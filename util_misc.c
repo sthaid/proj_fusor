@@ -5,6 +5,7 @@
 #include <stdarg.h>
 #include <unistd.h>
 #include <string.h>
+#include <errno.h>
 
 #include <time.h>
 #include <sys/time.h>

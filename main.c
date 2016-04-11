@@ -5,12 +5,12 @@
 #include <stdarg.h>
 #include <unistd.h>
 #include <string.h>
+#include <errno.h>
 
 #include "util_sdl.h"
 #include "util_jpeg_decode.h"
+#include "util_dataq.h"
 #include "util_misc.h"
-
-#include "about.h" //XXX
 
 //
 // defines
@@ -81,14 +81,32 @@ void * data_file_thread(void * cx);
 
 int main(int argc, char **argv)
 {
+    
     INFO("hello\n");
 
+#if 0
     sdl_init(1280, 800);
-    sdl_display_text(about);
+
+    static char * choices[] = {
+                "Expanding Gas in a Container",
+                "Gravity Simulation",
+                "Our Expanding Universe",
+                "Random Walk",
+                "About",
+                        };
+
+    int32_t selection = -1;
+    sdl_display_choose_from_list("-- Choose A Simulation --",
+                                 choices, sizeof(choices)/sizeof(choices[0]),
+                                 &selection);
+    printf("selection %d\n", selection);
     sdl_close();
+#endif
+
+    dataq_init();
+    sleep(100);
 
     INFO("TERMINATING\n");
-    sleep(3);
 
     return 0;
 

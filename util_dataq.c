@@ -18,6 +18,7 @@
 // XXX 
 // - search xxx
 // - review logging and prints
+// - review whole thing
 
 //
 // defines
@@ -25,9 +26,10 @@
 
 #define ENABLE_TEST_THREAD
 
-#define DATAQ_DEVICE "/dev/serial/by-id/usb-0683_1490-if00"
-#define MAX_RESP     100
-#define SCALE        (10.0/2048)  // volts per count
+#define DATAQ_DEVICE   "/dev/serial/by-id/usb-0683_1490-if00"
+#define MAX_RESP       100
+#define MAX_ADC_CHAN   9            // channels 1 .. 8
+#define SCALE          (10.0/2048)  // volts per count
 
 //
 // typedefs
@@ -45,11 +47,13 @@ typedef struct {
 //
 
 static int      fd;
-static adc_t    adc[4];
+static adc_t    adc[MAX_ADC_CHAN];
 static int64_t  scan_count;
 static bool     scan_okay;
 static int32_t  scan_hz;
 static int32_t  max_val;
+static int32_t  max_slist_idx; 
+static int32_t  slist_idx_to_adc_chan[8];
 
 //
 // prototypes
@@ -58,7 +62,7 @@ static int32_t  max_val;
 static void dataq_exit_handler(void);
 static void dataq_issue_cmd(char * cmd, char * resp);
 static void * dataq_recv_data_thread(void * cx);
-static void dataq_process_adc_value(int32_t adc_idx, int32_t new_val);
+static void dataq_process_adc_value(int32_t slist_idx, int32_t new_val);
 static void * dataq_monitor_thread(void * cx);
 #ifdef ENABLE_TEST_THREAD
 static void * dataq_test_thread(void * cx);
@@ -66,15 +70,34 @@ static void * dataq_test_thread(void * cx);
 
 // -----------------  DATAQ API ROUTINES  -----------------------------------------------
 
-// XXX args
-// XXX   channel_list, and
-// XXX   interval to average ovr
-void dataq_init(double averaging_duration_sec) 
+void dataq_init(double averaging_duration_sec, int32_t num_adc_chan, ...)
 {
     char resp[MAX_RESP];
     pthread_t thread_id;
     int32_t best_srate_arg, i;
-    char srate_cmd_str[100];
+    char cmd_str[100];
+    va_list ap;
+
+    // scan valist for adc channel numbers
+    max_slist_idx = num_adc_chan;
+    va_start(ap, num_adc_chan);
+    for (i = 0; i < max_slist_idx; i++) {
+        slist_idx_to_adc_chan[i] = va_arg(ap, int32_t);
+    }
+    va_end(ap);
+
+    // XXX temp
+    for (i = 0; i < max_slist_idx; i++) {
+        INFO("slist_idx_to_adc_chan[%d] = %d\n", i, slist_idx_to_adc_chan[i]);
+    }
+
+    // validate adc channel numbers
+    for (i = 0; i < max_slist_idx; i++) {
+        int32_t adc_chan = slist_idx_to_adc_chan[i];
+        if (adc_chan < 1 || adc_chan >= MAX_ADC_CHAN) {
+            FATAL("adc_chan %d is invalid\n", adc_chan);
+        }
+    }
 
     // open the dataq virtual com port
     fd = open(DATAQ_DEVICE, O_RDWR);
@@ -93,18 +116,18 @@ void dataq_init(double averaging_duration_sec)
 
     // configure scanning of the desired adc channels
     dataq_issue_cmd("asc", resp);
-    dataq_issue_cmd("slist 0 x0000", resp);
-    dataq_issue_cmd("slist 1 x0001", resp);
-    dataq_issue_cmd("slist 2 x0002", resp);
-    dataq_issue_cmd("slist 3 x0003", resp);
+    for (i = 0; i < max_slist_idx; i++) {
+        sprintf(cmd_str, "slist %d x%4.4x", i, slist_idx_to_adc_chan[i]-1);
+        dataq_issue_cmd(cmd_str, resp);
+    }
 
     // set the scan rate; 
     // use the max rate supported by the dataq, which is
     //   - best_srate_arg = 75 * num_enabled_scan_list_elements
     //   - scan_hz = 750000 / best_srate_cmd_arg
-    best_srate_arg = 75 * 4;   // XXX 4 i
-    sprintf(srate_cmd_str, "srate x%4.4x", best_srate_arg);
-    dataq_issue_cmd(srate_cmd_str, resp);
+    best_srate_arg = 75 * max_slist_idx;
+    sprintf(cmd_str, "srate x%4.4x", best_srate_arg);
+    dataq_issue_cmd(cmd_str, resp);
 
     // determine scan_hz, which is used by the monitor_thread
     scan_hz = 750000 / best_srate_arg;
@@ -114,10 +137,11 @@ void dataq_init(double averaging_duration_sec)
     // and allocate zeroed memory for them
     max_val = scan_hz * averaging_duration_sec;
     INFO("max_val = %d\n", max_val);
-    for (i = 0; i < 4; i++) {
-        adc[i].val = calloc(max_val, sizeof(int32_t));
-        if (adc[i].val == 0) {
-            FATAL("alloc adc[%d].val failed, max_val=%d\n", i, max_val);
+    for (i = 0; i < max_slist_idx; i++) {
+        int32_t adc_chan = slist_idx_to_adc_chan[i];
+        adc[adc_chan].val = calloc(max_val, sizeof(int32_t));
+        if (adc[adc_chan].val == NULL) {
+            FATAL("alloc adc[%d].val failed, max_val=%d\n", adc_chan, max_val);
         }
     }
 
@@ -141,14 +165,23 @@ void dataq_init(double averaging_duration_sec)
 #endif
 }
 
-// XXX pass in the channel number, not adc_idx
-int32_t dataq_get_adc(int32_t adc_idx, double * v_mean, double * v_min, double * v_max, double * v_rms)
+int32_t dataq_get_adc(int32_t adc_chan, double * v_mean, double * v_min, double * v_max, double * v_rms)
 {
     int32_t min, max, i;
-    adc_t * x = &adc[adc_idx];
+    adc_t * x;
+
+    // validate adc_chan
+    if (adc_chan < 1 || adc_chan >= MAX_ADC_CHAN || adc[adc_chan].val == NULL) {
+        ERROR("adc_chan %d is not valid\n", adc_chan);
+        *v_mean = 999;
+        *v_min = 999;
+        *v_max = 999;
+        return -1;
+    }
 
     // if dataq scan is not working then return error
     if (!scan_okay) {
+        ERROR("adc data not available\n");
         *v_mean = 999;
         *v_min = 999;
         *v_max = 999;
@@ -156,6 +189,7 @@ int32_t dataq_get_adc(int32_t adc_idx, double * v_mean, double * v_min, double *
     }
 
     // calculate mean voltage
+    x = &adc[adc_chan];
     if (v_mean) {
         *v_mean = (double)x->sum / max_val * SCALE;
     }
@@ -276,7 +310,7 @@ static void * dataq_recv_data_thread(void * cx)
 {
     uint8_t buff[1000];
     uint8_t *p;
-    int32_t len, buff_len, adc_idx; 
+    int32_t len, buff_len, slist_idx; 
 
     // init
     bzero(buff, sizeof(buff));
@@ -308,7 +342,7 @@ static void * dataq_recv_data_thread(void * cx)
 
             // extract adc values from buff
             p = buff;
-            for (adc_idx = 0; adc_idx < 4; adc_idx++) {  // XXX 4
+            for (slist_idx = 0; slist_idx < max_slist_idx; slist_idx++) {
                 int32_t new_val;
     
                 new_val = ((p[1] & 0xfe) << 4) | (p[0] >> 3);
@@ -317,7 +351,7 @@ static void * dataq_recv_data_thread(void * cx)
                     new_val |= 0xfffff000;
                 }
 
-                dataq_process_adc_value(adc_idx, new_val);
+                dataq_process_adc_value(slist_idx, new_val);
 
                 p += 2;
             }
@@ -335,10 +369,11 @@ static void * dataq_recv_data_thread(void * cx)
     return NULL;
 }
 
-static void dataq_process_adc_value(int32_t adc_idx, int32_t new_val)
+static void dataq_process_adc_value(int32_t slist_idx, int32_t new_val)
 {
     int32_t old_val;
-    adc_t * x = &adc[adc_idx];
+    int32_t adc_chan = slist_idx_to_adc_chan[slist_idx];
+    adc_t * x = &adc[adc_chan];
     
     // save adc value in circular buffer
     old_val = x->val[x->idx];
@@ -405,7 +440,7 @@ static void * dataq_test_thread(void * cx)
     // display voltage info once per second, on all registered channels
     while (true) {
         sleep(1);
-        ret = dataq_get_adc(0, &v_mean, &v_min, &v_max, &v_rms);
+        ret = dataq_get_adc(1, &v_mean, &v_min, &v_max, &v_rms);
         if (ret == 0) {
             printf("v_mean=%6.3f  v_min=%6.3f  v_max=%6.3f  v_rms=%6.3f\n", v_mean, v_min, v_max, v_rms);
         } else {

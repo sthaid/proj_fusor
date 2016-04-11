@@ -18,7 +18,7 @@ OBJS = main.o \
 all: $(TARGETS)
 
 fusor: $(OBJS) 
-	$(CC) -pthread -lrt -ljpeg -lpng -lSDL2 -lSDL2_ttf -lSDL2_mixer -o $@ $(OBJS)
+	$(CC) -pthread -lrt -ljpeg -lpng -lm -lSDL2 -lSDL2_ttf -lSDL2_mixer -o $@ $(OBJS)
 
 #
 # clean rule

@@ -103,8 +103,10 @@ int main(int argc, char **argv)
     sdl_close();
 #endif
 
-    dataq_init();
-    sleep(100);
+    dataq_init(1.0);
+
+    while (true) pause();
+    //sleep(100);
 
     INFO("TERMINATING\n");
 

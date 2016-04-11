@@ -10,9 +10,14 @@
 #include <termios.h>
 #include <fcntl.h>
 #include <pthread.h>
+#include <math.h>
 
 #include "util_dataq.h"
 #include "util_misc.h"
+
+// XXX 
+// - search xxx
+// - review logging and prints
 
 //
 // defines
@@ -22,7 +27,6 @@
 
 #define DATAQ_DEVICE "/dev/serial/by-id/usb-0683_1490-if00"
 #define MAX_RESP     100
-#define MAX_VAL      2500
 #define SCALE        (10.0/2048)  // volts per count
 
 //
@@ -30,8 +34,9 @@
 //
 
 typedef struct {
-    int32_t val[MAX_VAL];
+    int32_t * val;
     int32_t sum;
+    int64_t sum_squares;
     int32_t idx;
 } adc_t;
 
@@ -43,31 +48,33 @@ static int      fd;
 static adc_t    adc[4];
 static int64_t  scan_count;
 static bool     scan_okay;
+static int32_t  scan_hz;
+static int32_t  max_val;
 
 //
 // prototypes
 //
 
-static void exit_handler(void);
-static void issue_cmd(char * cmd, char * resp);
-static void * receive_data_thread(void * cx);
-static void process_adc_value(int32_t adc_idx, int32_t new_val);
-static void * monitor_thread(void * cx);
+static void dataq_exit_handler(void);
+static void dataq_issue_cmd(char * cmd, char * resp);
+static void * dataq_recv_data_thread(void * cx);
+static void dataq_process_adc_value(int32_t adc_idx, int32_t new_val);
+static void * dataq_monitor_thread(void * cx);
 #ifdef ENABLE_TEST_THREAD
-static void * test_thread(void * cx);
+static void * dataq_test_thread(void * cx);
 #endif
 
-// --------------------------------------------------------------------------------------
-
-// XXX add missing comments
+// -----------------  DATAQ API ROUTINES  -----------------------------------------------
 
 // XXX args
 // XXX   channel_list, and
 // XXX   interval to average ovr
-void dataq_init()
+void dataq_init(double averaging_duration_sec) 
 {
     char resp[MAX_RESP];
     pthread_t thread_id;
+    int32_t best_srate_arg, i;
+    char srate_cmd_str[100];
 
     // open the dataq virtual com port
     fd = open(DATAQ_DEVICE, O_RDWR);
@@ -82,67 +89,127 @@ void dataq_init()
     tcflush(fd, TCIFLUSH);
 
     // issue 'info 0' command
-//XXX check the responses in the routine
-    issue_cmd("info 0", resp);
-    if (strcmp(resp, "info 0 DATAQ") != 0) {
-        FATAL("invalid response rcvd from 'info 0' cmd, resp='%s'\n", resp);
-    }
+    dataq_issue_cmd("info 0", resp);
 
     // configure scanning of the desired adc channels
-    issue_cmd("asc", resp);
-    issue_cmd("slist 0 x0000", resp);
-    issue_cmd("slist 1 x0001", resp);
-    issue_cmd("slist 2 x0002", resp);
-    issue_cmd("slist 3 x0003", resp);
+    dataq_issue_cmd("asc", resp);
+    dataq_issue_cmd("slist 0 x0000", resp);
+    dataq_issue_cmd("slist 1 x0001", resp);
+    dataq_issue_cmd("slist 2 x0002", resp);
+    dataq_issue_cmd("slist 3 x0003", resp);
 
     // set the scan rate; 
     // use the max rate supported by the dataq, which is
-    //    10000 / num_enabled_scan_list_elements
-    //XXX make hz global, and use in monitor
-    int32_t srate, hz;
-    char srate_cmd_str[100];
-    srate = 75 * 4;   // XXX 4 i
-    hz = 750000 / srate;
-    printf("srate = %d  hz = %d\n", srate, hz);  // XXX make DEBUG print
-    sprintf(srate_cmd_str, "srate x%4.4x", srate);
-    issue_cmd(srate_cmd_str, resp);
+    //   - best_srate_arg = 75 * num_enabled_scan_list_elements
+    //   - scan_hz = 750000 / best_srate_cmd_arg
+    best_srate_arg = 75 * 4;   // XXX 4 i
+    sprintf(srate_cmd_str, "srate x%4.4x", best_srate_arg);
+    dataq_issue_cmd(srate_cmd_str, resp);
+
+    // determine scan_hz, which is used by the monitor_thread
+    scan_hz = 750000 / best_srate_arg;
+    INFO("scan_hz = %d\n", scan_hz);
+
+    // determine the number of adc values that are needed for the averaging_duration,
+    // and allocate zeroed memory for them
+    max_val = scan_hz * averaging_duration_sec;
+    INFO("max_val = %d\n", max_val);
+    for (i = 0; i < 4; i++) {
+        adc[i].val = calloc(max_val, sizeof(int32_t));
+        if (adc[i].val == 0) {
+            FATAL("alloc adc[%d].val failed, max_val=%d\n", i, max_val);
+        }
+    }
 
     // configure binary output
-    issue_cmd("bin", resp);
+    dataq_issue_cmd("bin", resp);
 
     // start scan
     write(fd, "start\r", 6);
 
     // stop scanning atexit
-    atexit(exit_handler);
+    atexit(dataq_exit_handler);
 
     // create threads 
     // - receive data from the adc
-    // - monitor health of the receive_data_thread
+    // - monitor health of the dataq_recv_data_thread
     // - optional test code
-    pthread_create(&thread_id, NULL, receive_data_thread, NULL);
-    pthread_create(&thread_id, NULL, monitor_thread, NULL);
+    pthread_create(&thread_id, NULL, dataq_recv_data_thread, NULL);
+    pthread_create(&thread_id, NULL, dataq_monitor_thread, NULL);
 #ifdef ENABLE_TEST_THREAD
-    pthread_create(&thread_id, NULL, test_thread, NULL);
+    pthread_create(&thread_id, NULL, dataq_test_thread, NULL);
 #endif
 }
 
-static void exit_handler()
+// XXX pass in the channel number, not adc_idx
+int32_t dataq_get_adc(int32_t adc_idx, double * v_mean, double * v_min, double * v_max, double * v_rms)
+{
+    int32_t min, max, i;
+    adc_t * x = &adc[adc_idx];
+
+    // if dataq scan is not working then return error
+    if (!scan_okay) {
+        *v_mean = 999;
+        *v_min = 999;
+        *v_max = 999;
+        return -1;
+    }
+
+    // calculate mean voltage
+    if (v_mean) {
+        *v_mean = (double)x->sum / max_val * SCALE;
+    }
+
+    // calculate rms 
+    if (v_rms) {
+        *v_rms = sqrt((double)x->sum_squares / max_val) * SCALE;
+    }
+
+    // calculate standard deviation xxx
+
+    // calculate min and max voltages
+    if (v_min || v_max) {
+        min = +10000;
+        max = -10000;
+        for (i = 0; i < max_val; i++) {
+            if (x->val[i] < min) {
+                min = x->val[i];
+            }
+            if (x->val[i] > max) {
+                max = x->val[i];
+            }
+        }
+        if (v_min) {
+            *v_min = (double)min * SCALE;
+        }
+        if (v_max) {
+            *v_max = (double)max * SCALE;
+        }
+    }
+
+    // return success
+    return 0;
+}
+
+// -----------------  PRIVATE ROUTINES  -------------------------------------------------
+
+static void dataq_exit_handler()
 {
     int32_t len;
 
+    // at program exit, stop the dataq
     len = write(fd, "stop\r", 5);
     if (len != 5) {
         ERROR("issuing stop cmd\n");
     }
 }
 
-static void issue_cmd(char * cmd, char * resp)
+static void dataq_issue_cmd(char * cmd, char * resp)
 {
     char cmd2[100];
     int32_t len, ret, total_len, i;
     char *p;
-    bool succ;
+    bool resp_recvd;
 
     // terminate command with <cr>
     strcpy(cmd2, cmd);
@@ -154,25 +221,25 @@ static void issue_cmd(char * cmd, char * resp)
         FATAL("failed write cmd '%s', %s\n", cmd, strerror(errno));
     }
 
-    // read response, non blocking, with 1 sec tout
+    // set non blocking
     ret = fcntl(fd, F_SETFL, O_NONBLOCK);
     if (ret < 0) {
         FATAL("failed to set non blocking, %s\n", strerror(errno));
     }
 
-    // XXX comments
+    // read response, must terminate with <cr>, with 1 sec tout
     p = resp;
     total_len = 0;
-    succ = false;
+    resp_recvd = false;
     for (i = 0; i < 200; i++) {
         len = read(fd, p, MAX_RESP-total_len);
         if (len > 0) {
             total_len += len;
             p += len;
             if (resp[total_len-1] == '\r') {
-                resp[total_len-1] = '\0';   // remove <cr>
+                resp[total_len-1] = '\0';   // remove <cr>, and null term
                 total_len--;
-                succ = true;
+                resp_recvd = true;
                 break;
             }
         } else if (len == -1 && errno == EWOULDBLOCK) {
@@ -185,24 +252,27 @@ static void issue_cmd(char * cmd, char * resp)
         usleep(5000);
     }
 
-    // XXX comments
+    // clear non blocking
     ret = fcntl(fd, F_SETFL, 0);
     if (ret < 0) {
         FATAL("failed to clear non blocking, %s\n", strerror(errno));
     }
 
     // check for failure to read response
-    if (!succ) {
+    if (!resp_recvd) {
         FATAL("response to cmd '%s' was not received\n", cmd);
     }
 
-    // XXX check that response received was correct
+    // check that response received was correct, it should match the cmd
+    if (strncmp(cmd, resp, strlen(cmd)) != 0) {
+        FATAL("response to cmd '%s', resp '%s', is incorrect\n", cmd, resp);
+    }
 
     // debug print
     DEBUG("okay: cmd='%s', resp='%s'\n", cmd, resp);
 }
 
-static void * receive_data_thread(void * cx)
+static void * dataq_recv_data_thread(void * cx)
 {
     uint8_t buff[1000];
     uint8_t *p;
@@ -213,7 +283,6 @@ static void * receive_data_thread(void * cx)
     buff_len = 0;
 
     // verify start response received
-    // XXX tbd non blocking
     len = read(fd, buff, 6);
     if (len != 6 || memcmp(buff, "start\r", 6) != 0) {
         FATAL("failed receive response to start, len=%d, %s\n", len, strerror(errno));
@@ -232,7 +301,7 @@ static void * receive_data_thread(void * cx)
         // and to validate sync then extract adc values
         while (buff_len >= 9) {
             // if not sychronized then abort for now
-            // XXX improve this to resync
+            // xxx improve this to resync
             if (((buff[0] & 1) != 0) || ((buff[8] & 1) != 0)) {
                 FATAL("not synced\n");
             }
@@ -248,7 +317,7 @@ static void * receive_data_thread(void * cx)
                     new_val |= 0xfffff000;
                 }
 
-                process_adc_value(adc_idx, new_val);
+                dataq_process_adc_value(adc_idx, new_val);
 
                 p += 2;
             }
@@ -257,7 +326,7 @@ static void * receive_data_thread(void * cx)
             memmove(buff, buff+8, buff_len-8);
             buff_len -= 8;
 
-            // bump up scan_count, which is used by the monitor_thread to
+            // bump up scan_count, which is used by the dataq_monitor_thread to
             // determine if scanning is working 
             scan_count++;
         }
@@ -266,72 +335,48 @@ static void * receive_data_thread(void * cx)
     return NULL;
 }
 
-static void process_adc_value(int32_t adc_idx, int32_t new_val)
+static void dataq_process_adc_value(int32_t adc_idx, int32_t new_val)
 {
     int32_t old_val;
     adc_t * x = &adc[adc_idx];
     
+    // save adc value in circular buffer
     old_val = x->val[x->idx];
     x->val[x->idx] = new_val;
-    x->idx = (x->idx + 1) % MAX_VAL;
+    x->idx = (x->idx + 1) % max_val;
 
+    // update the sum of saved values, and
+    // the sum^2 of saved values
     x->sum += (new_val - old_val);
+    x->sum_squares += (new_val*new_val - old_val*old_val);
 }
 
-// XXX return sdev too
-// XXX pass in the channel number, not adc_idx
-int32_t dataq_get_adc(int32_t adc_idx, double * v_avg, double * v_min, double * v_max)
-{
-    int32_t min, max, i;
-    adc_t * x = &adc[adc_idx];
-
-    if (!scan_okay) {
-        *v_avg = 999;
-        *v_min = 999;
-        *v_max = 999;
-        return -1;
-    }
-
-    *v_avg = (double)x->sum / MAX_VAL * SCALE;
-
-    if (v_min || v_max) {
-        min = +10000;
-        max = -10000;
-        for (i = 0; i < MAX_VAL; i++) {
-            if (x->val[i] < min) {
-                min = x->val[i];
-            }
-            if (x->val[i] > max) {
-                max = x->val[i];
-            }
-        }
-        if (v_min) {
-            *v_min = (double)min * SCALE;
-        }
-        if (v_max) {
-            *v_max = (double)max * SCALE;
-        }
-    }
-
-    return 0;
-}
-
-static void * monitor_thread(void * cx)
+static void * dataq_monitor_thread(void * cx)
 {
     uint64_t last_scan_count;
     uint64_t curr_scan_count;
     uint64_t delta_scan_count;
+    int32_t  min_scan_hz;
+    int32_t  max_scan_hz;
 
     last_scan_count = scan_count;
+    min_scan_hz = scan_hz - scan_hz / 10;
+    max_scan_hz = scan_hz + scan_hz / 10;
+    DEBUG("xxx min max scan hz %d %d\n", min_scan_hz, max_scan_hz);
 
+    // loop forever
     while (true) {
+        // sleep 1 second
         sleep(1);
 
+        // determine the amount scan_count has changed during the 1 sec sleep
         curr_scan_count = scan_count;
         delta_scan_count = curr_scan_count - last_scan_count;
         last_scan_count = curr_scan_count;
 
-        if (delta_scan_count > 2200 && delta_scan_count < 2800) {
+        // set scan_okay flag to true if delta_scan_count is within expected range,
+        // and set to false otherwise
+        if (delta_scan_count > min_scan_hz && delta_scan_count < max_scan_hz) {
             if (!scan_okay) {
                 INFO("dataq adc scan okay, delta_scan_count=%ld\n", delta_scan_count);
             }
@@ -348,19 +393,21 @@ static void * monitor_thread(void * cx)
 }        
         
 #ifdef ENABLE_TEST_THREAD
-static void * test_thread(void * cx)
+// XXX improve this code, dump all channels, , print date/time
+static void * dataq_test_thread(void * cx)
 {
-    double v_avg, v_min, v_max;
+    double v_mean, v_min, v_max, v_rms;
     int32_t ret;
 
+    // give the recv_data_thread 1 second to acquire data
     sleep(1);
 
-    // XXX improve this code, dump all channels, , print date/time
+    // display voltage info once per second, on all registered channels
     while (true) {
         sleep(1);
-        ret = dataq_get_adc(0, &v_avg, &v_min, &v_max);
+        ret = dataq_get_adc(0, &v_mean, &v_min, &v_max, &v_rms);
         if (ret == 0) {
-            printf("v_avg=%6.3f  v_min=%6.3f  v_max=%6.3f\n", v_avg, v_min, v_max);
+            printf("v_mean=%6.3f  v_min=%6.3f  v_max=%6.3f  v_rms=%6.3f\n", v_mean, v_min, v_max, v_rms);
         } else {
             printf("ERROR voltage values not avialable\n");
         }

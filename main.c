@@ -92,8 +92,80 @@ int main(int argc, char **argv)
     //exit(1);
 
     cam_init();
-    while (1) pause();
+    sdl_init(1280, 800);
+
+    texture_t texture;
+    texture = sdl_create_yuy2_texture(640,480);
+
+    bool done = false;
+    while (!done) {
+        int32_t ret;
+        uint8_t * jpeg_buff;
+        uint32_t jpeg_buff_len;
+        uint8_t * pixel_buff;
+        uint32_t pixel_buff_width, pixel_buff_height;
+        
+        rect_t pane;   // XXX either call them rect or pane
+        uint64_t start;
+
+        //static int count;
+        //char str[44];
+
+        sdl_event_t * event;
+
+        ret = cam_get_buff(&jpeg_buff, &jpeg_buff_len);
+        printf("ret=%d  jpeg_buff=%p  jpeg_buff_len=%d\n", ret, jpeg_buff, jpeg_buff_len);
+
+        // XXX time this
+        start = microsec_timer();
+        ret = jpeg_decode(0,  // cxid
+                          JPEG_DECODE_MODE_YUY2,      
+                          jpeg_buff, jpeg_buff_len,
+                          &pixel_buff, &pixel_buff_width, &pixel_buff_height);
+        printf("DURATION jpeg_decode = %ld us\n", (microsec_timer()-start));
+        printf("decode ret=%d  w=%d  h=%d\n",
+               ret, pixel_buff_width, pixel_buff_height);
+        // XXX assert pixel w and h are correct
+
+        start = microsec_timer();
+        cam_put_buff(jpeg_buff);
+        printf("DURATION put_buff = %ld us\n", (microsec_timer()-start));
+
+        sdl_display_init();
+
+        sdl_init_pane(&pane, 0, 0, 640, 480);
+        //sprintf(str, "HELLO %d", count++);
+        //sdl_render_text_font0(&pane, 0, 0, str, SDL_EVENT_NONE);
+        
+        start = microsec_timer();
+        sdl_update_yuy2_texture(texture, pixel_buff);
+        printf("DURATION update_yuy2 = %ld us\n", (microsec_timer()-start));
+
+        start = microsec_timer();
+        sdl_render_texture(texture, &pane);
+        printf("DURATION render_texture = %ld us\n", (microsec_timer()-start));
+
+        start = microsec_timer();
+        sdl_display_present();
+        printf("DURATION display_present = %ld us\n", (microsec_timer()-start));
+
+        event = sdl_poll_event();
+        switch (event->event) {
+        case SDL_EVENT_QUIT:
+            done = true;
+            break;
+        default:
+            break;
+        }
+
+        free(pixel_buff);
+    }
+
+    // XXX use atexit for this
+    printf("TERMINATING\n");
+    sdl_close();
     exit(1);
+
 #if 0
     sdl_init(1280, 800);
 

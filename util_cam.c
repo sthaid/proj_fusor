@@ -82,7 +82,7 @@ void cam_init(void)
     enum   v4l2_buf_type       buf_type;
     int                        i;
     bool                       first_try = true;
-    pthread_t thread_id;
+    //pthread_t thread_id;
 
     INFO("starting, resolution=%c\n", resolution);
 
@@ -249,7 +249,7 @@ try_again:
     }
 
     // create cam_thread
-    pthread_create(&thread_id, NULL, cam_thread, NULL);
+    // XXX pthread_create(&thread_id, NULL, cam_thread, NULL);
 
     // return success
     INFO("success\n");
@@ -307,3 +307,52 @@ void * cam_thread(void * cx)
         } 
     }
 }
+
+int32_t cam_get_buff(uint8_t **buff, uint32_t *len)
+{
+    struct v4l2_buffer buffer;
+
+    // XXX use non block
+    // - get all the buffers available
+    // - discard old ones if 3 or more are available
+    // - if tout then return error
+    // - return the oldest
+    // - check flags ?
+
+    bzero(&buffer, sizeof(buffer));
+    buffer.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    buffer.memory = V4L2_MEMORY_MMAP;
+    if (ioctl(cam_fd, VIDIOC_DQBUF, &buffer) < 0) {
+        ERROR("ioctl VIDIOC_DQBUF failed, %s\n", strerror(errno));
+    }
+
+    *buff = (uint8_t*)bufmap[buffer.index].addr;
+    *len =  buffer.bytesused;
+
+    return 0;
+}
+
+void cam_put_buff(uint8_t * buff)
+{
+    struct v4l2_buffer buffer;
+    int32_t i;
+
+    // XXX don't like this
+    for (i = 0; i < MAX_BUFMAP; i++) {
+        if (buff == bufmap[i].addr) {
+            break;
+        }
+    }
+    if (i == MAX_BUFMAP) {
+        FATAL("invalid buff %p\n", buff);
+    }
+
+    bzero(&buffer,sizeof(struct v4l2_buffer));
+    buffer.type   = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    buffer.memory = V4L2_MEMORY_MMAP;
+    buffer.index  = i;
+    if (ioctl(cam_fd, VIDIOC_QBUF, &buffer) < 0) {
+        ERROR("ioctl VIDIOC_QBUF index=%d %s\n", i, strerror(errno));
+    }
+}
+

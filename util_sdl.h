@@ -118,8 +118,10 @@ void sdl_render_rect(rect_t * rect, int32_t line_width, int32_t color);
 // XXX Lines
 
 // render using textures
+texture_t sdl_create_yuy2_texture(int32_t w, int32_t h);
 texture_t sdl_create_filled_circle_texture(int32_t radius, int32_t color);
 texture_t sdl_create_text_texture(int32_t fg_color, int32_t bg_color, int32_t font_id, char * str);
+void sdl_update_yuy2_texture(texture_t texture, uint8_t * pixels);
 void sdl_query_texture(texture_t texture, int32_t * width, int32_t * height);
 void sdl_render_texture(texture_t texture, rect_t * dstrect);
 void sdl_destroy_texture(texture_t texture);

@@ -772,6 +772,22 @@ void sdl_render_rect(rect_t * rect_arg, int32_t line_width, int32_t color)
 
 // -----------------  RENDER USING TEXTURES  ---------------------------- 
 
+texture_t sdl_create_yuy2_texture(int32_t w, int32_t h)
+{
+    SDL_Texture * texture;
+
+    texture = SDL_CreateTexture(sdl_renderer,
+                                SDL_PIXELFORMAT_YUY2,
+                                SDL_TEXTUREACCESS_STREAMING,
+                                w, h);
+    if (texture == NULL) {
+        ERROR("failed to allocate texture\n");
+        return NULL;
+    }
+
+    return (texture_t)texture;
+}
+
 texture_t sdl_create_filled_circle_texture(int32_t radius, int32_t color)
 {
     int32_t width = 2 * radius + 1;
@@ -865,6 +881,22 @@ texture_t sdl_create_text_texture(int32_t fg_color, int32_t bg_color, int32_t fo
     SDL_FreeSurface(surface);
 
     return (texture_t)texture;
+}
+
+void sdl_update_yuy2_texture(texture_t texture, uint8_t * pixels) 
+{
+    int32_t width, height;
+
+    // XXX time this
+    uint64_t start = microsec_timer();
+    sdl_query_texture(texture, &width, &height);
+    printf("XXX DURATION query_texture = %ld us\n", (microsec_timer()-start));
+
+
+    SDL_UpdateTexture((SDL_Texture*)texture,
+                      NULL,            // update entire texture
+                      pixels,          // pixels
+                      width*2);        // pitch
 }
 
 void sdl_query_texture(texture_t texture, int32_t * width, int32_t * height)

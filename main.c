@@ -10,6 +10,7 @@
 #include "util_sdl.h"
 #include "util_jpeg_decode.h"
 #include "util_dataq.h"
+#include "util_cam.h"
 #include "util_misc.h"
 
 //
@@ -84,6 +85,15 @@ int main(int argc, char **argv)
     
     INFO("hello\n");
 
+    // XXX catch ctrl c and exit gracefully, so dataq stops
+
+    //dataq_init(0.5, 4, 4,3,2,1);
+    //sleep(3);
+    //exit(1);
+
+    cam_init();
+    while (1) pause();
+    exit(1);
 #if 0
     sdl_init(1280, 800);
 

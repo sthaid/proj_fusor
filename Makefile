@@ -9,6 +9,7 @@ OBJS = main.o \
        util_sdl_predefined_displays.o \
        util_jpeg_decode.o \
        util_dataq.o \
+       util_cam.o \
        util_misc.o
 
 #

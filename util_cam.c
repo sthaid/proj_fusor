@@ -13,62 +13,51 @@
 #include <fcntl.h>
 #include <pthread.h>
 
-
-
+#include "util_cam.h"
 #include "util_misc.h"
 
-// XXX try printcap from https://gist.github.com/Circuitsoft/1126411
-// XXX try new camera
-// XXX clean this up
+//
+// notes:
+//
+// v4l2-ctl is useful to determine webcam capabilities
+//  - yum install v4l-utils
+//  - v4l2-ctl --help-all
+//  - v4l2-ctl --list-formats-ext
+//
+// sample code:
+//  - https://gist.github.com/Circuitsoft/1126411  print capabilities
 
+//
+// defines
+//
 
-// XXX v4l2-ctl
-// yum install v4l-utils
-//    v4l2-ctl --help-all
-//    v4l2-ctl --list-formats-ext
+#define WC_VIDEO          "/dev/video"   // base name
+#define MAX_BUFMAP        32  
+#define FRAMES_PER_SEC    10
+#define WIDTH             640
+#define HEIGHT            480
 
-
-
-#define STATUS_ERR_WEBCAM_FAILURE            117
-#define STATUS_INFO_OK                       0
-
-
-
-// webcam base device name
-#define WC_VIDEO "/dev/video"
-
-#define MAX_BUFMAP             32  
-#define FRAMES_PER_SEC         10
-
-#define MAX_RESOLUTION    3
-#define WIDTH_HIGH_RES    640
-#define HEIGHT_HIGH_RES   480
-#define WIDTH_MED_RES     320
-#define HEIGHT_MED_RES    240
-#define WIDTH_LOW_RES     160
-#define HEIGHT_LOW_RES    120
-#define VALID_WIDTH_AND_HEIGHT(w,h) \
-                          (((w) == WIDTH_HIGH_RES && (h) == HEIGHT_HIGH_RES) || \
-                           ((w) == WIDTH_MED_RES && (h) == HEIGHT_MED_RES)   || \
-                           ((w) == WIDTH_LOW_RES && (h) == HEIGHT_LOW_RES))
-#define WIDTH(res)        ((res) == '0' ? WIDTH_LOW_RES  : (res) == '1' ? WIDTH_MED_RES  : WIDTH_HIGH_RES)
-#define HEIGHT(res)       ((res) == '0' ? HEIGHT_LOW_RES : (res) == '1' ? HEIGHT_MED_RES : HEIGHT_HIGH_RES)
-
+//
+// typedefs
+//
 
 typedef struct {
     void  * addr;
-    int     length;
+    int32_t length;
 } bufmap_t;
 
+//
+// variables
+//
 
-int                      cam_fd = -1;
-bufmap_t                 bufmap[MAX_BUFMAP];
-uint32_t cam_status;
-#define MS 1000
+static int32_t   cam_fd = -1;
+static bufmap_t  bufmap[MAX_BUFMAP];
 
-char resolution = '2';
+//
+// prototypes
+//
 
-void * cam_thread(void * cx);
+// -----------------  API  ---------------------------------------------------------
 
 void cam_init(void)
 {
@@ -80,66 +69,32 @@ void cam_init(void)
     struct v4l2_requestbuffers reqbuf;
     struct v4l2_buffer         buffer;
     enum   v4l2_buf_type       buf_type;
-    int                        i;
-    bool                       first_try = true;
-    //pthread_t thread_id;
+    int32_t                    i;
 
-    INFO("starting, resolution=%c\n", resolution);
-
-try_again:
-    // if not first try then delay
-    if (!first_try) {
-        INFO("sleep and retry\n");
-        cam_status = STATUS_ERR_WEBCAM_FAILURE;
-        usleep(10000*MS);  // 10 secs
-    }
-    first_try = false;
-
-    // if already initialized, then perform uninitialize
-    if (cam_fd > 0) {
-        close(cam_fd);
-        for (i = 0; i < MAX_BUFMAP; i++) {
-            if (bufmap[i].addr != NULL) {
-                munmap(bufmap[i].addr, bufmap[i].length);
-                bufmap[i].addr = NULL;
-                bufmap[i].length = 0;
-            }
-        }
-        cam_fd = -1;
-        bzero(bufmap,sizeof(bufmap));
-    }
-
-    // open webcam
+    // open webcam, try devices /dev/video0 to 1
     for (i = 0; i < 2; i++) {
         char devpath[100];
         sprintf(devpath, "%s%d", WC_VIDEO, i);
-        //cam_fd = open(devpath, O_RDWR|O_CLOEXEC|O_NONBLOCK);
-        cam_fd = open(devpath, O_RDWR);
+        cam_fd = open(devpath, O_RDWR|O_NONBLOCK);
         if (cam_fd < 0) {
-            ERROR("open failed %s %s\n",  devpath, strerror(errno));
-        } else {
-            INFO("open success %s\n", devpath);
-            break;
+            WARN("open failed %s %s\n",  devpath, strerror(errno));
+            continue;
         }
+        break;
     }
     if (cam_fd < 0) {
-        goto try_again;
+        FATAL("open failed\n");
     }
 
     // get and verify capability
     if (ioctl(cam_fd, VIDIOC_QUERYCAP, &cap) < 0) {
-        ERROR("ioctl VIDIOC_QUERYCAP %s\n", strerror(errno));
-        goto try_again;
+        FATAL("ioctl VIDIOC_QUERYCAP %s\n", strerror(errno));
     }
-
-    // verify capabilities
     if ((cap.capabilities & V4L2_CAP_VIDEO_CAPTURE) == 0) {
-        ERROR("no cap V4L2_CAP_VIDEO_CAPTURE\n");
-        goto try_again;
+        FATAL("no cap V4L2_CAP_VIDEO_CAPTURE\n");
     }
     if ((cap.capabilities & V4L2_CAP_STREAMING) == 0) {
-        ERROR("no cap V4L2_CAP_STREAMING\n");
-        goto try_again;
+        FATAL("no cap V4L2_CAP_STREAMING\n");
     }
 
     // get VIDEO_CAPTURE format type, and
@@ -147,24 +102,20 @@ try_again:
     bzero(&format, sizeof(format));
     format.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
     if (ioctl(cam_fd, VIDIOC_G_FMT, &format) < 0) {
-        ERROR("ioctl VIDIOC_G_FMT %s\n", strerror(errno));
-        goto try_again;
+        FATAL("ioctl VIDIOC_G_FMT %s\n", strerror(errno));
     }
-    INFO("setting resolution to %dx%d\n", WIDTH(resolution), HEIGHT(resolution));
     format.fmt.pix.pixelformat = V4L2_PIX_FMT_MJPEG;
-    format.fmt.pix.width  =  WIDTH(resolution);
-    format.fmt.pix.height =  HEIGHT(resolution);
+    format.fmt.pix.width  =  WIDTH;
+    format.fmt.pix.height =  HEIGHT;
     if (ioctl(cam_fd, VIDIOC_S_FMT, &format) < 0) {
-        ERROR("ioctl VIDIOC_S_FMT %s\n", strerror(errno));
-        goto try_again;
+        FATAL("ioctl VIDIOC_S_FMT %s\n", strerror(errno));
     }
 
     // get crop capabilities
     bzero(&cropcap,sizeof(cropcap));
     cropcap.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
     if (ioctl(cam_fd, VIDIOC_CROPCAP, &cropcap) < 0) {
-        ERROR("ioctl VIDIOC_CROPCAP, %s\n", strerror(errno));
-        goto try_again;
+        FATAL("ioctl VIDIOC_CROPCAP, %s\n", strerror(errno));
     }
 
     // set crop to default 
@@ -173,10 +124,9 @@ try_again:
     crop.c = cropcap.defrect;
     if (ioctl(cam_fd, VIDIOC_S_CROP, &crop) < 0) {
         if (errno == EINVAL || errno == ENOTTY) {
-            INFO("crop not supported\n");
+            DEBUG("crop not supported\n");
         } else {
-            ERROR("ioctl VIDIOC_S_CROP, %s\n", strerror(errno));
-            goto try_again;
+            FATAL("ioctl VIDIOC_S_CROP, %s\n", strerror(errno));
         }
     }
 
@@ -186,8 +136,7 @@ try_again:
     streamparm.parm.capture.timeperframe.numerator   = 1;
     streamparm.parm.capture.timeperframe.denominator = FRAMES_PER_SEC;
     if (ioctl(cam_fd, VIDIOC_S_PARM, &streamparm) < 0) {
-        ERROR("ioctl VIDIOC_S_PARM, %s\n", strerror(errno));
-        goto try_again;
+        FATAL("ioctl VIDIOC_S_PARM, %s\n", strerror(errno));
     }
 
     // request memory mapped buffers
@@ -196,15 +145,13 @@ try_again:
     reqbuf.memory = V4L2_MEMORY_MMAP;
     reqbuf.count = MAX_BUFMAP;
     if (ioctl (cam_fd, VIDIOC_REQBUFS, &reqbuf) < 0) {
-        ERROR("ioctl VIDIOC_REQBUFS %s\n", strerror(errno));
-        goto try_again;
+        FATAL("ioctl VIDIOC_REQBUFS %s\n", strerror(errno));
     }
 
-    // verify we got all the frames requested
+    // verify we got all the buffers requested
     if (reqbuf.count != MAX_BUFMAP) {
-        ERROR("got wrong number of frames, requested %d, actual %d\n",
+        FATAL("got wrong number of frames, requested %d, actual %d\n",
               MAX_BUFMAP, reqbuf.count);
-        goto try_again;
     }
 
     // memory map each of the buffers
@@ -214,8 +161,7 @@ try_again:
         buffer.memory = V4L2_MEMORY_MMAP;
         buffer.index  = i;
         if (ioctl (cam_fd, VIDIOC_QUERYBUF, &buffer) < 0) {
-            ERROR("ioctl VIDIOC_QUERYBUF index=%d %s\n", i, strerror(errno));
-            goto try_again;
+            FATAL("ioctl VIDIOC_QUERYBUF index=%d %s\n", i, strerror(errno));
         }
         bufmap[i].addr = mmap(NULL, buffer.length,
                               PROT_READ | PROT_WRITE,
@@ -224,8 +170,7 @@ try_again:
         bufmap[i].length = buffer.length;
 
         if (bufmap[i].addr == MAP_FAILED) {
-            ERROR("mmap failed, %s\n", strerror(errno));
-            goto try_again;
+            FATAL("mmap failed, %s\n", strerror(errno));
         }
     }
 
@@ -236,123 +181,91 @@ try_again:
         buffer.memory = V4L2_MEMORY_MMAP;
         buffer.index  = i;
         if (ioctl(cam_fd, VIDIOC_QBUF, &buffer) < 0) {
-            ERROR("ioctl VIDIOC_QBUF index=%d %s\n", i, strerror(errno));
-            goto try_again;
+            FATAL("ioctl VIDIOC_QBUF index=%d %s\n", i, strerror(errno));
         }
     }
 
     // enable capture
     buf_type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
     if (ioctl(cam_fd, VIDIOC_STREAMON, &buf_type) < 0) {
-        ERROR("ioctl VIDIOC_STREAMON %s\n", strerror(errno));
-        goto try_again;
+        FATAL("ioctl VIDIOC_STREAMON %s\n", strerror(errno));
     }
-
-    // create cam_thread
-    // XXX pthread_create(&thread_id, NULL, cam_thread, NULL);
 
     // return success
     INFO("success\n");
-    cam_status = STATUS_INFO_OK;
 }
 
-void * cam_thread(void * cx)
+void cam_get_buff(uint8_t **buff, uint32_t *len, uint32_t * buff_id)
 {
-    struct v4l2_buffer buffer;
+    int64_t duration = 0;
 
+    static int32_t max_buffer_avail;
+    static struct v4l2_buffer buffer_avail[MAX_BUFMAP];
+ 
+try_again:
+    // dequeue buffers until no more available
     while (true) {
-
-        // read a frame
-#if 0
-        int count = 0;
-        while (true) {
-            bzero(&buffer, sizeof(buffer));
-            buffer.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-            buffer.memory = V4L2_MEMORY_MMAP;
-            if (ioctl(cam_fd, VIDIOC_DQBUF, &buffer) < 0) {
-                if (errno == EAGAIN && count++ < 50) {
-                    usleep(50*MS);
-                    continue;
-                }
-                ERROR("ioctl VIDIOC_DQBUF failed, count=%d, %s\n", count, strerror(errno));
-                cam_status = STATUS_ERR_WEBCAM_FAILURE;
-                goto cam_failure;
-            }
-            break;
-        }
-#endif
+        struct v4l2_buffer buffer;
         bzero(&buffer, sizeof(buffer));
         buffer.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
         buffer.memory = V4L2_MEMORY_MMAP;
         if (ioctl(cam_fd, VIDIOC_DQBUF, &buffer) < 0) {
-            ERROR("ioctl VIDIOC_DQBUF failed, %s\n", strerror(errno));
+            if (errno == EAGAIN) {
+                break;
+            } else {
+                FATAL("ioctl VIDIOC_DQBUF failed, %s\n", strerror(errno));
+            }
         }
 
-        // if error flag is set then requeue the buffer and continue
-        if (buffer.flags & V4L2_BUF_FLAG_ERROR) {
-            WARN("V4L2_BUF_FLAG_ERROR is set, flags=0x%x\n", buffer.flags);
-            //IOCTL_VIDIOC_QBUF();
-            //continue;
+        if (max_buffer_avail >= MAX_BUFMAP) {
+            FATAL("max_buffer_avail = %d\n", max_buffer_avail);
         }
-
-        printf("DQBUF OKAY bytes=%d index=%d flags=0x%x addr=%p\n",
-               buffer.bytesused,
-               buffer.index,
-               buffer.flags,
-               bufmap[buffer.index].addr);
-
-        buffer.flags = 0;
-        if (ioctl(cam_fd, VIDIOC_QBUF, &buffer) < 0) {
-            ERROR("ioctl VIDIOC_QBUF %s\n", strerror(errno));  
-        } 
+        buffer_avail[max_buffer_avail++] = buffer;
     }
+
+    // if no buffers are available then delay and try again
+    if (max_buffer_avail == 0) {
+        if (duration > 2000000) {
+            FATAL("cam not responding\n");
+        }
+        usleep(1000);
+        duration += 1000;
+        goto try_again;
+    }
+  
+    // if this routine is now holding more than 3 then
+    // discard all but the newest
+    if (max_buffer_avail > 3) {
+        int32_t i;
+        for (i = 0; i < max_buffer_avail-1; i++) {
+            WARN("discarding, index=%d\n", buffer_avail[i].index);
+            cam_put_buff(buffer_avail[i].index);
+        }
+
+        buffer_avail[0] = buffer_avail[max_buffer_avail-1];
+        max_buffer_avail = 1;
+    }
+
+    // return the oldest in buffer_avail
+    *buff = (uint8_t*)bufmap[buffer_avail[0].index].addr;
+    *len =  buffer_avail[0].bytesused;
+    *buff_id = buffer_avail[0].index;
+
+    // shift the remaining, slot 0 needs to be the oldest
+    max_buffer_avail--;
+    memmove(&buffer_avail[0], &buffer_avail[1], max_buffer_avail*sizeof(void*));
 }
 
-int32_t cam_get_buff(uint8_t **buff, uint32_t *len)
+void cam_put_buff(uint32_t buff_id)
 {
     struct v4l2_buffer buffer;
 
-    // XXX use non block
-    // - get all the buffers available
-    // - discard old ones if 3 or more are available
-    // - if tout then return error
-    // - return the oldest
-    // - check flags ?
-
-    bzero(&buffer, sizeof(buffer));
-    buffer.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    buffer.memory = V4L2_MEMORY_MMAP;
-    if (ioctl(cam_fd, VIDIOC_DQBUF, &buffer) < 0) {
-        ERROR("ioctl VIDIOC_DQBUF failed, %s\n", strerror(errno));
-    }
-
-    *buff = (uint8_t*)bufmap[buffer.index].addr;
-    *len =  buffer.bytesused;
-
-    return 0;
-}
-
-void cam_put_buff(uint8_t * buff)
-{
-    struct v4l2_buffer buffer;
-    int32_t i;
-
-    // XXX don't like this
-    for (i = 0; i < MAX_BUFMAP; i++) {
-        if (buff == bufmap[i].addr) {
-            break;
-        }
-    }
-    if (i == MAX_BUFMAP) {
-        FATAL("invalid buff %p\n", buff);
-    }
-
+    // give the buffer back to the driver
     bzero(&buffer,sizeof(struct v4l2_buffer));
     buffer.type   = V4L2_BUF_TYPE_VIDEO_CAPTURE;
     buffer.memory = V4L2_MEMORY_MMAP;
-    buffer.index  = i;
+    buffer.index  = buff_id;
     if (ioctl(cam_fd, VIDIOC_QBUF, &buffer) < 0) {
-        ERROR("ioctl VIDIOC_QBUF index=%d %s\n", i, strerror(errno));
+        FATAL("ioctl VIDIOC_QBUF index=%d %s\n", buff_id, strerror(errno));
     }
 }
-

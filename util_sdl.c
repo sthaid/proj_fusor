@@ -887,10 +887,10 @@ void sdl_update_yuy2_texture(texture_t texture, uint8_t * pixels)
 {
     int32_t width, height;
 
-    // XXX time this
-    uint64_t start = microsec_timer();
+    // XXX time this - measured0 or 1
+    //uint64_t start = microsec_timer();
     sdl_query_texture(texture, &width, &height);
-    printf("XXX DURATION query_texture = %ld us\n", (microsec_timer()-start));
+    //printf("XXX DURATION query_texture = %ld us\n", (microsec_timer()-start));
 
 
     SDL_UpdateTexture((SDL_Texture*)texture,

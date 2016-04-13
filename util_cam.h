@@ -1,7 +1,7 @@
 void cam_init(void);
 
-int32_t cam_get_buff(uint8_t **buff, uint32_t *len);
+void cam_get_buff(uint8_t **buff, uint32_t *len, uint32_t * buff_id);
 
-void cam_put_buff(uint8_t * buff);
+void cam_put_buff(uint32_t buff_id);
 
 

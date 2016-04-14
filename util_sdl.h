@@ -33,6 +33,7 @@
 #define SDL_EVENT_TYPE_MOUSE_CLICK  2
 #define SDL_EVENT_TYPE_MOUSE_MOTION 3
 #define SDL_EVENT_TYPE_MOUSE_WHEEL  4
+#define SDL_EVENT_TYPE_KEY          5
 
 // event data structure
 typedef struct {
@@ -85,9 +86,8 @@ typedef struct {
 // prototypes
 //
 
-// window initialize, close, and get_state
+// window initialize, and get_state
 void sdl_init(uint32_t w, uint32_t h);
-void sdl_close(void);
 void sdl_get_state(int32_t * win_width, int32_t * win_height, bool * win_minimized);
 
 // display init and present

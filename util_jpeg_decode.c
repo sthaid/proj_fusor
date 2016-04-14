@@ -6,6 +6,8 @@
 #include <unistd.h>
 #include <string.h>
 #include <errno.h>
+#include <inttypes.h>
+#include <limits.h>
 
 #include <setjmp.h>
 #include <jpeglib.h>
@@ -59,8 +61,8 @@ static void jpeg_decode_output_message_override(j_common_ptr cinfo);
 
 // -----------------  JPEG DECODE  ---------------------------------------------------------
 
-int jpeg_decode(uint32_t cxid, uint32_t jpeg_decode_mode, uint8_t * jpeg, uint32_t jpeg_size, 
-                uint8_t ** out_buf, uint32_t * width, uint32_t * height)
+int32_t jpeg_decode(uint32_t cxid, uint32_t jpeg_decode_mode, uint8_t * jpeg, uint32_t jpeg_size, 
+                    uint8_t ** out_buf, uint32_t * width, uint32_t * height)
 {
     jpeg_decode_cx_t              * cx;
     struct jpeg_decompress_struct * cinfo; 

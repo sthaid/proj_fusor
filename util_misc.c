@@ -6,6 +6,7 @@
 #include <unistd.h>
 #include <string.h>
 #include <errno.h>
+#include <inttypes.h>
 
 #include <time.h>
 #include <sys/time.h>
@@ -77,7 +78,7 @@ char * time2str(char * str, int64_t us, bool gmt, bool display_ms)
                   tm.tm_hour, tm.tm_min, tm.tm_sec);
 
     if (display_ms) {
-        cnt += sprintf(str+cnt, ".%3.3ld", (us % 1000000) / 1000);
+        cnt += sprintf(str+cnt, ".%3.3"PRId64, (us % 1000000) / 1000);
     }
 
     if (gmt) {

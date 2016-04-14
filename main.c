@@ -6,6 +6,8 @@
 #include <unistd.h>
 #include <string.h>
 #include <errno.h>
+#include <inttypes.h>
+#include <limits.h>
 
 #include "util_sdl.h"
 #include "util_jpeg_decode.h"
@@ -85,12 +87,7 @@ int main(int argc, char **argv)
     
     INFO("hello\n");
 
-    // XXX catch ctrl c and exit gracefully, so dataq stops
-
-    //dataq_init(0.5, 4, 4,3,2,1);
-    //sleep(3);
-    //exit(1);
-
+    dataq_init(0.5, 4, 4,3,2,1);
     cam_init();
     sdl_init(1280, 800);
 
@@ -156,8 +153,19 @@ int main(int argc, char **argv)
         sdl_display_present();
         //printf("DURATION display_present = %ld us\n", (microsec_timer()-start));
 
+        sdl_event_register('q', SDL_EVENT_TYPE_KEY, NULL);
+        sdl_event_register('Q', SDL_EVENT_TYPE_KEY, NULL);
+
         event = sdl_poll_event();
         switch (event->event) {
+        case 'q':
+            printf("Got q\n");
+            done = true;
+            break;
+        case 'Q':
+            printf("Got Q\n");
+            done = true;
+            break;
         case SDL_EVENT_QUIT:
             done = true;
             break;
@@ -168,9 +176,7 @@ int main(int argc, char **argv)
         free(pixel_buff);
     }
 
-    // XXX use atexit for this
     printf("TERMINATING\n");
-    sdl_close();
     exit(1);
 
 #if 0

@@ -6,6 +6,8 @@
 #include <unistd.h>
 #include <string.h>
 #include <errno.h>
+#include <inttypes.h>
+#include <limits.h>
 
 #include <termios.h>
 #include <fcntl.h>
@@ -22,6 +24,7 @@
 #define ENABLE_TEST_THREAD
 
 #define DATAQ_DEVICE   "/dev/serial/by-id/usb-0683_1490-if00"
+#define STTY_SETTINGS  "4:0:14b2:0:3:1c:7f:15:1:0:1:0:11:13:1a:0:12:f:17:16:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0"
 #define MAX_RESP       100
 #define MAX_ADC_CHAN   9            // channels 1 .. 8
 #define SCALE          (10.0/2048)  // volts per count
@@ -67,13 +70,14 @@ static void * dataq_test_thread(void * cx);
 
 void dataq_init(double averaging_duration_sec, int32_t num_adc_chan, ...)
 {
-    char resp[MAX_RESP];
+    char      cmd_str[100];
+    char      resp[MAX_RESP];
+    int32_t   best_srate_arg, i, cnt, len, total_len, duration, ret;
+    va_list   ap;
+    char      adc_channels_str[100];
+    char    * p;
+    char      stop_buff[10000];
     pthread_t thread_id;
-    int32_t best_srate_arg, i, cnt;
-    char cmd_str[100];
-    va_list ap;
-    char adc_channels_str[100];
-    char * p;
 
     // scan valist for adc channel numbers
     max_slist_idx = num_adc_chan;
@@ -100,6 +104,11 @@ void dataq_init(double averaging_duration_sec, int32_t num_adc_chan, ...)
     INFO("averaging_duration_sec=%4.2f num_adc_chan=%d channels=%s\n",
          averaging_duration_sec, num_adc_chan, adc_channels_str);
 
+    // setup serial port
+    // XXX perhaps use termios tcsetattr instead
+    sprintf(cmd_str, "stty -F %s %s\n", DATAQ_DEVICE, STTY_SETTINGS);
+    system(cmd_str);
+
     // open the dataq virtual com port
     fd = open(DATAQ_DEVICE, O_RDWR);
     if (fd < 0) {
@@ -108,10 +117,41 @@ void dataq_init(double averaging_duration_sec, int32_t num_adc_chan, ...)
 
     // cleanup from prior run:
     // - issue 'stop' scanning command
-    // - flush data received but not read
-    write(fd, "stop\r", 5);
-    usleep(100000);
-    tcflush(fd, TCIFLUSH);
+    // - set non blocking
+    // - read until get the response to the stop command
+    // - clear non blocking
+    len = write(fd, "stop\r", 5);
+    if (len != 5) {
+        FATAL("failed to write stop cmd, %s\n", strerror(errno));
+    }
+
+    ret = fcntl(fd, F_SETFL, O_NONBLOCK);
+    if (ret < 0) {
+        FATAL("failed to set non blocking, %s\n", strerror(errno));
+    }
+
+    total_len = 0;
+    duration = 0;
+    while (true) {
+        usleep(100000);
+        len = read(fd, stop_buff+total_len, sizeof(stop_buff)-total_len);
+        if (len > 0) {
+            total_len += len;
+            if (total_len >= 5 && strcmp(&stop_buff[total_len-5], "stop\r") == 0) {
+                break;
+            }
+        }
+        duration += 100000;
+        if (duration >= 1000000) {
+            FATAL("did not receive response to stop scanning cmd");
+        }
+    }        
+    printf("XXX -------------------- TOTAL_LEN %d\n", total_len);
+
+    ret = fcntl(fd, F_SETFL, 0);
+    if (ret < 0) {
+        FATAL("failed to clear non blocking, %s\n", strerror(errno));
+    }
 
     // issue 'info 0' command
     dataq_issue_cmd("info 0", resp);
@@ -236,11 +276,21 @@ static void dataq_exit_handler()
 {
     int32_t len;
 
+    printf("XXX DATAQEXIT START\n");
+
     // at program exit, stop the dataq
     len = write(fd, "stop\r", 5);
     if (len != 5) {
         ERROR("issuing stop cmd\n");
     }
+
+    // give some time to allow the stop cmd to be sent
+    usleep(100000);
+
+    // close
+    close(fd);
+
+    printf("XXX DATAQEXIT DONE\n");
 }
 
 static void dataq_issue_cmd(char * cmd, char * resp)
@@ -418,12 +468,12 @@ static void * dataq_monitor_thread(void * cx)
         // and set to false otherwise
         if (delta_scan_count > min_scan_hz && delta_scan_count < max_scan_hz) {
             if (!scan_okay) {
-                INFO("dataq adc scan okay, delta_scan_count=%ld\n", delta_scan_count);
+                INFO("dataq adc scan okay, delta_scan_count=%"PRId64"\n", delta_scan_count);
             }
             scan_okay = true;
         } else {
             if (scan_okay) {
-                ERROR("dataq adc scan failure, delta_scan_count=%ld\n", delta_scan_count);
+                ERROR("dataq adc scan failure, delta_scan_count=%"PRId64"\n", delta_scan_count);
             }
             scan_okay = false;
         }

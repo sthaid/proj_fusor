@@ -6,6 +6,7 @@
 #include <unistd.h>
 #include <string.h>
 #include <errno.h>
+#include <inttypes.h>
 
 #include <SDL.h>
 #include <SDL_ttf.h>
@@ -79,6 +80,7 @@ static uint32_t         sdl_color_to_rgba[] = {
 // prototypes
 //
 
+static void sdl_exit_handler(void);
 static void play_event_sound(void);
 static void print_screen(void);
 
@@ -105,13 +107,14 @@ void sdl_init(uint32_t w, uint32_t h)
 
     // init button_sound
     if (Mix_OpenAudio( 22050, MIX_DEFAULT_FORMAT, 2, 4096) < 0) {
-        FATAL("Mix_OpenAudio failed\n");
+        WARN("Mix_OpenAudio failed\n");
+    } else {
+        sdl_button_sound = Mix_QuickLoad_WAV(button_sound_wav);
+        if (sdl_button_sound == NULL) {
+            FATAL("Mix_QuickLoadWAV failed\n");
+        }
+        Mix_VolumeChunk(sdl_button_sound,MIX_MAX_VOLUME/2);
     }
-    sdl_button_sound = Mix_QuickLoad_WAV(button_sound_wav);
-    if (sdl_button_sound == NULL) {
-        FATAL("Mix_QuickLoadWAV failed\n");
-    }
-    Mix_VolumeChunk(sdl_button_sound,MIX_MAX_VOLUME/2);
 
     // initialize True Type Font
     if (TTF_Init() < 0) {
@@ -138,14 +141,21 @@ void sdl_init(uint32_t w, uint32_t h)
     TTF_SizeText(sdl_font[1].font, "X", &sdl_font[1].char_width, &sdl_font[1].char_height);
     INFO("font1 psize=%d width=%d height=%d\n", 
          font1_ptsize, sdl_font[1].char_width, sdl_font[1].char_height);
+
+    // register exit handler
+    atexit(sdl_exit_handler);
 }
 
-void sdl_close(void)
+static void sdl_exit_handler(void)
 {
     int32_t i;
     
-    Mix_FreeChunk(sdl_button_sound);
-    Mix_CloseAudio();
+    printf("XXX sdl_exit_handler starting\n");
+
+    if (sdl_button_sound) {
+        Mix_FreeChunk(sdl_button_sound);
+        Mix_CloseAudio();
+    }
 
     for (i = 0; i < MAX_FONT; i++) {
         TTF_CloseFont(sdl_font[i].font);
@@ -155,6 +165,8 @@ void sdl_close(void)
     SDL_DestroyRenderer(sdl_renderer);
     SDL_DestroyWindow(sdl_window);
     SDL_Quit();
+
+    printf("XXX sdl_exit_handler complete\n");
 }
 
 void sdl_get_state(int32_t * win_width, int32_t * win_height, bool * win_minimized)
@@ -222,10 +234,17 @@ void sdl_event_register(int32_t event_id, int32_t event_type, rect_t * pos_arg)
 {
     SDL_Rect pos;
 
-    pos.x = pos_arg->x;
-    pos.y = pos_arg->y;
-    pos.w = pos_arg->w;
-    pos.h = pos_arg->h;
+    if (pos_arg) {
+        pos.x = pos_arg->x;
+        pos.y = pos_arg->y;
+        pos.w = pos_arg->w;
+        pos.h = pos_arg->h;
+    } else {
+        pos.x = 0;
+        pos.y = 0;
+        pos.w = 0;
+        pos.h = 0;
+    }
 
     sdl_event_reg_tbl[event_id].pos  = pos;
     sdl_event_reg_tbl[event_id].type = event_type;
@@ -447,17 +466,13 @@ sdl_event_t * sdl_poll_event(void)
                 possible_event = SDL_EVENT_KEY_PGDN;
             }
 
-            if (possible_event != -1) {
-                if ((possible_event >= 'a' && possible_event <= 'z') &&
-                    (sdl_event_reg_tbl[possible_event].pos.w ||
-                     sdl_event_reg_tbl[toupper(possible_event)].pos.w))
-                {
-                    event.event = !shift ? possible_event : toupper(possible_event);
-                    play_event_sound();
-                } else if (sdl_event_reg_tbl[possible_event].pos.w) {
-                    event.event = possible_event;
-                    play_event_sound();
-                }
+            if ((possible_event >= 'a' && possible_event <= 'z') && shift) {
+                possible_event = toupper(possible_event);
+            }
+
+            if (possible_event != -1 && sdl_event_reg_tbl[possible_event].type == SDL_EVENT_TYPE_KEY) {
+                event.event = possible_event;
+                play_event_sound();
             }
             break; }
 
@@ -502,7 +517,9 @@ sdl_event_t * sdl_poll_event(void)
 
 static void play_event_sound(void)   
 {
-    Mix_PlayChannel(-1, sdl_button_sound, 0);
+    if (sdl_button_sound) {
+        Mix_PlayChannel(-1, sdl_button_sound, 0);
+    }
 }
 
 static void print_screen(void) 

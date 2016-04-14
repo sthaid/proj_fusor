@@ -1,21 +1,16 @@
-TODO
+XXX
 ----
-
-make rpi git repo, start with this on my cloud system
-- keep directions here 
-
-utils for SDL
-
-utils for jpeg decode
-
-utils for webcam
-
-utils for dataq
-
-make test pgms using these utils
 
 learn apt-get
 - add packages, such as cscope and vim
+
+get vim working
+
+save copy of bashrc, etc in this file
+
+- XXX possibly can run not as root, but don't have procedure yet
+  . sudo chmod a+rw /dev/vchiq      # do need this
+  . currently not getting events
 
 
 ================================
@@ -33,16 +28,18 @@ Install from NOOBS flash card
 
 Configure using raspi-config
 - disable X windows, use consle login screen
-- try using advanced gpu driver
+- Note - X windows can be broght up later using 'startx'
 
 Add user account 
 - create .bashrc, .bash_profile, .vimrc, .ssh
 - add sudo access
 
-Updates, and additional packages
-  sudo apt-get update
-  sudo apt-get install libudev-dev
-  sudo apt-get install libevdev-dev
+Updates, and additional packages, run as root:
+  apt-get update
+  apt-get install libudev-dev
+  apt-get install libevdev-dev
+  apt-get install tk
+  apt-get install vim
 
 Install SDL2
 - script is here, or see copy below
@@ -66,11 +63,23 @@ To Run SDL2 Test Pgm
       See any operating system documentation about shared libraries for
       more information, such as the ld(1) and ld.so(8) manual pages.
 - run as root
-- XXX possibly can run not as root, but don't have procedure yet
-  . sudo chmod a+rw /dev/vchiq      # do need this
-  . currently not getting events
+
+Apply USB Patch
+- add the folloing to /boot/cmdline.txt, and reboot
+      dwc_otg.fiq_fsm_enable=0
+- see https://github.com/raspberrypi/linux/issues/618 for information
+- this seems to fix a webcam failure that occurs when closing and reopening the /dev/video0
+
+
+=================================
+TITLE: GRAPHICS ACCELERATOR
+=================================
+ 
+XXX I'm not sure if I have this on or off now.
+XXX if needed put in above section
 
 To test graphics accelerator:
+- need to configure advanced gpu driver using raspi-config
 - sudo apt-get install mesa-utils
 - glxgears
 - should see about 60 FPS and no graphics glitches

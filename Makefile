@@ -20,6 +20,8 @@ all: $(TARGETS)
 
 fusor: $(OBJS) 
 	$(CC) -pthread -lrt -ljpeg -lpng -lm -lSDL2 -lSDL2_ttf -lSDL2_mixer -o $@ $(OBJS)
+	sudo chown root:root fusor
+	sudo chmod 4777 fusor
 
 #
 # clean rule

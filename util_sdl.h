@@ -98,9 +98,10 @@ void sdl_display_init(void);
 void sdl_display_present(void);
 
 // pane support
-void sdl_init_pane(rect_t * r, int16_t x, int16_t y, uint16_t w, uint16_t h);
-int32_t sdl_pane_cols(rect_t * r, int32_t fid);
-int32_t sdl_pane_rows(rect_t * r, int32_t fid);
+void sdl_init_pane(rect_t * pane, rect_t * rect, int16_t x, int16_t y, uint16_t w, uint16_t h);
+int32_t sdl_pane_cols(rect_t * rect, int32_t fid);
+int32_t sdl_pane_rows(rect_t * rect, int32_t fid);
+void sdl_render_pane_border(rect_t * pane_full, int32_t color);
 
 // font support
 int32_t sdl_font_char_width(int32_t fid);
@@ -117,7 +118,7 @@ void sdl_render_text_ex(rect_t * pane, int32_t row, int32_t col, char * str, int
         int32_t field_cols, bool center, int32_t font_id);
 
 // render rectangle and lines
-void sdl_render_rect(rect_t * rect, int32_t line_width, int32_t color);
+void sdl_render_rect(rect_t * pane, rect_t * rect, int32_t line_width, int32_t color);
 // XXX Lines
 
 // render using textures

@@ -213,8 +213,13 @@ void display_handler(void)
     bool          done;
     data_t      * data;
     sdl_event_t * event;
-    rect_t        cam_pane; 
+    rect_t        title_pane_full, title_pane; 
+    rect_t        cam_pane_full, cam_pane;
     texture_t     cam_texture;
+
+    char title_str[100];
+    int32_t win_width, win_height;
+    int32_t font0_height, font1_height;
 
     // XXX verify cam width >= height, and explain
 
@@ -230,9 +235,21 @@ void display_handler(void)
 
         // init for display update
         sdl_display_init();
-        sdl_init_pane(&cam_pane, 0, 0, CAM_HEIGHT, CAM_HEIGHT); 
+        sdl_get_state(&win_width, &win_height, NULL);
+        font0_height = sdl_font_char_height(0);
+        font1_height = sdl_font_char_height(1);
+        sdl_init_pane(&title_pane_full, &title_pane, 0, 0, win_width, 4+font0_height);
+        sdl_init_pane(&cam_pane_full, &cam_pane, 0, 2+font0_height, CAM_HEIGHT+4, CAM_HEIGHT+4); 
 
         // draw fixed elements
+        // XXX should have a routine to draw border
+        // XXX require both args in util_sdl
+        sdl_render_pane_border(&title_pane_full, GREEN);
+        sdl_render_pane_border(&cam_pane_full, GREEN);
+
+        // draw title
+        sprintf(title_str, "THIS IS THE TITLE");
+        sdl_render_text_ex(&title_pane, 0, 0, title_str, SDL_EVENT_NONE, sdl_pane_cols(&title_pane,0), true, 0);
         
         // draw the camera image
         sdl_update_yuy2_texture(cam_texture, 

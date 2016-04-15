@@ -196,12 +196,17 @@ void sdl_display_present(void)
 
 // -----------------  PANE SUPPORT ROUTINES  ---------------------------- 
 
-void sdl_init_pane(rect_t * r, int16_t x, int16_t y, uint16_t w, uint16_t h)
+void sdl_init_pane(rect_t * pane_full, rect_t * pane, int16_t x, int16_t y, uint16_t w, uint16_t h)
 {
-    r->x = x;
-    r->y = y;
-    r->w = w;
-    r->h = h;
+    pane_full->x = x;
+    pane_full->y = y;
+    pane_full->w = w;
+    pane_full->h = h;
+
+    pane->x = x + 2;
+    pane->y = y + 2;
+    pane->w = w - 4;
+    pane->h = h - 4;
 }
 
 int32_t sdl_pane_cols(rect_t * r, int32_t fid)
@@ -212,6 +217,18 @@ int32_t sdl_pane_cols(rect_t * r, int32_t fid)
 int32_t sdl_pane_rows(rect_t * r, int32_t fid)
 {
     return r->h / sdl_font[fid].char_height;
+}
+
+void sdl_render_pane_border(rect_t * pane_full, int32_t color)
+{
+    rect_t rect;
+
+    rect.x = 0;
+    rect.y = 0;
+    rect.w = pane_full->w;
+    rect.h = pane_full->h;
+
+    sdl_render_rect(pane_full, &rect, 2, color);
 }
 
 // -----------------  FONT SUPPORT ROUTINES  ---------------------------- 
@@ -752,15 +769,15 @@ void sdl_render_text_ex(rect_t * pane, int32_t row, int32_t col, char * str, int
 
 // -----------------  RENDER RECTANGLES & LINES  ------------------------ 
 
-void sdl_render_rect(rect_t * rect_arg, int32_t line_width, int32_t color)
+void sdl_render_rect(rect_t * pane, rect_t * rect_arg, int32_t line_width, int32_t color)
 {
     SDL_Rect rect;
     int32_t i;
     uint8_t r, g, b, a;
     uint32_t rgba;
 
-    rect.x = rect_arg->x;
-    rect.y = rect_arg->y;
+    rect.x = pane->x + rect_arg->x;
+    rect.y = pane->y + rect_arg->y;
     rect.w = rect_arg->w;
     rect.h = rect_arg->h;
 

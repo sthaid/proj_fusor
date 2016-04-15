@@ -91,7 +91,7 @@ typedef struct {
 
 // window initialize, and get_state
 void sdl_init(uint32_t w, uint32_t h);
-void sdl_get_state(int32_t * win_width, int32_t * win_height, bool * win_minimized);
+void sdl_get_state(int32_t * win_width, int32_t * win_height, bool * win_minimized); // XXX maybe don't need events
 
 // display init and present
 void sdl_display_init(void);
@@ -124,7 +124,7 @@ void sdl_render_rect(rect_t * rect, int32_t line_width, int32_t color);
 texture_t sdl_create_yuy2_texture(int32_t w, int32_t h);
 texture_t sdl_create_filled_circle_texture(int32_t radius, int32_t color);
 texture_t sdl_create_text_texture(int32_t fg_color, int32_t bg_color, int32_t font_id, char * str);
-void sdl_update_yuy2_texture(texture_t texture, uint8_t * pixels);
+void sdl_update_yuy2_texture(texture_t texture, uint8_t * pixels, int32_t pitch);
 void sdl_query_texture(texture_t texture, int32_t * width, int32_t * height);
 void sdl_render_texture(texture_t texture, rect_t * dstrect);
 void sdl_destroy_texture(texture_t texture);

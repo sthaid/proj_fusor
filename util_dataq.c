@@ -52,6 +52,7 @@ static int32_t  scan_hz;
 static int32_t  max_val;
 static int32_t  max_slist_idx; 
 static int32_t  slist_idx_to_adc_chan[8];
+static bool     exitting;
 
 //
 // prototypes
@@ -275,6 +276,9 @@ static void dataq_exit_handler()
 {
     int32_t len;
 
+    // let the threads know program is exitting
+    exitting = true;
+    
     // at program exit, stop the dataq
     len = write(fd, "stop\r", 5);
     if (len != 5) {
@@ -381,6 +385,11 @@ static void * dataq_recv_data_thread(void * cx)
         }
         buff_len += len;
 
+        // if program is exitting then terminate this thread
+        if (exitting) {
+            return NULL;
+        }
+
         // while there is enough data read for all sensors being scanned,
         // and to validate sync then extract adc values
         while (buff_len >= 9) {
@@ -454,6 +463,11 @@ static void * dataq_monitor_thread(void * cx)
         // sleep 1 second
         sleep(1);
 
+        // if program is exitting then terminate this thread
+        if (exitting) {
+            return NULL;
+        }
+
         // determine the amount scan_count has changed during the 1 sec sleep
         curr_scan_count = scan_count;
         delta_scan_count = curr_scan_count - last_scan_count;
@@ -489,6 +503,10 @@ static void * dataq_test_thread(void * cx)
     // display voltage info once per second, on all registered channels
     while (true) {
         sleep(1);
+
+        if (exitting) {
+            return NULL;
+        }
 
         printf("CHAN      RMS     MEAN     SDEV     MIN       MAX\n");
         for (i = 0; i < max_slist_idx; i++) {

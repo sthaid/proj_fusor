@@ -163,6 +163,8 @@ static void sdl_exit_handler(void)
     SDL_DestroyRenderer(sdl_renderer);
     SDL_DestroyWindow(sdl_window);
     SDL_Quit();
+
+    // XXX usleep(500000);
 }
 
 void sdl_get_state(int32_t * win_width, int32_t * win_height, bool * win_minimized)
@@ -892,7 +894,7 @@ texture_t sdl_create_text_texture(int32_t fg_color, int32_t bg_color, int32_t fo
     return (texture_t)texture;
 }
 
-void sdl_update_yuy2_texture(texture_t texture, uint8_t * pixels) 
+void sdl_update_yuy2_texture(texture_t texture, uint8_t * pixels, int32_t pitch) 
 {
     int32_t width, height;
 
@@ -901,7 +903,7 @@ void sdl_update_yuy2_texture(texture_t texture, uint8_t * pixels)
     SDL_UpdateTexture((SDL_Texture*)texture,
                       NULL,            // update entire texture
                       pixels,          // pixels
-                      width*2);        // pitch
+                      pitch*2);        // pitch
 }
 
 void sdl_query_texture(texture_t texture, int32_t * width, int32_t * height)

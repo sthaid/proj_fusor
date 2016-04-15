@@ -22,6 +22,8 @@
 #define FILE_MAGIC      0x1234cdef
 #define RECORD_MAGIC_1  0x11111111
 #define RECORD_MAGIC_2  0x22222222
+#define CAM_WIDTH       960
+#define CAM_HEIGHT      720
 
 //
 // typedefs
@@ -88,11 +90,11 @@ int main(int argc, char **argv)
     INFO("hello\n");
 
     dataq_init(0.5, 4, 4,3,2,1);
-    cam_init();
-    sdl_init(1280, 800);
+    cam_init(CAM_WIDTH, CAM_HEIGHT);
+    sdl_init(1280, 800);  // XXX defines
 
     texture_t texture;
-    texture = sdl_create_yuy2_texture(640,480);
+    texture = sdl_create_yuy2_texture(CAM_WIDTH,CAM_HEIGHT);
 
     bool done = false;
     while (!done) {
@@ -136,7 +138,7 @@ int main(int argc, char **argv)
 
         sdl_display_init();
 
-        sdl_init_pane(&pane, 0, 0, 640, 480);
+        sdl_init_pane(&pane, 0, 0, CAM_WIDTH, CAM_HEIGHT); // XXX make it square
         
         start = microsec_timer();
         sdl_update_yuy2_texture(texture, pixel_buff);

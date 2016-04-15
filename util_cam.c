@@ -36,8 +36,6 @@
 #define WC_VIDEO          "/dev/video"   // base name
 #define MAX_BUFMAP        32  
 #define FRAMES_PER_SEC    10
-#define WIDTH             640
-#define HEIGHT            480
 
 //
 // typedefs
@@ -63,7 +61,7 @@ static void cam_exit_handler(void);
 
 // -----------------  API  ---------------------------------------------------------
 
-void cam_init(void)
+void cam_init(int32_t width, int32_t height)
 {
     struct v4l2_capability     cap;
     struct v4l2_cropcap        cropcap;
@@ -109,8 +107,8 @@ void cam_init(void)
         FATAL("ioctl VIDIOC_G_FMT %s\n", strerror(errno));
     }
     format.fmt.pix.pixelformat = V4L2_PIX_FMT_MJPEG;
-    format.fmt.pix.width  =  WIDTH;
-    format.fmt.pix.height =  HEIGHT;
+    format.fmt.pix.width  =  width;
+    format.fmt.pix.height =  height;
     if (ioctl(cam_fd, VIDIOC_S_FMT, &format) < 0) {
         FATAL("ioctl VIDIOC_S_FMT %s\n", strerror(errno));
     }

@@ -206,15 +206,12 @@ static void cam_exit_handler(void)
 {
     enum v4l2_buf_type buf_type;
 
-    printf("XXX CAM EXIT \n");
     buf_type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
     if (ioctl(cam_fd, VIDIOC_STREAMOFF, &buf_type) < 0) {
         WARN("ioctl VIDIOC_STREAMOFF %s\n", strerror(errno));
     }
 
-    // XXX is this needed usleep(100000);
     close(cam_fd);
-    printf("XXX CAM DONE \n");
 }
 
 void cam_get_buff(uint8_t **buff, uint32_t *len, uint32_t * buff_id)

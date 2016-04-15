@@ -102,11 +102,10 @@ int main(int argc, char **argv)
         uint32_t pixel_buff_width, pixel_buff_height;
         uint32_t buff_id;
         
-        rect_t pane;   // XXX either call them rect or pane
+        rect_t pane; 
 
-        //uint64_t start;
+        uint64_t start;
         int32_t ret;
-
 
         //static int count;
         //char str[44];
@@ -118,7 +117,7 @@ int main(int argc, char **argv)
         //printf("jpeg_buff=%p  jpeg_buff_len=%d\n", jpeg_buff, jpeg_buff_len);
 
         // XXX time this
-        //start = microsec_timer();
+        start = microsec_timer();
         ret = jpeg_decode(0,  // cxid
                           JPEG_DECODE_MODE_YUY2,      
                           jpeg_buff, jpeg_buff_len,
@@ -126,9 +125,9 @@ int main(int argc, char **argv)
         if (ret < 0) {
             printf("jpeg decode failed\n");
         }
-        //printf("DURATION jpeg_decode = %ld us\n", (microsec_timer()-start));
-        //printf("decode ret=%d  w=%d  h=%d\n",
-               //ret, pixel_buff_width, pixel_buff_height);
+        printf("DURATION jpeg_decode = %"PRId64" us\n", (microsec_timer()-start));
+        printf("decode ret=%d  w=%d  h=%d\n",
+               ret, pixel_buff_width, pixel_buff_height);
         // XXX assert pixel w and h are correct
 
         //start = microsec_timer();
@@ -138,20 +137,18 @@ int main(int argc, char **argv)
         sdl_display_init();
 
         sdl_init_pane(&pane, 0, 0, 640, 480);
-        //sprintf(str, "HELLO %d", count++);
-        //sdl_render_text_font0(&pane, 0, 0, str, SDL_EVENT_NONE);
         
-        //start = microsec_timer();
+        start = microsec_timer();
         sdl_update_yuy2_texture(texture, pixel_buff);
-        //printf("DURATION update_yuy2 = %ld us\n", (microsec_timer()-start));
+        printf("DURATION update_yuy2 = %"PRId64" us\n", (microsec_timer()-start));
 
-        //start = microsec_timer();
+        start = microsec_timer();
         sdl_render_texture(texture, &pane);
-        //printf("DURATION render_texture = %ld us\n", (microsec_timer()-start));
+        printf("DURATION render_texture = %"PRId64" us\n", (microsec_timer()-start));
 
-        //start = microsec_timer();
+        start = microsec_timer();
         sdl_display_present();
-        //printf("DURATION display_present = %ld us\n", (microsec_timer()-start));
+        printf("DURATION display_present = %"PRId64" us\n", (microsec_timer()-start));
 
         sdl_event_register('q', SDL_EVENT_TYPE_KEY, NULL);
         sdl_event_register('Q', SDL_EVENT_TYPE_KEY, NULL);

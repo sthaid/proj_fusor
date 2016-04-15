@@ -1,17 +1,6 @@
 XXX
-----
-
+---
 learn apt-get
-- add packages, such as cscope and vim
-
-get vim working
-
-save copy of bashrc, etc in this file
-
-- XXX possibly can run not as root, but don't have procedure yet
-  . sudo chmod a+rw /dev/vchiq      # do need this
-  . currently not getting events
-
 
 ================================
 TITLE: INSTALL RASPBERRY PI
@@ -70,13 +59,11 @@ Apply USB Patch
 - see https://github.com/raspberrypi/linux/issues/618 for information
 - this seems to fix a webcam failure that occurs when closing and reopening the /dev/video0
 
-
 =================================
 TITLE: GRAPHICS ACCELERATOR
 =================================
  
-XXX I'm not sure if I have this on or off now.
-XXX if needed put in above section
+Not needed to run the fusor instrumentation program.
 
 To test graphics accelerator:
 - need to configure advanced gpu driver using raspi-config
@@ -85,7 +72,6 @@ To test graphics accelerator:
 - should see about 60 FPS and no graphics glitches
 - note: I did see a hang with graphics accel enabled, when resising terminal
         window;  so suggest don't use X windows
-
 
 ================================
 TITLE: BUILD AND INSTALL SDL2 ON RASPBERRY PI
@@ -156,8 +142,53 @@ ELAPSED_TIME=$(($SECONDS - $START_TIME))
 echo -e "\n${bold}Finished in $(($ELAPSED_TIME/60/60)) hr, $(($ELAPSED_TIME/60%60)) min, and $(($ELAPSED_TIME%60)) sec${normal}\n"
 
 ================================
-TITLE: SAMPLE XXX ?
-.bashrc, .bash_profile, .vimrc
+TITLE: SAMPLES of .bashrc, .bash_profile, .vimrc
 ================================
 
-XXX tbd
+---- .bashrc ---
+
+# .bashrc
+
+# Source global definitions
+if [ -f /etc/bashrc ]; then
+	. /etc/bashrc
+fi
+
+# update ulimit for core dump
+ulimit -c unlimited
+
+# General Command aliases
+alias ls='ls -l --color=always --group-directories-first --human-readable'
+alias bashrc='source ~/.bashrc'
+alias bash_profile='source ~/.bash_profile'
+
+# cd aliases
+alias pf='cd ~/proj_fusor'
+
+--- .bsh_profile ---
+
+# .bash_profile
+
+# Get the aliases and functions
+if [ -f ~/.bashrc ]; then
+	. ~/.bashrc
+fi
+
+# User specific environment and startup programs
+export PATH=$PATH:.:$HOME/bin
+export GIT_EXTERNAL_DIFF=~/bin/git_external_diff
+export LD_LIBRARY_PATH=/usr/local/lib
+export PS1='[HOME \u@\h \W]\$ '
+
+--- .vimrc ---
+
+" use 4 spaces for tab indent
+set expandtab
+set tabstop=8
+set softtabstop=4
+set shiftwidth=4
+
+" color scheme
+set background=dark
+colors default
+syntax on

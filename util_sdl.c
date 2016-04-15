@@ -150,8 +150,6 @@ static void sdl_exit_handler(void)
 {
     int32_t i;
     
-    printf("XXX sdl_exit_handler starting\n");
-
     if (sdl_button_sound) {
         Mix_FreeChunk(sdl_button_sound);
         Mix_CloseAudio();
@@ -165,8 +163,6 @@ static void sdl_exit_handler(void)
     SDL_DestroyRenderer(sdl_renderer);
     SDL_DestroyWindow(sdl_window);
     SDL_Quit();
-
-    printf("XXX sdl_exit_handler complete\n");
 }
 
 void sdl_get_state(int32_t * win_width, int32_t * win_height, bool * win_minimized)
@@ -864,10 +860,6 @@ texture_t sdl_create_text_texture(int32_t fg_color, int32_t bg_color, int32_t fo
     SDL_Color     fg_sdl_color;
     SDL_Color     bg_sdl_color;
 
-#if 0 // XXX
-    printf("fg=%d bg=%d fid=%d str='%s'\n",
-        fg_color, bg_color, font_id, str);
-#endif
     if (str[0] == '\0') {
         return NULL;
     }
@@ -904,11 +896,7 @@ void sdl_update_yuy2_texture(texture_t texture, uint8_t * pixels)
 {
     int32_t width, height;
 
-    // XXX time this - measured0 or 1
-    //uint64_t start = microsec_timer();
     sdl_query_texture(texture, &width, &height);
-    //printf("XXX DURATION query_texture = %ld us\n", (microsec_timer()-start));
-
 
     SDL_UpdateTexture((SDL_Texture*)texture,
                       NULL,            // update entire texture
@@ -939,14 +927,6 @@ void sdl_render_texture(texture_t texture, rect_t * dstrect_arg)
     dstrect.y = dstrect_arg->y;
     dstrect.w = dstrect_arg->w;
     dstrect.h = dstrect_arg->h;
-
-#if 0 // XXX
-    printf("RENDER %p %d %d %d %d \n", texture, 
-        dstrect.x,
-        dstrect.y,
-        dstrect.w,
-        dstrect.h);
-#endif
 
     SDL_RenderCopy(sdl_renderer, texture, NULL, &dstrect);
 }

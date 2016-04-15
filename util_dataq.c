@@ -105,7 +105,7 @@ void dataq_init(double averaging_duration_sec, int32_t num_adc_chan, ...)
          averaging_duration_sec, num_adc_chan, adc_channels_str);
 
     // setup serial port
-    // XXX perhaps use termios tcsetattr instead
+    // XXX LATER perhaps use termios tcsetattr instead
     sprintf(cmd_str, "stty -F %s %s\n", DATAQ_DEVICE, STTY_SETTINGS);
     system(cmd_str);
 
@@ -146,7 +146,6 @@ void dataq_init(double averaging_duration_sec, int32_t num_adc_chan, ...)
             FATAL("did not receive response to stop scanning cmd");
         }
     }        
-    printf("XXX -------------------- TOTAL_LEN %d\n", total_len);
 
     ret = fcntl(fd, F_SETFL, 0);
     if (ret < 0) {
@@ -276,8 +275,6 @@ static void dataq_exit_handler()
 {
     int32_t len;
 
-    printf("XXX DATAQEXIT START\n");
-
     // at program exit, stop the dataq
     len = write(fd, "stop\r", 5);
     if (len != 5) {
@@ -289,8 +286,6 @@ static void dataq_exit_handler()
 
     // close
     close(fd);
-
-    printf("XXX DATAQEXIT DONE\n");
 }
 
 static void dataq_issue_cmd(char * cmd, char * resp)
@@ -390,7 +385,7 @@ static void * dataq_recv_data_thread(void * cx)
         // and to validate sync then extract adc values
         while (buff_len >= 9) {
             // if not sychronized then abort for now
-            // XXX improve this to resync, if needed
+            // XXX LATER improve this to resync, if needed
             if (((buff[0] & 1) != 0) || ((buff[8] & 1) != 0)) {
                 FATAL("not synced\n");
             }

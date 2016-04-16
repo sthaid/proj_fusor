@@ -119,6 +119,7 @@ void sdl_render_text_ex(rect_t * pane, int32_t row, int32_t col, char * str, int
 
 // render rectangle and lines
 void sdl_render_rect(rect_t * pane, rect_t * rect, int32_t line_width, int32_t color);
+void sdl_render_fill_rect(rect_t * pane, rect_t * rect, int32_t color);
 // XXX Lines
 
 // render using textures

@@ -6,11 +6,13 @@ CFLAGS = -c -g -O0 -pthread -fsigned-char -Wall \
 
 OBJS = main.o \
        util_sdl.o \
-       util_sdl_predefined_displays.o \
        util_jpeg_decode.o \
        util_dataq.o \
        util_cam.o \
        util_misc.o
+
+XXX_LATER= \
+       util_sdl_predefined_displays.o
 
 #
 # build rules

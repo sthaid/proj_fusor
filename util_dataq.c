@@ -212,10 +212,16 @@ int32_t dataq_get_adc(int32_t adc_chan,
                       double * rms, 
                       double * mean, double * sdev,
                       double * min, double * max) 
-
 {
     int32_t i;
     adc_t * x;
+
+    // preset returns to 0
+    if (rms) *rms   = 0;
+    if (mean) *mean = 0;
+    if (sdev) *sdev = 0;
+    if (min) *min   = 0;
+    if (max) *max   = 0;
 
     // validate adc_chan
     if (adc_chan < 1 || adc_chan >= MAX_ADC_CHAN || adc[adc_chan].val == NULL) {
@@ -392,10 +398,10 @@ static void * dataq_recv_data_thread(void * cx)
 
         // while there is enough data read for all sensors being scanned,
         // and to validate sync then extract adc values
-        while (buff_len >= 9) {
+        while (buff_len >= max_slist_idx*2+1) {
             // if not sychronized then abort for now
             // XXX LATER improve this to resync, if needed
-            if (((buff[0] & 1) != 0) || ((buff[8] & 1) != 0)) {
+            if (((buff[0] & 1) != 0) || ((buff[max_slist_idx*2] & 1) != 0)) {
                 FATAL("not synced\n");
             }
 
@@ -416,8 +422,8 @@ static void * dataq_recv_data_thread(void * cx)
             }
 
             // shift buff, and adjust buff_len
-            memmove(buff, buff+8, buff_len-8);
-            buff_len -= 8;
+            memmove(buff, buff+(max_slist_idx*2), buff_len-(max_slist_idx*2));
+            buff_len -= (max_slist_idx*2);
 
             // bump up scan_count, which is used by the dataq_monitor_thread to
             // determine if scanning is working 

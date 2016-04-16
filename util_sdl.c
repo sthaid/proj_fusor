@@ -150,6 +150,9 @@ static void sdl_exit_handler(void)
 {
     int32_t i;
     
+    // XXX key up ?
+    usleep(2000000);
+
     if (sdl_button_sound) {
         Mix_FreeChunk(sdl_button_sound);
         Mix_CloseAudio();
@@ -163,8 +166,6 @@ static void sdl_exit_handler(void)
     SDL_DestroyRenderer(sdl_renderer);
     SDL_DestroyWindow(sdl_window);
     SDL_Quit();
-
-    // XXX usleep(500000);
 }
 
 void sdl_get_state(int32_t * win_width, int32_t * win_height, bool * win_minimized)
@@ -577,7 +578,7 @@ static void print_screen(void)
 
     t = time(NULL);
     localtime_r(&t, &tm);
-    sprintf(file_name, "entropy_%2.2d%2.2d%2.2d_%2.2d%2.2d%2.2d.png",
+    sprintf(file_name, "screenshot_%2.2d%2.2d%2.2d_%2.2d%2.2d%2.2d.png",
             tm.tm_year - 100, tm.tm_mon + 1, tm.tm_mday,
             tm.tm_hour, tm.tm_min, tm.tm_sec);
 
@@ -782,12 +783,10 @@ void sdl_render_rect(rect_t * pane, rect_t * rect_arg, int32_t line_width, int32
     rect.h = rect_arg->h;
 
     rgba = sdl_color_to_rgba[color];
-
     r = (rgba >> 24) & 0xff;
     g = (rgba >> 16) & 0xff;
     b = (rgba >>  8) & 0xff;
     a = (rgba      ) & 0xff;
-
     SDL_SetRenderDrawColor(sdl_renderer, r, g, b, a);
 
     for (i = 0; i < line_width; i++) {
@@ -800,6 +799,26 @@ void sdl_render_rect(rect_t * pane, rect_t * rect_arg, int32_t line_width, int32
         rect.w -= 2;
         rect.h -= 2;
     }
+}
+
+void sdl_render_fill_rect(rect_t * pane, rect_t * rect_arg, int32_t color)
+{
+    SDL_Rect rect;
+    uint8_t r, g, b, a;
+    uint32_t rgba;
+
+    rgba = sdl_color_to_rgba[color];
+    r = (rgba >> 24) & 0xff;
+    g = (rgba >> 16) & 0xff;
+    b = (rgba >>  8) & 0xff;
+    a = (rgba      ) & 0xff;
+    SDL_SetRenderDrawColor(sdl_renderer, r, g, b, a);
+
+    rect.x = pane->x + rect_arg->x;
+    rect.y = pane->y + rect_arg->y;
+    rect.w = rect_arg->w;
+    rect.h = rect_arg->h;
+    SDL_RenderFillRect(sdl_renderer, &rect);
 }
 
 // -----------------  RENDER USING TEXTURES  ---------------------------- 

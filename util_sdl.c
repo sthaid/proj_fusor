@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdarg.h>
+#include <stddef.h>
 #include <unistd.h>
 #include <string.h>
 #include <errno.h>
@@ -83,6 +84,7 @@ static uint32_t         sdl_color_to_rgba[] = {
 static void sdl_exit_handler(void);
 static void play_event_sound(void);
 static void print_screen(void);
+static void sdl_set_color(int32_t color); 
 
 // -----------------  SDL INIT & CLOSE  --------------------------------- 
 
@@ -122,8 +124,8 @@ void sdl_init(uint32_t w, uint32_t h)
     }
 
     font0_path = "fonts/FreeMonoBold.ttf";         // normal 
-    font0_ptsize = sdl_win_height / 18 - 1;
-    font1_path = "fonts/FreeMonoBold.ttf";         // extra large, for keyboard
+    font0_ptsize = sdl_win_height / 30 - 1;
+    font1_path = "fonts/FreeMonoBold.ttf";         // large
     font1_ptsize = sdl_win_height / 13 - 1;
 
     sdl_font[0].font = TTF_OpenFont(font0_path, font0_ptsize);
@@ -653,8 +655,95 @@ done:
     free(pixels);
 }
 
-// -----------------  RENDER TEXT WITH EVENT HANDLING ------------------- 
+// -----------------  RENDER TEXT  -------------------------------------- 
 
+void sdl_render_text(rect_t * pane, int32_t row, int32_t col, int32_t font_id, char * str, int32_t fg_color_arg, int32_t bg_color_arg)
+{
+    SDL_Surface    * surface = NULL;
+    SDL_Texture    * texture = NULL;
+    SDL_Rect         pos;
+    SDL_Color        fg_sdl_color, bg_sdl_color;
+    uint32_t         fg_rgba, bg_rgba;
+#if 0
+    SDL_Surface    * surface = NULL;
+    SDL_Texture    * texture = NULL;
+    SDL_Color        fg_color;
+    SDL_Rect         pos;
+    char             s[500];
+    int32_t          slen;
+
+    static SDL_Color fg_color_normal = {255,255,255,255}; 
+    static SDL_Color fg_color_event  = {0,255,255,255}; 
+    static SDL_Color bg_color        = {0,0,0,255}; 
+#endif
+    // init 
+    fg_rgba = sdl_color_to_rgba[fg_color_arg];
+    fg_sdl_color.r = (fg_rgba >> 24) & 0xff;
+    fg_sdl_color.g = (fg_rgba >> 16) & 0xff;
+    fg_sdl_color.b = (fg_rgba >>  8) & 0xff;
+    fg_sdl_color.a = (fg_rgba >>  0) & 0xff;
+
+    bg_rgba = sdl_color_to_rgba[bg_color_arg];
+    bg_sdl_color.r = (bg_rgba >> 24) & 0xff;
+    bg_sdl_color.g = (bg_rgba >> 16) & 0xff;
+    bg_sdl_color.b = (bg_rgba >>  8) & 0xff;
+    bg_sdl_color.a = (bg_rgba >>  0) & 0xff;
+
+    // if zero length string then nothing to do
+    if (str[0] == '\0') {
+        return;
+    }
+
+#if 0
+    // if row or col are less than zero then adjust 
+    if (row < 0) {
+        row += sdl_pane_rows(pane,font_id);
+    }
+    if (col < 0) {
+        col += sdl_pane_cols(pane,font_id);
+    }
+
+    // if field_cols is zero then set to huge value (unlimiitted)
+    if (field_cols == 0) {
+        field_cols = 999;
+    }
+#endif
+
+    // render the text to a surface
+    surface = TTF_RenderText_Shaded(sdl_font[font_id].font, str, fg_sdl_color, bg_sdl_color);
+    if (surface == NULL) { 
+        FATAL("TTF_RenderText_Shaded returned NULL\n");
+    } 
+
+    // determine the display location
+    pos.x = pane->x + col * sdl_font[font_id].char_width;
+    if (col < 0) {
+        pos.x += pane->w;
+    }
+    pos.y = pane->y + row * sdl_font[font_id].char_height;
+    if (row < 0) {
+        pos.y += pane->h;
+    }
+    pos.w = surface->w;
+    pos.h = surface->h;
+
+    // create texture from the surface, and 
+    // render the texture
+    texture = SDL_CreateTextureFromSurface(sdl_renderer, surface); 
+    SDL_RenderCopy(sdl_renderer, texture, NULL, &pos); 
+
+    // clean up
+    if (surface) {
+        SDL_FreeSurface(surface); 
+        surface = NULL;
+    }
+    if (texture) {
+        SDL_DestroyTexture(texture); 
+        texture = NULL;
+    }
+}
+
+#if 0
 void sdl_render_text_font0(rect_t * pane, int32_t row, int32_t col, char * str, int32_t event)
 {
     sdl_render_text_ex(pane, row, col, str, event, sdl_pane_cols(pane,0)-col, false, 0);
@@ -767,6 +856,7 @@ void sdl_render_text_ex(rect_t * pane, int32_t row, int32_t col, char * str, int
         sdl_event_register(event, SDL_EVENT_TYPE_TEXT, &pos2);
     }
 }
+#endif
 
 // -----------------  RENDER RECTANGLES & LINES  ------------------------ 
 
@@ -774,20 +864,13 @@ void sdl_render_rect(rect_t * pane, rect_t * rect_arg, int32_t line_width, int32
 {
     SDL_Rect rect;
     int32_t i;
-    uint8_t r, g, b, a;
-    uint32_t rgba;
+
+    sdl_set_color(color);
 
     rect.x = pane->x + rect_arg->x;
     rect.y = pane->y + rect_arg->y;
     rect.w = rect_arg->w;
     rect.h = rect_arg->h;
-
-    rgba = sdl_color_to_rgba[color];
-    r = (rgba >> 24) & 0xff;
-    g = (rgba >> 16) & 0xff;
-    b = (rgba >>  8) & 0xff;
-    a = (rgba      ) & 0xff;
-    SDL_SetRenderDrawColor(sdl_renderer, r, g, b, a);
 
     for (i = 0; i < line_width; i++) {
         SDL_RenderDrawRect(sdl_renderer, &rect);
@@ -804,6 +887,54 @@ void sdl_render_rect(rect_t * pane, rect_t * rect_arg, int32_t line_width, int32
 void sdl_render_fill_rect(rect_t * pane, rect_t * rect_arg, int32_t color)
 {
     SDL_Rect rect;
+
+    sdl_set_color(color);
+
+    rect.x = pane->x + rect_arg->x;
+    rect.y = pane->y + rect_arg->y;
+    rect.w = rect_arg->w;
+    rect.h = rect_arg->h;
+    SDL_RenderFillRect(sdl_renderer, &rect);
+}
+
+void sdl_render_line(rect_t * pane, int32_t x1, int32_t y1, int32_t x2, int32_t y2, int32_t color)
+{
+    sdl_set_color(color);
+
+    x1 += pane->x;
+    y1 += pane->y;
+    x2 += pane->x;
+    y2 += pane->y;
+
+    SDL_RenderDrawLine(sdl_renderer, x1,y1,x2,y2);
+}
+
+void sdl_render_lines(rect_t * pane, point_t * points, int32_t count, int32_t color)
+{
+    int32_t i;
+
+//XXX tbd use pane
+    //printf("sdl_render_lines count %d\n", count);
+    if (count <= 1) {
+        return;
+    }
+
+    sdl_set_color(color);
+
+    if (pane->x || pane->y) {
+        point_t new_points[count];
+        for (i = 0; i < count; i++) {
+            new_points[i].x = points[i].x + pane->x;
+            new_points[i].y = points[i].y + pane->y;
+        }
+        SDL_RenderDrawLines(sdl_renderer, (SDL_Point*)new_points, count);
+    } else {
+        SDL_RenderDrawLines(sdl_renderer, (SDL_Point*)points, count);
+    }
+}
+
+static void sdl_set_color(int32_t color)
+{
     uint8_t r, g, b, a;
     uint32_t rgba;
 
@@ -813,12 +944,6 @@ void sdl_render_fill_rect(rect_t * pane, rect_t * rect_arg, int32_t color)
     b = (rgba >>  8) & 0xff;
     a = (rgba      ) & 0xff;
     SDL_SetRenderDrawColor(sdl_renderer, r, g, b, a);
-
-    rect.x = pane->x + rect_arg->x;
-    rect.y = pane->y + rect_arg->y;
-    rect.w = rect_arg->w;
-    rect.h = rect_arg->h;
-    SDL_RenderFillRect(sdl_renderer, &rect);
 }
 
 // -----------------  RENDER USING TEXTURES  ---------------------------- 

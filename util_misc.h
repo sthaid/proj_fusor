@@ -3,7 +3,7 @@
 
 // -----------------  LOGGING  -----------------------------------
 
-#define ENABLE_LOGGING_AT_DEBUG_LEVEL
+//#define ENABLE_LOGGING_AT_DEBUG_LEVEL
 
 #define INFO(fmt, args...) \
     do { \

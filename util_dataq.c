@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdarg.h>
+#include <stddef.h>
 #include <unistd.h>
 #include <string.h>
 #include <errno.h>
@@ -21,13 +22,13 @@
 // defines
 //
 
-#define ENABLE_TEST_THREAD
+//#define ENABLE_TEST_THREAD
 
 #define DATAQ_DEVICE   "/dev/serial/by-id/usb-0683_1490-if00"
 #define STTY_SETTINGS  "4:0:14b2:0:3:1c:7f:15:1:0:1:0:11:13:1a:0:12:f:17:16:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0"
 #define MAX_RESP       100
 #define MAX_ADC_CHAN   9            // channels 1 .. 8
-#define SCALE          (10.0/2048)  // volts per count
+#define SCALE          (10.0)
 
 //
 // typedefs
@@ -61,7 +62,7 @@ static bool     exitting;
 static void dataq_exit_handler(void);
 static void dataq_issue_cmd(char * cmd, char * resp);
 static void * dataq_recv_data_thread(void * cx);
-static void dataq_process_adc_value(int32_t slist_idx, int32_t new_val);
+static void dataq_process_adc_raw(int32_t slist_idx, int32_t new_val);
 static void * dataq_monitor_thread(void * cx);
 #ifdef ENABLE_TEST_THREAD
 static void * dataq_test_thread(void * cx);
@@ -69,24 +70,21 @@ static void * dataq_test_thread(void * cx);
 
 // -----------------  DATAQ API ROUTINES  -----------------------------------------------
 
-void dataq_init(double averaging_duration_sec, int32_t num_adc_chan, ...)
+void dataq_init(float averaging_duration_sec, int32_t * adc_chan_list, int32_t max_adc_chan_list)
 {
     char      cmd_str[100];
     char      resp[MAX_RESP];
     int32_t   best_srate_arg, i, cnt, len, total_len, duration, ret;
-    va_list   ap;
     char      adc_channels_str[100];
     char    * p;
     char      stop_buff[10000];
     pthread_t thread_id;
 
     // scan valist for adc channel numbers
-    max_slist_idx = num_adc_chan;
-    va_start(ap, num_adc_chan);
+    max_slist_idx = max_adc_chan_list;
     for (i = 0; i < max_slist_idx; i++) {
-        slist_idx_to_adc_chan[i] = va_arg(ap, int32_t);
+        slist_idx_to_adc_chan[i] = adc_chan_list[i];
     }
-    va_end(ap);
 
     // validate adc channel numbers
     for (i = 0; i < max_slist_idx; i++) {
@@ -102,8 +100,8 @@ void dataq_init(double averaging_duration_sec, int32_t num_adc_chan, ...)
         cnt = sprintf(p, "%d ",  slist_idx_to_adc_chan[i]);
         p += cnt;
     }
-    INFO("averaging_duration_sec=%4.2f num_adc_chan=%d channels=%s\n",
-         averaging_duration_sec, num_adc_chan, adc_channels_str);
+    INFO("averaging_duration_sec=%4.2f channels=%s\n",
+         averaging_duration_sec, adc_channels_str);
 
     // setup serial port
     // XXX LATER perhaps use termios tcsetattr instead
@@ -206,22 +204,19 @@ void dataq_init(double averaging_duration_sec, int32_t num_adc_chan, ...)
 #ifdef ENABLE_TEST_THREAD
     pthread_create(&thread_id, NULL, dataq_test_thread, NULL);
 #endif
+
+    // XXX  wait for adc data to be available
+    sleep(1);
 }
 
-int32_t dataq_get_adc(int32_t adc_chan, 
-                      double * rms, 
-                      double * mean, double * sdev,
-                      double * min, double * max) 
+// XXX need to time this, perhaps additonal flags for what decode is needed
+int32_t dataq_get_adc(int32_t adc_chan, adc_value_t * adc_value)
 {
     int32_t i;
     adc_t * x;
 
     // preset returns to 0
-    if (rms) *rms   = 0;
-    if (mean) *mean = 0;
-    if (sdev) *sdev = 0;
-    if (min) *min   = 0;
-    if (max) *max   = 0;
+    bzero(adc_value, sizeof(adc_value_t));
 
     // validate adc_chan
     if (adc_chan < 1 || adc_chan >= MAX_ADC_CHAN || adc[adc_chan].val == NULL) {
@@ -237,40 +232,30 @@ int32_t dataq_get_adc(int32_t adc_chan,
     }
 
     // calculate rms 
-    if (rms) {
-        *rms = sqrt((double)x->sum_squares / max_val) * SCALE;
-    }
+    adc_value->rms = sqrtf((float)x->sum_squares / max_val) * SCALE;
 
     // calculate mean voltage
-    if (mean) {
-        *mean = (double)x->sum / max_val * SCALE;
-    }
+    adc_value->mean = (float)x->sum / max_val * SCALE;
 
+#if 0
     // calculate standad deviation voltage
-    if (sdev) {
-        double u = (double)x->sum / max_val;
-        *sdev = sqrt(((double)x->sum_squares / max_val) - (u * u)) * SCALE;
-    }
+    float u = (float)x->sum / max_val;
+    adc_val->sdev = sqrtf(((float)x->sum_squares / max_val) - (u * u)) * SCALE;
+#endif
 
     // calculate min and max voltages
-    if (min || max) {
-        int32_t minv = +10000;
-        int32_t maxv = -10000;
-        for (i = 0; i < max_val; i++) {
-            if (x->val[i] < minv) {
-                minv = x->val[i];
-            }
-            if (x->val[i] > maxv) {
-                maxv = x->val[i];
-            }
+    int32_t minv = +10000;
+    int32_t maxv = -10000;
+    for (i = 0; i < max_val; i++) {
+        if (x->val[i] < minv) {
+            minv = x->val[i];
         }
-        if (min) {
-            *min = (double)minv * SCALE;
-        }
-        if (max) {
-            *max = (double)maxv * SCALE;
+        if (x->val[i] > maxv) {
+            maxv = x->val[i];
         }
     }
+    adc_value->min = (float)minv * SCALE;
+    adc_value->max = (float)maxv * SCALE;
 
     // return success
     return 0;
@@ -416,7 +401,7 @@ static void * dataq_recv_data_thread(void * cx)
                     new_val |= 0xfffff000;
                 }
 
-                dataq_process_adc_value(slist_idx, new_val);
+                dataq_process_adc_raw(slist_idx, new_val);
 
                 p += 2;
             }
@@ -434,7 +419,7 @@ static void * dataq_recv_data_thread(void * cx)
     return NULL;
 }
 
-static void dataq_process_adc_value(int32_t slist_idx, int32_t new_val)
+static void dataq_process_adc_raw(int32_t slist_idx, int32_t new_val)
 {
     int32_t old_val;
     int32_t adc_chan = slist_idx_to_adc_chan[slist_idx];
@@ -500,7 +485,7 @@ static void * dataq_monitor_thread(void * cx)
 #ifdef ENABLE_TEST_THREAD
 static void * dataq_test_thread(void * cx)
 {
-    double rms, mean, sdev, min, max;
+    adc_value_t adc_value;
     int32_t ret, adc_chan, i;
 
     // give the recdata_thread 1 second to acquire data
@@ -514,14 +499,18 @@ static void * dataq_test_thread(void * cx)
             return NULL;
         }
 
-        printf("CHAN      RMS     MEAN     SDEV     MIN       MAX\n");
+        printf("CHAN      RMS     MEAN      MIN       MAX\n");
         for (i = 0; i < max_slist_idx; i++) {
             adc_chan = slist_idx_to_adc_chan[i];
         
-            ret = dataq_get_adc(adc_chan, &rms, &mean, &sdev, &min, &max);
+            ret = dataq_get_adc(adc_chan, &adc_value);
             if (ret == 0) {
-                printf("%4d %8.3f %8.3f %8.3f %8.3f %8.3f\n",
-                        adc_chan, rms, mean, sdev, min, max);
+                printf("%4d %8.3f %8.3f %8.3f %8.3f\n",
+                        adc_chan, 
+                        VOLTS(adc_value.rms),
+                        VOLTS(adc_value.mean),
+                        VOLTS(adc_value.min),
+                        VOLTS(adc_value.max));
             } else {
                 printf("%4d\n", adc_chan);
             }

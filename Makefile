@@ -1,7 +1,7 @@
 TARGETS = fusor
 
 CC = gcc
-CFLAGS = -c -g -O0 -pthread -fsigned-char -Wall \
+CFLAGS = -c -g -O2 -pthread -fsigned-char -Wall \
          $(shell sdl2-config --cflags) 
 
 OBJS = main.o \

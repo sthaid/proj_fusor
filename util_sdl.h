@@ -73,7 +73,6 @@ typedef struct {
 #define WHITE      9
 #define BLACK      10
 
-
 //
 // typedefs
 //
@@ -84,6 +83,10 @@ typedef struct {
     int16_t x, y;
     uint16_t w, h;
 } rect_t;
+
+typedef struct {
+    int32_t x, y;
+} point_t;
 
 //
 // prototypes
@@ -112,15 +115,20 @@ void sdl_event_register(int32_t event_id, int32_t event_type, rect_t * pos);
 sdl_event_t * sdl_poll_event(void);
 
 // render text
+#if 0
 void sdl_render_text_font0(rect_t * pane, int32_t row, int32_t col, char * str, int32_t event);
 void sdl_render_text_font1(rect_t * pane, int32_t row, int32_t col, char * str, int32_t event);
 void sdl_render_text_ex(rect_t * pane, int32_t row, int32_t col, char * str, int32_t event, 
         int32_t field_cols, bool center, int32_t font_id);
+#endif
+void sdl_render_text(rect_t * pane, int32_t row, int32_t col, int32_t font_id, char * str, 
+    int32_t fd_color, int32_t bg_color);
 
 // render rectangle and lines
 void sdl_render_rect(rect_t * pane, rect_t * rect, int32_t line_width, int32_t color);
 void sdl_render_fill_rect(rect_t * pane, rect_t * rect, int32_t color);
-// XXX Lines
+void sdl_render_line(rect_t * pane, int32_t x1, int32_t y1, int32_t x2, int32_t y2, int32_t color);
+void sdl_render_lines(rect_t * pane, point_t * points, int32_t count, int32_t color);
 
 // render using textures
 texture_t sdl_create_yuy2_texture(int32_t w, int32_t h);

@@ -15,10 +15,11 @@
 #include <inttypes.h>
 #include <limits.h>
 
+#include <time.h>
+#include <fcntl.h>
 #include <sys/types.h>
 #include <sys/stat.h>
-#include <fcntl.h>
-#include <time.h>
+#include <sys/mman.h>
 
 #include "util_sdl.h"
 #include "util_jpeg_decode.h"
@@ -50,6 +51,8 @@
 
 #define MODE_STR(m) ((m) == LIVE_MODE ? "LIVE" : "PLAYBACK")
 
+#define MAGIC 0x1122334455667788
+
 //
 // typedefs
 //
@@ -57,6 +60,7 @@
 enum mode {LIVE_MODE, PLAYBACK_MODE};
 
 typedef struct {
+    uint64_t     magic;
     uint64_t     time_us;
 
     bool         adc_valid;
@@ -66,7 +70,6 @@ typedef struct {
     uint32_t     jpeg_buff_len;
     uint8_t    * jpeg_buff_ptr;
     off_t        jpeg_buff_offset;
-    uint32_t     jpeg_buff_id;    // xxx mayb get rid of this
 } data_t;
 
 //
@@ -78,13 +81,17 @@ bool       no_cam;
 bool       no_dataq;
 
 int32_t    fd;
+void     * fd_mmap_addr;
 
 data_t    * history;
-int32_t     max_history;
-time_t      history_start_time_sec;
-time_t      history_end_time_sec;
+int32_t     max_history;  // XXX is this needed, and verify it is correctly updated
+time_t      history_start_time_sec;  //XXX review
+time_t      history_end_time_sec;  //XXX review
+
+int64_t     cursor_time_sec;  //XXX review
 
 int32_t     adc_chan_list[MAX_ADC_CHAN_LIST] = { ADC_CHAN_VOLTAGE, ADC_CHAN_CURRENT, ADC_CHAN_PRESSURE };
+
 
 //
 // prototypes
@@ -97,8 +104,7 @@ void display_handler();
 void draw_camera_image(data_t * data, rect_t * cam_pane, texture_t cam_texture);
 void draw_adc_values(data_t *data, rect_t * data_pane);
 void draw_graph(rect_t * graph_pane);
-void get_live_data(data_t ** data);
-void get_playback_data(data_t ** data);
+data_t *  get_data(void);
 void free_data(data_t * data);
 
 // -----------------  MAIN  ----------------------------------------------------------
@@ -116,7 +122,8 @@ void initialize(int32_t argc, char ** argv)
 {
     char filename[100];
 
-    printf("XXX sizeof datat %d\n", sizeof(data_t));
+    // XXX check is same size on fedora 64bit
+    printf("XXX sizeof datat %d\n", sizeof(data_t));  // XXX = 96
 
     // parse options
     // -n cam   : no camera, applies only in live mode
@@ -186,8 +193,8 @@ void initialize(int32_t argc, char ** argv)
     //   init history vars
     // else  (playback mode)
     //   open the file containing the recording to be examined
-    //   mmap the file
-    //   init history start, end, and max from file
+    //   mmap the file's history array
+    //   init history vars
     // endif
     if (mode == LIVE_MODE) {
         fd = open(filename, O_WRONLY|O_CREAT|O_TRUNC, 0666);
@@ -200,15 +207,51 @@ void initialize(int32_t argc, char ** argv)
             FATAL("failed to allocate history\n");
         }
 
-        history_start_time_sec = get_real_time_us() / 1000000;
+        history_start_time_sec = get_real_time_us() / 1000000;   // XXX init these onfirst
         history_end_time_sec = history_start_time_sec - 1;
-        max_history = 0;
+        cursor_time_sec = history_end_time_sec;
+        max_history = 0;  // XXX is this used
     } else {
+        char    start_time_str[MAX_TIME_STR];
+        char    end_time_str[MAX_TIME_STR];
+        int32_t i;
+
         fd = open(filename, O_RDONLY);
         if (fd < 0) {
             FATAL("failed to open %s, %s\n", filename, strerror(errno));
         }
-        // XXX
+
+        fd_mmap_addr = mmap(NULL,  // addr
+                            MAX_HISTORY * sizeof(data_t),
+                            PROT_READ, 
+                            MAP_PRIVATE,    
+                            fd, 
+                            0);   // offset
+        if (fd_mmap_addr == MAP_FAILED) {
+            FATAL("mmap failed, %s\n", strerror(errno));
+        }
+        history = fd_mmap_addr;
+
+        for (i = 0; i < MAX_HISTORY; i++) {
+            if (history[i].magic != MAGIC && history[i].magic != 0) {
+                FATAL("file %s contains bad magic, history[%d].magic = 0x%"PRIx64"\n",
+                      filename, i, history[i].magic);
+            }
+            if (history[i].magic == MAGIC) {
+                max_history = i + 1;
+            }
+        }
+        if (max_history == 0) {
+            FATAL("file %s contains no history\n", filename);
+        }
+
+        history_start_time_sec = history[0].time_us / 1000000;
+        history_end_time_sec = history_start_time_sec + max_history - 1;
+        cursor_time_sec = history_start_time_sec;
+
+        time2str(start_time_str, history_start_time_sec*(uint64_t)1000000, false, false);
+        time2str(end_time_str, history_end_time_sec*(uint64_t)1000000, false, false);
+        INFO("history range is %s to %s, max_history=%d\n", start_time_str, end_time_str, max_history);
     }
 }
 
@@ -262,11 +305,7 @@ void display_handler(void)
     // loop until done
     while (!done) {
         // get data to be displayed
-        if (mode == LIVE_MODE) {
-            get_live_data(&data);
-        } else {
-            //XXX get_playback_data(&data);
-        }
+        data = get_data();
 
         // initialize for display update
         sdl_display_init();
@@ -492,11 +531,9 @@ void draw_graph(rect_t * graph_pane)
 
 // -----------------  GET AND FREE DATA  ---------------------------------------------
 
-void get_live_data(data_t ** data_arg)
+data_t *  get_data(void)
 {
-    int32_t  ret, i, chan;
     data_t * data;
-    time_t   t;
 
     // allocate data buffer
     data = calloc(1, sizeof(data_t));
@@ -504,55 +541,130 @@ void get_live_data(data_t ** data_arg)
         FATAL("alloc data failed\n");
     }
 
-    // get current time
-    data->time_us = get_real_time_us();
+    // processing for either LIVE_MODE or PLAYBACK_MODE
+    if (mode == LIVE_MODE) {
+        int32_t   ret, i, chan;
+        data_t    data2;
+        time_t    t;
+        size_t    len;
 
-    // get camera data
-    if (!no_cam) {
-        cam_get_buff(&data->jpeg_buff_ptr, &data->jpeg_buff_len, &data->jpeg_buff_id);
-        data->jpeg_valid = true;
-    }
+        static off_t jpeg_buff_offset = MAX_HISTORY * sizeof(data_t);
 
-    // get adc data from the dataq device
-    if (!no_dataq) {
-        for (i = 0; i < MAX_ADC_CHAN_LIST; i++) {
-            chan = adc_chan_list[i];
-            ret = dataq_get_adc(chan, &data->adc_value[chan]);
-            if (ret != 0) {
-                break;
-            }
+        // LIVE_MODE ...
+
+        // init data magic
+        data->magic = MAGIC;
+
+        // get current time
+        data->time_us = get_real_time_us();
+
+        // get camera data
+        if (!no_cam) {
+            cam_get_buff(&data->jpeg_buff_ptr, &data->jpeg_buff_len);
+            data->jpeg_valid = true;
         }
-        data->adc_valid = (i == MAX_ADC_CHAN_LIST);
-    }
 
-    // if data time is 1 second beyond the end of current saved history then
-    //   store data in history, and
-    //   write to file
-    // endif
-    t = data->time_us / 1000000;
-    if (t > history_end_time_sec) {
-        // determine the index into history buffer, indexed by seconds
-        int32_t idx = t - history_start_time_sec;
-        if (idx < 0 || idx == MAX_HISTORY) {
+        // get adc data from the dataq device
+        if (!no_dataq) {
+            for (i = 0; i < MAX_ADC_CHAN_LIST; i++) {
+                chan = adc_chan_list[i];
+                ret = dataq_get_adc(chan, &data->adc_value[chan]);
+                if (ret != 0) {
+                    break;
+                }
+            }
+            data->adc_valid = (i == MAX_ADC_CHAN_LIST);
+        }
+
+        // if data time is 1 second beyond the end of current saved history then
+        //   store data in history, and
+        //   write to file
+        // endif
+        t = data->time_us / 1000000;
+        if (t > history_end_time_sec) {
+            // determine the index into history buffer, indexed by seconds
+            int32_t idx = t - history_start_time_sec;
+            if (idx < 0 || idx >= MAX_HISTORY) {  // XXX or max_history
+                FATAL("invalid history idx = %d\n", idx);
+            }
+            printf("XXX ADDING HISTORY %d\n", idx);
+
+            // save the data in history  XXX probably update cursor here
+            history_end_time_sec = t;
+            history[idx] = *data;
+
+            // update the graph cursor_time, 
+            // in live mode the graph tracks the most recent data stored in history
+            cursor_time_sec = history_end_time_sec;
+
+            // write to history file
+            data2 = history[idx];
+            if (data2.jpeg_valid) {
+                data2.jpeg_buff_offset = jpeg_buff_offset;
+                data2.jpeg_buff_ptr = NULL;
+                jpeg_buff_offset += data2.jpeg_buff_len;
+
+                len = pwrite(fd, history[idx].jpeg_buff_ptr, data2.jpeg_buff_len, data2.jpeg_buff_offset);
+                printf("write %d\n", len);
+                if (len !=  data2.jpeg_buff_len) {
+                    FATAL("failed write jpeg to file, len=%d, %s\n", len, strerror(errno));
+                }
+            } else {
+                data2.jpeg_buff_offset = 0;
+                data2.jpeg_buff_ptr = NULL;
+            }
+
+            len = pwrite(fd, &data2, sizeof(data2), idx * sizeof(data2));
+            printf("write %d\n", len);
+            if (len != sizeof(data2)) {
+                FATAL("failed write data2 to file, len=%d, %s\n", len, strerror(errno));
+            }
+
+            // XXX wirt to history file, max history
+        }
+    } else {
+        int32_t len, idx;
+
+        // PLAYBACK_MODE ...
+
+        // copy the data from the history array, at cursor_time_sec
+        idx = cursor_time_sec - history_start_time_sec;
+        if (idx < 0 || idx >= MAX_HISTORY) {  // XXX or max_history
             FATAL("invalid history idx = %d\n", idx);
         }
-        printf("XXX ADDING HISTORY %d\n", idx);
+        *data = history[idx];
 
-        // save the data in history  XXX probably update cursor here
-        history_end_time_sec = t;
-        history[idx] = *data;
+        // malloc and read the jpeg
+        if (data->jpeg_valid) {
+            data->jpeg_buff_ptr = malloc(data->jpeg_buff_len);
+            if (data->jpeg_buff_ptr == NULL){
+                FATAL("failed malloc jpeg buff, len=%d\n", data->jpeg_buff_len);
+            }
+            len = pread(fd, data->jpeg_buff_ptr, data->jpeg_buff_len, data->jpeg_buff_offset);
+            if (len != data->jpeg_buff_len) {
+                FATAL("read jpeg buff, len=%d, %s\n", len, strerror(errno));
+            }
+        }
 
-        // XXX write to file  XXX can this be done inline without slowing down too much
+        // clear data->jpeg_buff_offset, this is not used by caller
+        data->jpeg_buff_offset = 0;
     }
 
     // return data
-    *data_arg = data;
+    return data;
 }
 
 void free_data(data_t * data) 
 {
-    if (mode == LIVE_MODE && data->jpeg_valid) {
-        cam_put_buff(data->jpeg_buff_id);
+    if (mode == LIVE_MODE) {
+        if (data->jpeg_valid) {
+            cam_put_buff(data->jpeg_buff_ptr);
+        }
+    } else {
+        if (data->jpeg_valid) {
+            free(data->jpeg_buff_ptr);
+        }
     }
+
     free(data);
 }

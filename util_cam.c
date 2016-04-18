@@ -213,7 +213,7 @@ static void cam_exit_handler(void)
     close(cam_fd);
 }
 
-void cam_get_buff(uint8_t **buff, uint32_t *len, uint32_t * buff_id)
+void cam_get_buff(uint8_t **buff, uint32_t *len)
 {
     int64_t duration = 0;
 
@@ -257,7 +257,7 @@ try_again:
         int32_t i;
         for (i = 0; i < max_buffer_avail-1; i++) {
             WARN("discarding, index=%d\n", buffer_avail[i].index);
-            cam_put_buff(buffer_avail[i].index);
+            cam_put_buff(bufmap[buffer_avail[i].index].addr);
         }
 
         buffer_avail[0] = buffer_avail[max_buffer_avail-1];
@@ -267,16 +267,27 @@ try_again:
     // return the oldest in buffer_avail
     *buff = (uint8_t*)bufmap[buffer_avail[0].index].addr;
     *len =  buffer_avail[0].bytesused;
-    *buff_id = buffer_avail[0].index;
 
     // shift the remaining, slot 0 needs to be the oldest
     max_buffer_avail--;
     memmove(&buffer_avail[0], &buffer_avail[1], max_buffer_avail*sizeof(void*));
 }
 
-void cam_put_buff(uint32_t buff_id)
+void cam_put_buff(uint8_t * buff)   
 {
     struct v4l2_buffer buffer;
+    int32_t i, buff_id;
+
+    // find the buff_id
+    for (i = 0; i < MAX_BUFMAP; i++) {
+        if (bufmap[i].addr == buff) {
+            break;
+        }
+    }
+    if (i == MAX_BUFMAP) {
+        FATAL("invalid buff addr %p\n", buff);
+    }
+    buff_id = i;
 
     // give the buffer back to the driver
     bzero(&buffer,sizeof(struct v4l2_buffer));

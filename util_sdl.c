@@ -694,7 +694,7 @@ void sdl_render_text(rect_t * pane, int32_t row, int32_t col, int32_t font_id, c
         return;
     }
 
-#if 0
+#if 0  // XXX delete the if 0 stuff
     // if row or col are less than zero then adjust 
     if (row < 0) {
         row += sdl_pane_rows(pane,font_id);

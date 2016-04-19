@@ -39,8 +39,6 @@
 #define CAM_WIDTH   960
 #define CAM_HEIGHT  720
 
-#define MAX_ADC_CHAN       8
-#define MAX_ADC_CHAN_LIST  3
 #define ADC_CHAN_VOLTAGE   1
 #define ADC_CHAN_CURRENT   2
 #define ADC_CHAN_PRESSURE  3
@@ -63,8 +61,12 @@ typedef struct {
     uint64_t     magic;
     uint64_t     time_us;
 
-    bool         adc_valid;
-    adc_value_t  adc_value[MAX_ADC_CHAN];
+    bool         data_valid;
+    float        voltage_rms_kv;
+    float        voltage_min_kv;
+    float        voltage_max_kv;
+    float        current_ma;
+    float        pressure_mtorr;
 
     bool         jpeg_valid;
     uint32_t     jpeg_buff_len;
@@ -84,14 +86,9 @@ int32_t    fd;
 void     * fd_mmap_addr;
 
 data_t    * history;
-int32_t     max_history;  // XXX is this needed, and verify it is correctly updated
-time_t      history_start_time_sec;  //XXX review
-time_t      history_end_time_sec;  //XXX review
-
-int64_t     cursor_time_sec;  //XXX review
-
-int32_t     adc_chan_list[MAX_ADC_CHAN_LIST] = { ADC_CHAN_VOLTAGE, ADC_CHAN_CURRENT, ADC_CHAN_PRESSURE };
-
+time_t      history_start_time_sec;  //xxx review
+time_t      history_end_time_sec;    //xxx review
+time_t      cursor_time_sec;         //xxx review
 
 //
 // prototypes
@@ -102,7 +99,7 @@ void usage(void);
 char * bool2str(bool b);
 void display_handler();
 void draw_camera_image(data_t * data, rect_t * cam_pane, texture_t cam_texture);
-void draw_adc_values(data_t *data, rect_t * data_pane);
+void draw_data_values(data_t *data, rect_t * data_pane);
 void draw_graph(rect_t * graph_pane);
 data_t *  get_data(void);
 void free_data(data_t * data);
@@ -180,7 +177,7 @@ void initialize(int32_t argc, char ** argv)
     // endif
     if (mode == LIVE_MODE) {
         if (!no_dataq) {
-            dataq_init(0.5, adc_chan_list, MAX_ADC_CHAN_LIST);
+            dataq_init(0.5, 3, ADC_CHAN_VOLTAGE, ADC_CHAN_CURRENT, ADC_CHAN_PRESSURE);
         }
         if (!no_cam) {
             cam_init(CAM_WIDTH, CAM_HEIGHT);
@@ -207,14 +204,13 @@ void initialize(int32_t argc, char ** argv)
             FATAL("failed to allocate history\n");
         }
 
-        history_start_time_sec = get_real_time_us() / 1000000;   // XXX init these onfirst
+        history_start_time_sec = get_real_time_us() / 1000000; 
         history_end_time_sec = history_start_time_sec - 1;
-        cursor_time_sec = history_end_time_sec;
-        max_history = 0;  // XXX is this used
+        cursor_time_sec = history_end_time_sec;  // XXX realyy -1?
     } else {
         char    start_time_str[MAX_TIME_STR];
         char    end_time_str[MAX_TIME_STR];
-        int32_t i;
+        int32_t i, max_history=0;
 
         fd = open(filename, O_RDONLY);
         if (fd < 0) {
@@ -329,7 +325,7 @@ void display_handler(void)
         // draw the data values,
         // draw the graph
         draw_camera_image(data, &cam_pane, cam_texture);
-        draw_adc_values(data, &data_pane);
+        draw_data_values(data, &data_pane);
         draw_graph(&graph_pane);
 
         // present the display
@@ -389,57 +385,150 @@ void draw_camera_image(data_t * data, rect_t * cam_pane, texture_t cam_texture)
     free(pixel_buff);
 }
 
-void draw_adc_values(data_t *data, rect_t * data_pane)
+void draw_data_values(data_t *data, rect_t * data_pane)
 {
-    float voltage_rms_kv;
-    float voltage_min_kv;
-    float voltage_max_kv;
-    float current_ma;
-    float pressure_mtorr;
-    char  str[100];
+    char str[100];
 
-    if (!data->adc_valid) {
+    if (!data->data_valid) {
         return;
     }
         
-    // convert the adc values to the values to be displayed  XXX tbd
-#if 1
-    // XXX simulation
-    static float sim_voltage_rms_kv;
-    static bool increasing = true;
-    voltage_rms_kv = sim_voltage_rms_kv;
-    if (increasing) {
-        sim_voltage_rms_kv += .1;
-        if (sim_voltage_rms_kv >= 30) {
-            increasing = false;
-        }
-    } else {
-        sim_voltage_rms_kv -= .1;
-        if (sim_voltage_rms_kv <= 0) {
-            increasing = true;
-        }
-    }
-
-    voltage_min_kv = 0;
-    voltage_max_kv = 0;
-    current_ma = 0;
-    pressure_mtorr = 0;
-#endif
-
-    sprintf(str, "%4.1f kV rms", voltage_rms_kv);
+    sprintf(str, "%4.1f kV rms", data->voltage_rms_kv);
     sdl_render_text(data_pane, 0, 0, 1, str, WHITE, BLACK);
-    sprintf(str, "%4.1f kV min", voltage_min_kv);
+    sprintf(str, "%4.1f kV min", data->voltage_min_kv);
     sdl_render_text(data_pane, 1, 0, 1, str, WHITE, BLACK);
-    sprintf(str, "%4.1f kV max", voltage_max_kv);
+    sprintf(str, "%4.1f kV max", data->voltage_max_kv);
     sdl_render_text(data_pane, 2, 0, 1, str, WHITE, BLACK);
-    sprintf(str, "%4.1f mA", current_ma);
+    sprintf(str, "%4.1f mA", data->current_ma);
     sdl_render_text(data_pane, 3, 0, 1, str, WHITE, BLACK);
-    sprintf(str, "%4.1f mTorr", pressure_mtorr);
+    sprintf(str, "%4.1f mTorr", data->pressure_mtorr);
     sdl_render_text(data_pane, 4, 0, 1, str, WHITE, BLACK);
 }
 
 void draw_graph(rect_t * graph_pane)
 {
+    #define MAX_GRAPH_CONFIG (sizeof(graph_config)/sizeof(graph_config[0]))
+    static struct graph_config {
+        char   * name;
+        float    max_value;
+        int32_t  color;
+        off_t    field_offset;
+    } graph_config[] = {
+        { "kV   30", 30.0, RED, offsetof(data_t, voltage_rms_kv) },
+                            };
+
+    time_t  graph_start_time_sec, graph_end_time_sec;
+    int32_t X_origin, X_pixels, X_pixels_per_sec, Y_origin, Y_pixels, T_decrement;
+
+    int32_t i;
+
+    // init
+    X_origin = 10;
+    X_pixels = 1200;
+    X_pixels_per_sec  = X_pixels / 60;  // xxx 60
+    Y_origin = graph_pane->h - FONT0_HEIGHT - 4;
+    Y_pixels = graph_pane->h - FONT0_HEIGHT - 10;
+    T_decrement = 1;
+
+    // determine graph_start_sec and graph_end_sec
+    if (mode == LIVE_MODE) {
+        //graph_end_time_sec = cursor_time_sec;
+        //graph_start_time_sec = graph_end_time_sec - 60 + 1;
+        graph_start_time_sec = history_start_time_sec;
+        graph_end_time_sec = graph_start_time_sec + 60 - 1;
+    } else {
+        FATAL("XXX\n");
+    }
+// XXX limit Y value to range
+// XXX adjust graph start when in live mode
+
+    // fill white
+    rect_t rect;
+    rect.x = 0;
+    rect.y = 0;
+    rect.w = graph_pane->w;
+    rect.h = graph_pane->h;
+    sdl_render_fill_rect(graph_pane, &rect, WHITE);
+
+    // draw the graphs
+    for (i = 0; i < MAX_GRAPH_CONFIG; i++) {
+        struct graph_config * gc;
+        int32_t max_points, X, idx;
+        point_t points[1000];  // XXX why 1000
+        int32_t t;
+        float   Y_scale;
+
+        gc = &graph_config[i];
+        max_points = 0;
+        X = X_origin + X_pixels - 1;
+        Y_scale  = Y_pixels / gc->max_value;
+
+        for (t = graph_end_time_sec; t >= graph_start_time_sec; t -= T_decrement) {
+            idx = t - history_start_time_sec;
+            if ((idx >= 0 && idx < MAX_HISTORY) && history[idx].data_valid) {
+                float value  = *(float*)((void*)&history[idx] + gc->field_offset);
+                points[max_points].x = X;
+                points[max_points].y = Y_origin - value * Y_scale;
+                max_points++;
+            } else {
+                sdl_render_lines(graph_pane, points, max_points, gc->color);
+                max_points = 0;
+            }
+            X -= (X_pixels_per_sec * T_decrement);
+        }
+        sdl_render_lines(graph_pane, points, max_points, gc->color);
+    }
+
+    // draw x axis
+    sdl_render_line(graph_pane, 
+                    X_origin-1, Y_origin+1, 
+                    X_origin+X_pixels, Y_origin+1,
+                    BLACK);
+    sdl_render_line(graph_pane, 
+                    X_origin-2, Y_origin+2, 
+                    X_origin+X_pixels, Y_origin+2,
+                    BLACK);
+    sdl_render_line(graph_pane, 
+                    X_origin-3, Y_origin+3, 
+                    X_origin+X_pixels, Y_origin+3,
+                    BLACK);
+
+    // draw y axis
+    sdl_render_line(graph_pane, 
+                    X_origin-1, Y_origin+1, 
+                    X_origin-1, Y_origin-Y_pixels,
+                    BLACK);
+    sdl_render_line(graph_pane, 
+                    X_origin-2, Y_origin+2, 
+                    X_origin-2, Y_origin-Y_pixels,
+                    BLACK);
+    sdl_render_line(graph_pane, 
+                    X_origin-3, Y_origin+3, 
+                    X_origin-3, Y_origin-Y_pixels,
+                    BLACK);
+
+    // draw cursor
+    int32_t X_cursor = (X_origin + X_pixels - 1) -
+                       (graph_end_time_sec - cursor_time_sec) * X_pixels_per_sec;
+    sdl_render_line(graph_pane, 
+                    X_cursor, Y_origin-20,
+                    X_cursor, Y_origin-Y_pixels+20,
+                    PURPLE);
+    
+    // draw the horizontal scale
+    // XXX make this clickable
+    sdl_render_text(graph_pane, -1, 25, 0, 
+                    // XXX scale_config[scale_config_idx].name, 
+                    "60 SECONDS",
+                    BLACK, WHITE);
+
+    // draw graph names 
+    for (i = 0; i < MAX_GRAPH_CONFIG; i++) {
+        sdl_render_text(graph_pane, i, -10, 0, 
+                        graph_config[i].name, 
+                        graph_config[i].color, WHITE);
+    }
+
 #if 0 // XXX later
     #define MAX_GRAPH_CONFIG (sizeof(graph_config)/sizeof(graph_config[0]))
     static struct graph_config {
@@ -543,13 +632,6 @@ data_t *  get_data(void)
 
     // processing for either LIVE_MODE or PLAYBACK_MODE
     if (mode == LIVE_MODE) {
-        int32_t   ret, i, chan;
-        data_t    data2;
-        time_t    t;
-        size_t    len;
-
-        static off_t jpeg_buff_offset = MAX_HISTORY * sizeof(data_t);
-
         // LIVE_MODE ...
 
         // init data magic
@@ -564,37 +646,49 @@ data_t *  get_data(void)
             data->jpeg_valid = true;
         }
 
-        // get adc data from the dataq device
-        if (!no_dataq) {
-            for (i = 0; i < MAX_ADC_CHAN_LIST; i++) {
-                chan = adc_chan_list[i];
-                ret = dataq_get_adc(chan, &data->adc_value[chan]);
-                if (ret != 0) {
-                    break;
-                }
+        // get adc data from the dataq device, and convert to voltage, current, and pressure
+        if (!no_dataq) do {
+            float rms, mean, min, max;
+            int32_t ret1, ret2, ret3;
+
+            ret1 = dataq_get_adc(ADC_CHAN_VOLTAGE, &rms, NULL, NULL, &min, &max);
+            ret2 = dataq_get_adc(ADC_CHAN_CURRENT, NULL, &mean, NULL, NULL, NULL);
+            ret3 = dataq_get_adc(ADC_CHAN_PRESSURE, NULL, &mean, NULL, NULL, NULL);
+            data->data_valid = (ret1 == 0 && ret2 == 0 && ret3 == 0);
+
+            if (!data->data_valid) {
+                break;
             }
-            data->adc_valid = (i == MAX_ADC_CHAN_LIST);
-        }
+
+            data->voltage_rms_kv = time(NULL) - history_start_time_sec;  // XXX tbd
+
+            data->voltage_min_kv = 10;
+            data->voltage_max_kv = 10;
+            data->current_ma = 10;
+            data->pressure_mtorr = 10;
+        } while (0);
 
         // if data time is 1 second beyond the end of current saved history then
         //   store data in history, and
         //   write to file
         // endif
-        t = data->time_us / 1000000;
+        time_t t = data->time_us / 1000000;
         if (t > history_end_time_sec) {
+            data_t data2;
+            int32_t len;
+            static off_t jpeg_buff_offset = MAX_HISTORY * sizeof(data_t);
+
             // determine the index into history buffer, indexed by seconds
             int32_t idx = t - history_start_time_sec;
-            if (idx < 0 || idx >= MAX_HISTORY) {  // XXX or max_history
+            if (idx < 0 || idx >= MAX_HISTORY) {
                 FATAL("invalid history idx = %d\n", idx);
             }
             printf("XXX ADDING HISTORY %d\n", idx);
 
-            // save the data in history  XXX probably update cursor here
+            // save the data in history, and
+            // update the graph cursor_time
             history_end_time_sec = t;
             history[idx] = *data;
-
-            // update the graph cursor_time, 
-            // in live mode the graph tracks the most recent data stored in history
             cursor_time_sec = history_end_time_sec;
 
             // write to history file
@@ -619,8 +713,6 @@ data_t *  get_data(void)
             if (len != sizeof(data2)) {
                 FATAL("failed write data2 to file, len=%d, %s\n", len, strerror(errno));
             }
-
-            // XXX wirt to history file, max history
         }
     } else {
         int32_t len, idx;
@@ -629,7 +721,7 @@ data_t *  get_data(void)
 
         // copy the data from the history array, at cursor_time_sec
         idx = cursor_time_sec - history_start_time_sec;
-        if (idx < 0 || idx >= MAX_HISTORY) {  // XXX or max_history
+        if (idx < 0 || idx >= MAX_HISTORY) {
             FATAL("invalid history idx = %d\n", idx);
         }
         *data = history[idx];

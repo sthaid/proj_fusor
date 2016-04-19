@@ -28,7 +28,7 @@
 #define STTY_SETTINGS  "4:0:14b2:0:3:1c:7f:15:1:0:1:0:11:13:1a:0:12:f:17:16:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0"
 #define MAX_RESP       100
 #define MAX_ADC_CHAN   9            // channels 1 .. 8
-#define SCALE          (10.0)
+#define SCALE          (10.0/2048)
 
 //
 // typedefs
@@ -70,7 +70,7 @@ static void * dataq_test_thread(void * cx);
 
 // -----------------  DATAQ API ROUTINES  -----------------------------------------------
 
-void dataq_init(float averaging_duration_sec, int32_t * adc_chan_list, int32_t max_adc_chan_list)
+void dataq_init(float averaging_duration_sec, int32_t max_adc_chan, ...)
 {
     char      cmd_str[100];
     char      resp[MAX_RESP];
@@ -79,12 +79,15 @@ void dataq_init(float averaging_duration_sec, int32_t * adc_chan_list, int32_t m
     char    * p;
     char      stop_buff[10000];
     pthread_t thread_id;
+    va_list   ap;
 
     // scan valist for adc channel numbers
-    max_slist_idx = max_adc_chan_list;
+    max_slist_idx = max_adc_chan;
+    va_start(ap, max_adc_chan);
     for (i = 0; i < max_slist_idx; i++) {
-        slist_idx_to_adc_chan[i] = adc_chan_list[i];
+        slist_idx_to_adc_chan[i] = va_arg(ap, int32_t);
     }
+    va_end(ap);
 
     // validate adc channel numbers
     for (i = 0; i < max_slist_idx; i++) {
@@ -209,14 +212,10 @@ void dataq_init(float averaging_duration_sec, int32_t * adc_chan_list, int32_t m
     sleep(1);
 }
 
-// XXX need to time this, perhaps additonal flags for what decode is needed
-int32_t dataq_get_adc(int32_t adc_chan, adc_value_t * adc_value)
+int32_t dataq_get_adc(int32_t adc_chan, float * rms, float * mean, float * sdev, float * min, float * max)
 {
     int32_t i;
     adc_t * x;
-
-    // preset returns to 0
-    bzero(adc_value, sizeof(adc_value_t));
 
     // validate adc_chan
     if (adc_chan < 1 || adc_chan >= MAX_ADC_CHAN || adc[adc_chan].val == NULL) {
@@ -232,30 +231,40 @@ int32_t dataq_get_adc(int32_t adc_chan, adc_value_t * adc_value)
     }
 
     // calculate rms 
-    adc_value->rms = sqrtf((float)x->sum_squares / max_val) * SCALE;
+    if (rms) {
+        *rms = sqrtf((float)x->sum_squares / max_val) * SCALE;
+    }
 
     // calculate mean voltage
-    adc_value->mean = (float)x->sum / max_val * SCALE;
+    if (mean) {
+        *mean = (float)x->sum / max_val * SCALE;
+    }
 
-#if 0
     // calculate standad deviation voltage
-    float u = (float)x->sum / max_val;
-    adc_val->sdev = sqrtf(((float)x->sum_squares / max_val) - (u * u)) * SCALE;
-#endif
+    if (sdev) {
+        float u = (float)x->sum / max_val;
+        *sdev = sqrtf(((float)x->sum_squares / max_val) - (u * u)) * SCALE;
+    }
 
     // calculate min and max voltages
-    int32_t minv = +10000;
-    int32_t maxv = -10000;
-    for (i = 0; i < max_val; i++) {
-        if (x->val[i] < minv) {
-            minv = x->val[i];
+    if (min || max) {
+        int32_t minv = +10000;
+        int32_t maxv = -10000;
+        for (i = 0; i < max_val; i++) {
+            if (x->val[i] < minv) {
+                minv = x->val[i];
+            }
+            if (x->val[i] > maxv) {
+                maxv = x->val[i];
+            }
         }
-        if (x->val[i] > maxv) {
-            maxv = x->val[i];
+        if (min) {
+            *min = (float)minv * SCALE;
+        }
+        if (max) {
+            *max = (float)maxv * SCALE;
         }
     }
-    adc_value->min = (float)minv * SCALE;
-    adc_value->max = (float)maxv * SCALE;
 
     // return success
     return 0;

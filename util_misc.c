@@ -37,7 +37,7 @@ void logmsg(char *lvl, const char *func, char *fmt, ...)
 
     // log to stderr
     fprintf(stderr, "%s %s %s: %s\n",
-            time2str(time_str, get_real_time_us(), false, true),
+            time2str(time_str, get_real_time_us(), false, true, true),
             lvl, func, msg);
 }
 
@@ -59,11 +59,12 @@ uint64_t get_real_time_us(void)
     return ((uint64_t)ts.tv_sec * 1000000) + ((uint64_t)ts.tv_nsec / 1000);
 }
 
-char * time2str(char * str, int64_t us, bool gmt, bool display_ms) 
+char * time2str(char * str, int64_t us, bool gmt, bool display_ms, bool display_date) 
 {
     struct tm tm;
     time_t secs;
     int32_t cnt;
+    char * s = str;
 
     secs = us / 1000000;
 
@@ -73,17 +74,23 @@ char * time2str(char * str, int64_t us, bool gmt, bool display_ms)
         localtime_r(&secs, &tm);
     }
 
-    cnt = sprintf(str, 
-                  "%2.2d/%2.2d/%2.2d %2.2d:%2.2d:%2.2d",
-                  tm.tm_mon+1, tm.tm_mday, tm.tm_year%100,
-                  tm.tm_hour, tm.tm_min, tm.tm_sec);
+    if (display_date) {
+        cnt = sprintf(s, "%2.2d/%2.2d/%2.2d ",
+                         tm.tm_mon+1, tm.tm_mday, tm.tm_year%100);
+        s += cnt;
+    }
+
+    cnt = sprintf(s, "%2.2d:%2.2d:%2.2d",
+                     tm.tm_hour, tm.tm_min, tm.tm_sec);
+    s += cnt;
 
     if (display_ms) {
-        cnt += sprintf(str+cnt, ".%3.3"PRId64, (us % 1000000) / 1000);
+        cnt = sprintf(s, ".%3.3"PRId64, (us % 1000000) / 1000);
+        s += cnt;
     }
 
     if (gmt) {
-        strcpy(str+cnt, " GMT");
+        strcpy(s, " GMT");
     }
 
     return str;

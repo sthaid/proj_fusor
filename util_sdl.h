@@ -18,7 +18,7 @@
 #define SDL_EVENT_KEY_END         131
 #define SDL_EVENT_KEY_PGUP        132
 #define SDL_EVENT_KEY_PGDN        133
-// - window
+// - window  XXX do we need these
 #define SDL_EVENT_WIN_SIZE_CHANGE 140
 #define SDL_EVENT_WIN_MINIMIZED   141
 #define SDL_EVENT_WIN_RESTORED    142
@@ -115,14 +115,10 @@ void sdl_event_register(int32_t event_id, int32_t event_type, rect_t * pos);
 sdl_event_t * sdl_poll_event(void);
 
 // render text
-#if 0
-void sdl_render_text_font0(rect_t * pane, int32_t row, int32_t col, char * str, int32_t event);
-void sdl_render_text_font1(rect_t * pane, int32_t row, int32_t col, char * str, int32_t event);
-void sdl_render_text_ex(rect_t * pane, int32_t row, int32_t col, char * str, int32_t event, 
-        int32_t field_cols, bool center, int32_t font_id);
-#endif
 void sdl_render_text(rect_t * pane, int32_t row, int32_t col, int32_t font_id, char * str, 
     int32_t fd_color, int32_t bg_color);
+void sdl_render_text_with_event(rect_t * pane, int32_t row, int32_t col, int32_t font_id, char * str, 
+    int32_t fd_color, int32_t bg_color, int32_t event_id);
 
 // render rectangle and lines
 void sdl_render_rect(rect_t * pane, rect_t * rect, int32_t line_width, int32_t color);

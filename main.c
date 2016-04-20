@@ -1,3 +1,7 @@
+// 04/19/16 08:14:48.530 ERROR jpeg_decode_output_message_override: Premature end of JPEG file
+// 04/19/16 08:14:48.592 ERROR jpeg_decode_output_message_override: Premature end of JPEG file
+// 04/19/16 08:14:48.621 FATAL cam_put_buff: ioctl VIDIOC_QBUF index=9 Invalid argument
+
 // XXX retest the predefined displays
 // XXX make static vars and procs
 // XXX is data_t this same size on fedora and rpi
@@ -46,10 +50,15 @@
 #define MAX_HISTORY  100000
 
 #define FONT0_HEIGHT (sdl_font_char_height(0))
+#define FONT0_WIDTH  (sdl_font_char_width(0))
 
 #define MODE_STR(m) ((m) == LIVE_MODE ? "LIVE" : "PLAYBACK")
 
 #define MAGIC 0x1122334455667788
+
+#define SDL_EVENT_EXIT          (SDL_EVENT_USER_START + 0)
+#define SDL_EVENT_GRAPH_PLUS    (SDL_EVENT_USER_START + 1)
+#define SDL_EVENT_GRAPH_MINUS   (SDL_EVENT_USER_START + 2)
 
 //
 // typedefs
@@ -245,8 +254,8 @@ void initialize(int32_t argc, char ** argv)
         history_end_time_sec = history_start_time_sec + max_history - 1;
         cursor_time_sec = history_start_time_sec;
 
-        time2str(start_time_str, history_start_time_sec*(uint64_t)1000000, false, false);
-        time2str(end_time_str, history_end_time_sec*(uint64_t)1000000, false, false);
+        time2str(start_time_str, history_start_time_sec*(uint64_t)1000000, false, false, true);
+        time2str(end_time_str, history_end_time_sec*(uint64_t)1000000, false, false, true);
         INFO("history range is %s to %s, max_history=%d\n", start_time_str, end_time_str, max_history);
     }
 }
@@ -328,20 +337,26 @@ void display_handler(void)
         draw_data_values(data, &data_pane);
         draw_graph(&graph_pane);
 
+        // register for events
+        sdl_render_text_with_event(&title_pane, 
+                                   0, -1,
+                                   0, "X", WHITE, BLACK, SDL_EVENT_EXIT);
+        sdl_event_register('x', SDL_EVENT_TYPE_KEY, NULL);
+
         // present the display
         sdl_display_present();
-
-        // register for key press events
-        sdl_event_register('q', SDL_EVENT_TYPE_KEY, NULL);
-        sdl_event_register('Q', SDL_EVENT_TYPE_KEY, NULL);
 
         // process events
         event = sdl_poll_event();
         switch (event->event) {
-        case 'q':
-        case 'Q':
-        case SDL_EVENT_QUIT:
+        case SDL_EVENT_QUIT: case SDL_EVENT_EXIT: case 'x': 
             done = true;
+            break;
+        case SDL_EVENT_GRAPH_PLUS: case '+':
+            printf("XXX graph plus\n");
+            break;
+        case SDL_EVENT_GRAPH_MINUS: case '-':
+            printf("XXX graph minus\n");
             break;
         default:
             break;
@@ -414,33 +429,36 @@ void draw_graph(rect_t * graph_pane)
         int32_t  color;
         off_t    field_offset;
     } graph_config[] = {
-        { "kV   30", 30.0, RED, offsetof(data_t, voltage_rms_kv) },
+        { "kV : 30 MAX", 30.0, RED, offsetof(data_t, voltage_rms_kv) },
                             };
 
     time_t  graph_start_time_sec, graph_end_time_sec;
-    int32_t X_origin, X_pixels, X_pixels_per_sec, Y_origin, Y_pixels, T_decrement;
-
+    int32_t X_origin, X_pixels, Y_origin, Y_pixels, T_delta, T_span;
+    float   X_pixels_per_sec;
     int32_t i;
 
     // init
+    T_delta = 1;  // xxx
+    T_span = 60;   // xxx
     X_origin = 10;
     X_pixels = 1200;
-    X_pixels_per_sec  = X_pixels / 60;  // xxx 60
+    X_pixels_per_sec = (float)X_pixels / T_span;
     Y_origin = graph_pane->h - FONT0_HEIGHT - 4;
     Y_pixels = graph_pane->h - FONT0_HEIGHT - 10;
-    T_decrement = 1;
 
     // determine graph_start_sec and graph_end_sec
     if (mode == LIVE_MODE) {
-        //graph_end_time_sec = cursor_time_sec;
-        //graph_start_time_sec = graph_end_time_sec - 60 + 1;
         graph_start_time_sec = history_start_time_sec;
-        graph_end_time_sec = graph_start_time_sec + 60 - 1;
+        graph_end_time_sec = graph_start_time_sec + (T_span - 1);
+        if (cursor_time_sec > graph_end_time_sec) {
+            graph_end_time_sec = cursor_time_sec;
+            graph_start_time_sec = graph_end_time_sec - (T_span - 1);
+        }
     } else {
-        FATAL("XXX\n");
+        // XXX tbd
+        graph_start_time_sec = history_start_time_sec;
+        graph_end_time_sec = graph_start_time_sec + T_span - 1;
     }
-// XXX limit Y value to range
-// XXX adjust graph start when in live mode
 
     // fill white
     rect_t rect;
@@ -453,28 +471,38 @@ void draw_graph(rect_t * graph_pane)
     // draw the graphs
     for (i = 0; i < MAX_GRAPH_CONFIG; i++) {
         struct graph_config * gc;
-        int32_t max_points, X, idx;
-        point_t points[1000];  // XXX why 1000
-        int32_t t;
-        float   Y_scale;
+        int32_t max_points, idx;
+        point_t points[1000];
+        time_t  t;
+        float   X, X_delta, Y_scale;
 
         gc = &graph_config[i];
-        max_points = 0;
         X = X_origin + X_pixels - 1;
+        X_delta = X_pixels_per_sec * T_delta;
         Y_scale  = Y_pixels / gc->max_value;
+        max_points = 0;
 
-        for (t = graph_end_time_sec; t >= graph_start_time_sec; t -= T_decrement) {
+        for (t = graph_end_time_sec; t >= graph_start_time_sec; t -= T_delta) {
             idx = t - history_start_time_sec;
             if ((idx >= 0 && idx < MAX_HISTORY) && history[idx].data_valid) {
                 float value  = *(float*)((void*)&history[idx] + gc->field_offset);
+                if (value < 0) {
+                    value = 0;
+                } else if (value > gc->max_value) {
+                    value = gc->max_value;
+                }
+                if (max_points >= (sizeof(points)/sizeof(points[0]))) {
+                    FATAL("max_points=%d is too big\n", max_points);
+                }
                 points[max_points].x = X;
                 points[max_points].y = Y_origin - value * Y_scale;
                 max_points++;
+                // XXX if full then reset points
             } else {
                 sdl_render_lines(graph_pane, points, max_points, gc->color);
                 max_points = 0;
             }
-            X -= (X_pixels_per_sec * T_decrement);
+            X -= X_delta;
         }
         sdl_render_lines(graph_pane, points, max_points, gc->color);
     }
@@ -511,116 +539,51 @@ void draw_graph(rect_t * graph_pane)
     int32_t X_cursor = (X_origin + X_pixels - 1) -
                        (graph_end_time_sec - cursor_time_sec) * X_pixels_per_sec;
     sdl_render_line(graph_pane, 
-                    X_cursor, Y_origin-20,
-                    X_cursor, Y_origin-Y_pixels+20,
+                    X_cursor, Y_origin,
+                    X_cursor, Y_origin-Y_pixels,
                     PURPLE);
     
-    // draw the horizontal scale
-    // XXX make this clickable
-    sdl_render_text(graph_pane, -1, 25, 0, 
-                    // XXX scale_config[scale_config_idx].name, 
-                    "60 SECONDS",
-                    BLACK, WHITE);
+    // draw cursor time
+    int32_t str_col;
+    char    str[100];
+    time2str(str, (uint64_t)cursor_time_sec*1000000, false, false, false);
+    str_col = X_cursor/FONT0_WIDTH - 4;
+    if (str_col < 0) {
+        str_col = 0;
+    }
+    sdl_render_text(graph_pane, 
+                    -1, str_col,
+                    0, str, PURPLE, WHITE);
+
+    // draw x axis span time
+    sprintf(str, "%d MIN", T_span/60);    // XXX comment multiple of 60
+    str_col = (X_pixels + X_origin) / FONT0_WIDTH + 9;
+    sdl_render_text(graph_pane, 
+                    -1, str_col,
+                    0, str, BLACK, WHITE);
+
+    // draw x axis span time controls
+    sdl_render_text_with_event(graph_pane, 
+                               -1, str_col + 8,
+                               0, "+", BLACK, WHITE, SDL_EVENT_GRAPH_PLUS);
+    sdl_event_register('+', SDL_EVENT_TYPE_KEY, NULL);
+
+    sdl_render_text_with_event(graph_pane, 
+                               -1, str_col + 11,
+                               0, "-", BLACK, WHITE, SDL_EVENT_GRAPH_MINUS);
+    sdl_event_register('-', SDL_EVENT_TYPE_KEY, NULL);
 
     // draw graph names 
     for (i = 0; i < MAX_GRAPH_CONFIG; i++) {
-        sdl_render_text(graph_pane, i, -10, 0, 
-                        graph_config[i].name, 
-                        graph_config[i].color, WHITE);
+        sdl_render_text(graph_pane, 
+                        i, str_col,
+                        0, graph_config[i].name, graph_config[i].color, WHITE);
     }
-
-#if 0 // XXX later
-    #define MAX_GRAPH_CONFIG (sizeof(graph_config)/sizeof(graph_config[0]))
-    static struct graph_config {
-        char   * name;
-        float    scale;
-        int32_t  color;
-        off_t    offset;
-    } graph_config[] = {
-        { "kV   30", 30.0, RED, offsetof(history_t, voltage_rms_kv) },
-                            };
-
-    #define MAX_SCALE_CONFIG (sizeof(scale_config)/sizeof(scale_config[0])
-    static struct scale_config {
-        char  * name;
-        int32_t secs;
-    } scale_config[] = {
-        { "<---  1 MINUTE  --->", 60 }
-                            };
-    static int32_t scale_config_idx;
-
-    rect_t  rect;
-    int32_t x_start, x_end, y_start, y_end;
-    int32_t i, j, count;
-    struct graph_config * gc;
-    point_t points[1000];
-
-    // init
-    x_start = 20;
-    x_end   = graph_pane->w - sdl_font_char_width(0)*10;
-    y_start = graph_pane->h - (sdl_font_char_height(0) + 1);
-    y_end   = 20;
-
-    // fill white
-    rect.x = 0;
-    rect.y = 0;
-    rect.w = graph_pane->w;
-    rect.h = graph_pane->h;
-    sdl_render_fill_rect(graph_pane, &rect, WHITE);
-
-    // draw the axis
-    sdl_render_line(graph_pane, x_start, y_start, x_end, y_start, BLACK);
-    //sdl_render_line(graph_pane, x_start, y_start-1, x_end, y_start-1, BLACK);
-
-    sdl_render_line(graph_pane, x_start, y_start, x_start, y_end, BLACK);
-    //sdl_render_line(graph_pane, x_start+1, y_start, x_start+1, y_end, BLACK);
-
-    // draw names and scales
-    for (i = 0; i < MAX_GRAPH_CONFIG; i++) {
-        sdl_render_text(graph_pane, i, -10, 0, 
-                        graph_config[i].name, 
-                        graph_config[i].color, WHITE);
-    }
-
-    // draw the horizontal scale
-    // XXX make this clickable
-    sdl_render_text(graph_pane, -1, 25, 0, 
-                    scale_config[scale_config_idx].name, 
-                    BLACK, WHITE);
-
-    // draw the graphs
-    // XXX optimize
-    // XXX draw cursor
-    // XXX graph back from the cursor
-    for (i = 0; i < MAX_GRAPH_CONFIG; i++) {
-        gc = &graph_config[i];
-        count = 0;
-        for (j = history_start_time; j <= history_end_time; j++) {
-            history_t * h = &history[j-history_start_time];
-            if (h->valid) {
-                //printf("VALID is TRUE\n");
-                float  val  = *(float*)((void*)h+gc->offset);
-                float  secs = j - history_start_time;
-                points[count].x = x_start+1 + (x_end - x_start) * secs / 60;
-                points[count].y = y_start-1 + (y_end - y_start) * val / 30;
-                count++;
-            } else {
-                //printf("VALID is FALSE\n");
-                sdl_render_lines(graph_pane, points, count, gc->color);
-                count = 0;
-            }
-        }
-        if (count) {
-            sdl_render_lines(graph_pane, points, count, gc->color);
-            count = 0;
-        }
-    }
-#endif
 }
 
 // -----------------  GET AND FREE DATA  ---------------------------------------------
 
-data_t *  get_data(void)
+data_t * get_data(void)
 {
     data_t * data;
 
@@ -660,7 +623,7 @@ data_t *  get_data(void)
                 break;
             }
 
-            data->voltage_rms_kv = time(NULL) - history_start_time_sec;  // XXX tbd
+            data->voltage_rms_kv = (float)(time(NULL) - history_start_time_sec) / 10;  // XXX tbd
 
             data->voltage_min_kv = 10;
             data->voltage_max_kv = 10;

@@ -36,6 +36,7 @@
 
 typedef struct {
     TTF_Font * font;
+    TTF_Font * font_underline;
     int32_t    char_width;
     int32_t    char_height;
 } sdl_font_t;
@@ -132,7 +133,12 @@ void sdl_init(uint32_t w, uint32_t h)
     if (sdl_font[0].font == NULL) {
         FATAL("failed TTF_OpenFont %s\n", font0_path);
     }
+    sdl_font[0].font_underline = TTF_OpenFont(font0_path, font0_ptsize);
+    if (sdl_font[0].font == NULL) {
+        FATAL("failed TTF_OpenFont %s\n", font0_path);
+    }
     TTF_SizeText(sdl_font[0].font, "X", &sdl_font[0].char_width, &sdl_font[0].char_height);
+    TTF_SetFontStyle(sdl_font[0].font_underline, TTF_STYLE_UNDERLINE|TTF_STYLE_BOLD);
     INFO("font0 psize=%d width=%d height=%d\n", 
          font0_ptsize, sdl_font[0].char_width, sdl_font[0].char_height);
 
@@ -140,7 +146,12 @@ void sdl_init(uint32_t w, uint32_t h)
     if (sdl_font[1].font == NULL) {
         FATAL("failed TTF_OpenFont %s\n", font1_path);
     }
+    sdl_font[1].font_underline = TTF_OpenFont(font1_path, font1_ptsize);
+    if (sdl_font[1].font == NULL) {
+        FATAL("failed TTF_OpenFont %s\n", font1_path);
+    }
     TTF_SizeText(sdl_font[1].font, "X", &sdl_font[1].char_width, &sdl_font[1].char_height);
+    TTF_SetFontStyle(sdl_font[1].font_underline, TTF_STYLE_UNDERLINE|TTF_STYLE_BOLD);
     INFO("font1 psize=%d width=%d height=%d\n", 
          font1_ptsize, sdl_font[1].char_width, sdl_font[1].char_height);
 
@@ -657,33 +668,29 @@ done:
 
 // -----------------  RENDER TEXT  -------------------------------------- 
 
-void sdl_render_text(rect_t * pane, int32_t row, int32_t col, int32_t font_id, char * str, int32_t fg_color_arg, int32_t bg_color_arg)
+void sdl_render_text(rect_t * pane, int32_t row, int32_t col, int32_t font_id, char * str, 
+        int32_t fg_color, int32_t bg_color)
+{
+    sdl_render_text_with_event(pane, row, col, font_id, str, fg_color, bg_color, SDL_EVENT_NONE);
+}
+
+void sdl_render_text_with_event(rect_t * pane, int32_t row, int32_t col, int32_t font_id, char * str, 
+        int32_t fg_color, int32_t bg_color, int32_t event_id)
 {
     SDL_Surface    * surface = NULL;
     SDL_Texture    * texture = NULL;
     SDL_Rect         pos;
     SDL_Color        fg_sdl_color, bg_sdl_color;
     uint32_t         fg_rgba, bg_rgba;
-#if 0
-    SDL_Surface    * surface = NULL;
-    SDL_Texture    * texture = NULL;
-    SDL_Color        fg_color;
-    SDL_Rect         pos;
-    char             s[500];
-    int32_t          slen;
 
-    static SDL_Color fg_color_normal = {255,255,255,255}; 
-    static SDL_Color fg_color_event  = {0,255,255,255}; 
-    static SDL_Color bg_color        = {0,0,0,255}; 
-#endif
     // init 
-    fg_rgba = sdl_color_to_rgba[fg_color_arg];
+    fg_rgba = sdl_color_to_rgba[fg_color];
     fg_sdl_color.r = (fg_rgba >> 24) & 0xff;
     fg_sdl_color.g = (fg_rgba >> 16) & 0xff;
     fg_sdl_color.b = (fg_rgba >>  8) & 0xff;
     fg_sdl_color.a = (fg_rgba >>  0) & 0xff;
 
-    bg_rgba = sdl_color_to_rgba[bg_color_arg];
+    bg_rgba = sdl_color_to_rgba[bg_color];
     bg_sdl_color.r = (bg_rgba >> 24) & 0xff;
     bg_sdl_color.g = (bg_rgba >> 16) & 0xff;
     bg_sdl_color.b = (bg_rgba >>  8) & 0xff;
@@ -694,26 +701,15 @@ void sdl_render_text(rect_t * pane, int32_t row, int32_t col, int32_t font_id, c
         return;
     }
 
-#if 0  // XXX delete the if 0 stuff
-    // if row or col are less than zero then adjust 
-    if (row < 0) {
-        row += sdl_pane_rows(pane,font_id);
-    }
-    if (col < 0) {
-        col += sdl_pane_cols(pane,font_id);
-    }
-
-    // if field_cols is zero then set to huge value (unlimiitted)
-    if (field_cols == 0) {
-        field_cols = 999;
-    }
-#endif
-
     // render the text to a surface
-    surface = TTF_RenderText_Shaded(sdl_font[font_id].font, str, fg_sdl_color, bg_sdl_color);
+    if (event_id == SDL_EVENT_NONE) {
+        surface = TTF_RenderText_Shaded(sdl_font[font_id].font, str, fg_sdl_color, bg_sdl_color);
+    } else {
+        surface = TTF_RenderText_Shaded(sdl_font[font_id].font_underline, str, fg_sdl_color, bg_sdl_color);
+    }
     if (surface == NULL) { 
         FATAL("TTF_RenderText_Shaded returned NULL\n");
-    } 
+    }
 
     // determine the display location
     pos.x = pane->x + col * sdl_font[font_id].char_width;
@@ -741,122 +737,19 @@ void sdl_render_text(rect_t * pane, int32_t row, int32_t col, int32_t font_id, c
         SDL_DestroyTexture(texture); 
         texture = NULL;
     }
-}
-
-#if 0
-void sdl_render_text_font0(rect_t * pane, int32_t row, int32_t col, char * str, int32_t event)
-{
-    sdl_render_text_ex(pane, row, col, str, event, sdl_pane_cols(pane,0)-col, false, 0);
-}
-
-void sdl_render_text_font1(rect_t * pane, int32_t row, int32_t col, char * str, int32_t event)
-{
-    sdl_render_text_ex(pane, row, col, str, event, sdl_pane_cols(pane,1)-col, false, 1);
-}
-
-void sdl_render_text_ex(rect_t * pane, int32_t row, int32_t col, char * str, int32_t event, 
-        int32_t field_cols, bool center, int32_t font_id)
-{
-    SDL_Surface    * surface = NULL;
-    SDL_Texture    * texture = NULL;
-    SDL_Color        fg_color;
-    SDL_Rect         pos;
-    char             s[500];
-    int32_t          slen;
-
-    static SDL_Color fg_color_normal = {255,255,255,255}; 
-    static SDL_Color fg_color_event  = {0,255,255,255}; 
-    static SDL_Color bg_color        = {0,0,0,255}; 
-
-    // if zero length string then nothing to do
-    if (str[0] == '\0') {
-        return;
-    }
-
-    // if row or col are less than zero then adjust 
-    if (row < 0) {
-        row += sdl_pane_rows(pane,font_id);
-    }
-    if (col < 0) {
-        col += sdl_pane_cols(pane,font_id);
-    }
-
-    // if field_cols is zero then set to huge value (unlimiitted)
-    if (field_cols == 0) {
-        field_cols = 999;
-    }
-
-    // verify row, col, and field_cols
-    if (row < 0 || row >= sdl_pane_rows(pane,font_id) || 
-        col < 0 || col >= sdl_pane_cols(pane,font_id) ||
-        field_cols <= 0) 
-    {
-        return;
-    }
-
-    // reduce field_cols if necessary to stay in pane
-    if (field_cols > sdl_pane_cols(pane,font_id) - col) {
-         field_cols = sdl_pane_cols(pane,font_id) - col;
-    }
-
-    // make a copy of the str arg, and shorten if necessary
-    strcpy(s, str);
-    slen = strlen(s);
-    if (slen > field_cols) {
-        s[field_cols] = '\0';
-        slen = field_cols;
-    }
-
-    // if centered then adjust col
-    if (center) {
-        col += (field_cols - slen) / 2;
-    }
-
-    // render the text to a surface
-    fg_color = (event != SDL_EVENT_NONE ? fg_color_event : fg_color_normal); 
-    surface = TTF_RenderText_Shaded(sdl_font[font_id].font, s, fg_color, bg_color);
-    if (surface == NULL) { 
-        FATAL("TTF_RenderText_Shaded returned NULL\n");
-    } 
-
-    // determine the display location
-    pos.x = pane->x + col * sdl_font[font_id].char_width;
-    pos.y = pane->y + row * sdl_font[font_id].char_height;
-    pos.w = surface->w;
-    pos.h = surface->h;
-
-    // create texture from the surface, and 
-    // render the texture
-    texture = SDL_CreateTextureFromSurface(sdl_renderer, surface); 
-    SDL_RenderCopy(sdl_renderer, texture, NULL, &pos); 
-
-    // clean up
-    if (surface) {
-        SDL_FreeSurface(surface); 
-        surface = NULL;
-    }
-    if (texture) {
-        SDL_DestroyTexture(texture); 
-        texture = NULL;
-    }
 
     // if there is a event then save the location for the event handler
-    if (event != SDL_EVENT_NONE) {
-        pos.x -= sdl_font[font_id].char_width/2;
-        pos.y -= sdl_font[font_id].char_height/2;
-        pos.w += sdl_font[font_id].char_width;
-        pos.h += sdl_font[font_id].char_height;
+    if (event_id != SDL_EVENT_NONE) {
+        rect_t rect;
 
-        rect_t pos2;
-        pos2.x = pos.x;
-        pos2.y = pos.y;
-        pos2.w = pos.w;
-        pos2.h = pos.h;
+        rect.x = pos.x - sdl_font[font_id].char_width/2;
+        rect.y = pos.y - sdl_font[font_id].char_height/2;
+        rect.w = pos.w + sdl_font[font_id].char_width;
+        rect.h = pos.h + sdl_font[font_id].char_height;
 
-        sdl_event_register(event, SDL_EVENT_TYPE_TEXT, &pos2);
+        sdl_event_register(event_id, SDL_EVENT_TYPE_TEXT, &rect);
     }
 }
-#endif
 
 // -----------------  RENDER RECTANGLES & LINES  ------------------------ 
 

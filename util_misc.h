@@ -41,6 +41,6 @@ void logmsg(char * lvl, const char * func, char * fmt, ...) __attribute__ ((form
 
 uint64_t microsec_timer(void);
 uint64_t get_real_time_us(void);
-char * time2str(char * str, int64_t us, bool gmt, bool display_ms);
+char * time2str(char * str, int64_t us, bool gmt, bool display_ms, bool display_date);
 
 #endif

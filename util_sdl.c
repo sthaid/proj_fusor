@@ -494,7 +494,16 @@ sdl_event_t * sdl_poll_event(void)
                 possible_event= SDL_EVENT_KEY_PGUP;
             } else if (key == SDLK_PAGEDOWN) {
                 possible_event = SDL_EVENT_KEY_PGDN;
+            } else if (key == SDLK_UP) {
+                possible_event = SDL_EVENT_KEY_UP_ARROW;
+            } else if (key == SDLK_DOWN) {
+                possible_event = SDL_EVENT_KEY_DOWN_ARROW;
+            } else if (key == SDLK_LEFT) {
+                possible_event = SDL_EVENT_KEY_LEFT_ARROW;
+            } else if (key == SDLK_RIGHT) {
+                possible_event = SDL_EVENT_KEY_RIGHT_ARROW;
             }
+
 
             if (shift) {
                 if (possible_event >= 'a' && possible_event <= 'z') {
@@ -505,6 +514,8 @@ sdl_event_t * sdl_poll_event(void)
                     possible_event = '_';
                 } else if (possible_event == '=') {
                     possible_event = '+';
+                } else if (possible_event == '/') {
+                    possible_event = '?';
                 }
             }
 

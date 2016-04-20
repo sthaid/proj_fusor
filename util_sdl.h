@@ -18,6 +18,10 @@
 #define SDL_EVENT_KEY_END         131
 #define SDL_EVENT_KEY_PGUP        132
 #define SDL_EVENT_KEY_PGDN        133
+#define SDL_EVENT_KEY_UP_ARROW    134
+#define SDL_EVENT_KEY_DOWN_ARROW  135
+#define SDL_EVENT_KEY_LEFT_ARROW  136
+#define SDL_EVENT_KEY_RIGHT_ARROW 137
 // - window  XXX do we need these
 #define SDL_EVENT_WIN_SIZE_CHANGE 140
 #define SDL_EVENT_WIN_MINIMIZED   141

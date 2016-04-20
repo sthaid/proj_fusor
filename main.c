@@ -1,3 +1,7 @@
+// 04/20/16 03:44:48.414 ERROR jpeg_decode_output_message_override: Premature end of JPEG file
+// 04/20/16 03:44:48.466 ERROR jpeg_decode_output_message_override: Premature end of JPEG file
+// 04/20/16 04:54:52.639 FATAL cam_put_buff: ioctl VIDIOC_QBUF index=24 Invalid argument
+
 // 04/19/16 08:14:48.530 ERROR jpeg_decode_output_message_override: Premature end of JPEG file
 // 04/19/16 08:14:48.592 ERROR jpeg_decode_output_message_override: Premature end of JPEG file
 // 04/19/16 08:14:48.621 FATAL cam_put_buff: ioctl VIDIOC_QBUF index=9 Invalid argument
@@ -31,11 +35,12 @@
 #include "util_cam.h"
 #include "util_misc.h"
 
+#define VERSION_STR  "1.0"
+#include "about.h"
+
 //
 // defines
 //
-
-#define VERSION_STR  "1.0"
 
 #define WIN_WIDTH   1920
 #define WIN_HEIGHT  1080
@@ -56,9 +61,9 @@
 
 #define MAGIC 0x1122334455667788
 
-#define SDL_EVENT_EXIT          (SDL_EVENT_USER_START + 0)
-#define SDL_EVENT_GRAPH_PLUS    (SDL_EVENT_USER_START + 1)
-#define SDL_EVENT_GRAPH_MINUS   (SDL_EVENT_USER_START + 2)
+//#define SDL_EVENT_EXIT          (SDL_EVENT_USER_START + 0)
+//#define SDL_EVENT_GRAPH_PLUS    (SDL_EVENT_USER_START + 1)
+//#define SDL_EVENT_GRAPH_MINUS   (SDL_EVENT_USER_START + 2)
 
 //
 // typedefs
@@ -282,7 +287,7 @@ void display_handler(void)
     rect_t        data_pane_full, data_pane;
     rect_t        graph_pane_full, graph_pane;
     texture_t     cam_texture;
-    char          title_str[100];
+    char          str[100];
     struct tm   * tm;
     time_t        t;
 
@@ -324,11 +329,13 @@ void display_handler(void)
         // draw title line
         t = data->time_us / 1000000;
         tm = localtime(&t);
-        sprintf(title_str, "%s MODE - %d/%d/%d %2.2d:%2.2d:%2.2d",
+        sprintf(str, "%s MODE - %d/%d/%d %2.2d:%2.2d:%2.2d",
                 MODE_STR(mode),
                 tm->tm_mon+1, tm->tm_mday, tm->tm_year-100,
                 tm->tm_hour, tm->tm_min, tm->tm_sec);
-        sdl_render_text(&title_pane, 0, 0, 0, title_str, WHITE, BLACK);
+        sdl_render_text(&title_pane, 0, 0, 0, str, WHITE, BLACK);
+        sdl_render_text(&title_pane, 0, -5, 0, "(ESC)", WHITE, BLACK);
+        sdl_render_text(&title_pane, 0, -11, 0, "(?)", WHITE, BLACK);
         
         // draw the camera image,
         // draw the data values,
@@ -338,10 +345,10 @@ void display_handler(void)
         draw_graph(&graph_pane);
 
         // register for events
-        sdl_render_text_with_event(&title_pane, 
-                                   0, -1,
-                                   0, "X", WHITE, BLACK, SDL_EVENT_EXIT);
-        sdl_event_register('x', SDL_EVENT_TYPE_KEY, NULL);
+        sdl_event_register(SDL_EVENT_KEY_ESC, SDL_EVENT_TYPE_KEY, NULL);
+        sdl_event_register('?', SDL_EVENT_TYPE_KEY, NULL);
+        sdl_event_register('+', SDL_EVENT_TYPE_KEY, NULL);
+        sdl_event_register('-', SDL_EVENT_TYPE_KEY, NULL);
 
         // present the display
         sdl_display_present();
@@ -349,13 +356,24 @@ void display_handler(void)
         // process events
         event = sdl_poll_event();
         switch (event->event) {
-        case SDL_EVENT_QUIT: case SDL_EVENT_EXIT: case 'x': 
+        case SDL_EVENT_QUIT: 
+        case SDL_EVENT_KEY_ESC: 
             done = true;
             break;
-        case SDL_EVENT_GRAPH_PLUS: case '+':
+        case '?':  
+            // XXX not gathering data whenin these 
+            // XXX about.h,  text and widht
+/*
+void sdl_display_get_string(int32_t count, ...);
+void sdl_display_choose_from_list(char * title_str, char ** choices, int32_t max_choices, int32_t * selection);
+void sdl_display_error(char * err_str0, char * err_str1, char * err_str2);
+*/
+            sdl_display_text(about);
+            break;
+        case '+':
             printf("XXX graph plus\n");
             break;
-        case SDL_EVENT_GRAPH_MINUS: case '-':
+        case '-':
             printf("XXX graph minus\n");
             break;
         default:
@@ -556,12 +574,13 @@ void draw_graph(rect_t * graph_pane)
                     0, str, PURPLE, WHITE);
 
     // draw x axis span time
-    sprintf(str, "%d MIN", T_span/60);    // XXX comment multiple of 60
+    sprintf(str, "%d MIN (+/-)", T_span/60);    // XXX comment multiple of 60
     str_col = (X_pixels + X_origin) / FONT0_WIDTH + 9;
     sdl_render_text(graph_pane, 
                     -1, str_col,
                     0, str, BLACK, WHITE);
 
+#if 0
     // draw x axis span time controls
     sdl_render_text_with_event(graph_pane, 
                                -1, str_col + 8,
@@ -572,6 +591,7 @@ void draw_graph(rect_t * graph_pane)
                                -1, str_col + 11,
                                0, "-", BLACK, WHITE, SDL_EVENT_GRAPH_MINUS);
     sdl_event_register('-', SDL_EVENT_TYPE_KEY, NULL);
+#endif
 
     // draw graph names 
     for (i = 0; i < MAX_GRAPH_CONFIG; i++) {

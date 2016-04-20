@@ -21,7 +21,6 @@
 #define SDL_EVENT_MOUSE_WHEEL     (SDL_EVENT_USER_START+2)
 #define SDL_EVENT_FIELD_SELECT    (SDL_EVENT_USER_START+3)    // through +9
 #define SDL_EVENT_LIST_CHOICE     (SDL_EVENT_USER_START+10)   // through +49
-#define SDL_EVENT_BACK            (SDL_EVENT_USER_START+50)
 
 void sdl_display_get_string(int32_t count, ...)
 {
@@ -30,7 +29,7 @@ void sdl_display_get_string(int32_t count, ...)
     char        * ret_str[10];
 
     va_list       ap;
-    rect_t        keybdpane; 
+    rect_t        keybdpane_full, keybdpane; 
     char          str[200];
     int32_t       i;
     sdl_event_t * event;
@@ -69,7 +68,7 @@ void sdl_display_get_string(int32_t count, ...)
 
         // init
         sdl_get_state(&win_width, &win_height, NULL);
-        sdl_init_pane(&keybdpane, 0, 0, win_width, win_height);
+        sdl_init_pane(&keybdpane_full, &keybdpane, 0, 0, win_width, win_height);
         sdl_display_init();
 
         // draw keyboard
@@ -96,16 +95,15 @@ void sdl_display_get_string(int32_t count, ...)
                 char s[2];
                 s[0] = row_chars[i][j];
                 s[1] = '\0';
-                sdl_render_text_ex(&keybdpane, r+2*i, c+3*j, s, s[0], 1, false, 1);
+                sdl_render_text_with_event(&keybdpane, r+2*i, c+3*j, 1, s, LIGHT_BLUE, BLACK, s[0]);
             }
         }
-        sdl_render_text_ex(&keybdpane, r+6, c+27,  "SPACE",  ' ',   5, false, 1);
-
-        sdl_render_text_ex(&keybdpane, r+8, c+0,  "SHIFT",   SDL_EVENT_KEY_SHIFT,   5, false, 1);
-        sdl_render_text_ex(&keybdpane, r+8, c+8,  "BS",      SDL_EVENT_KEY_BS,      2, false, 1);
-        sdl_render_text_ex(&keybdpane, r+8, c+13, "TAB",     SDL_EVENT_KEY_TAB,     3, false, 1);
-        sdl_render_text_ex(&keybdpane, r+8, c+19, "ESC",     SDL_EVENT_KEY_ESC,     3, false, 1);
-        sdl_render_text_ex(&keybdpane, r+8, c+25, "ENTER",   SDL_EVENT_KEY_ENTER,   5, false, 1);
+        sdl_render_text_with_event(&keybdpane, r+6, c+27, 1, "SPACE",  LIGHT_BLUE, BLACK, ' ');
+        sdl_render_text_with_event(&keybdpane, r+8, c+0,  1, "SHIFT",  LIGHT_BLUE, BLACK, SDL_EVENT_KEY_SHIFT);
+        sdl_render_text_with_event(&keybdpane, r+8, c+8,  1, "BS",     LIGHT_BLUE, BLACK, SDL_EVENT_KEY_BS);
+        sdl_render_text_with_event(&keybdpane, r+8, c+13, 1, "TAB",    LIGHT_BLUE, BLACK, SDL_EVENT_KEY_TAB);
+        sdl_render_text_with_event(&keybdpane, r+8, c+19, 1, "ESC",    LIGHT_BLUE, BLACK, SDL_EVENT_KEY_ESC);
+        sdl_render_text_with_event(&keybdpane, r+8, c+25, 1, "ENTER",  LIGHT_BLUE, BLACK, SDL_EVENT_KEY_ENTER);
 
         // draw prompts
         for (i = 0; i < count; i++) {
@@ -113,12 +111,13 @@ void sdl_display_get_string(int32_t count, ...)
             if ((i == field_select) && ((microsec_timer() % 1000000) > 500000) ) {
                 strcat(str, "_");
             }
-            sdl_render_text_ex(&keybdpane, 
-                               r + 10 + 2 * (i % 2), 
-                               i / 2 * sdl_pane_cols(&keybdpane,1) / 2, 
-                               str, 
-                               SDL_EVENT_FIELD_SELECT+i,
-                               0, false, 1);
+            sdl_render_text_with_event(&keybdpane, 
+                                       r + 10 + 2 * (i % 2),   // row
+                                       i / 2 * sdl_pane_cols(&keybdpane,1) / 2,   // col
+                                       1,  // font_id
+                                       str, 
+                                       LIGHT_BLUE, BLACK, 
+                                       SDL_EVENT_FIELD_SELECT+i);
         }
 
         // present the display
@@ -163,7 +162,7 @@ void sdl_display_text(char * text)
 {
     rect_t         dstrect;
     texture_t    * texture = NULL;
-    rect_t         disp_pane;
+    rect_t         disp_pane_full, disp_pane;
     sdl_event_t  * event;
     char         * p;
     int32_t        i;
@@ -208,7 +207,7 @@ void sdl_display_text(char * text)
 
         // init 
         sdl_get_state(&win_width, &win_height, NULL);
-        sdl_init_pane(&disp_pane, 0, 0, win_width, win_height);
+        sdl_init_pane(&disp_pane_full, &disp_pane, 0, 0, win_width, win_height);
         sdl_display_init();
         lines_per_display = win_height / pixels_per_row;
 
@@ -247,14 +246,23 @@ void sdl_display_text(char * text)
 
         // display controls 
         if (max_texture > lines_per_display) {
-            sdl_render_text_font0(&disp_pane, 0, -5, "HOME", SDL_EVENT_KEY_HOME);
-            sdl_render_text_font0(&disp_pane, 2, -5, "END",  SDL_EVENT_KEY_END);
-            sdl_render_text_font0(&disp_pane, 4, -5, "PGUP", SDL_EVENT_KEY_PGUP);
-            sdl_render_text_font0(&disp_pane, 6, -5, "PGDN", SDL_EVENT_KEY_PGDN);
+            sdl_render_text(&disp_pane, 0, -7, 0, "(HOME)", LIGHT_BLUE, BLACK);
+            sdl_render_text(&disp_pane, 2, -7, 0, "(END)",  LIGHT_BLUE, BLACK);
+            sdl_render_text(&disp_pane, 4, -7, 0, "(PGUP)", LIGHT_BLUE, BLACK);
+            sdl_render_text(&disp_pane, 6, -7, 0, "(PGDN)", LIGHT_BLUE, BLACK);
+            sdl_render_text(&disp_pane, 8, -7, 0, "(UP^)",  LIGHT_BLUE, BLACK);
+            sdl_render_text(&disp_pane,10, -7, 0, "(DNv)",  LIGHT_BLUE, BLACK);
+            sdl_event_register(SDL_EVENT_KEY_HOME, SDL_EVENT_TYPE_KEY, NULL);
+            sdl_event_register(SDL_EVENT_KEY_END, SDL_EVENT_TYPE_KEY, NULL);
+            sdl_event_register(SDL_EVENT_KEY_PGUP, SDL_EVENT_TYPE_KEY, NULL);
+            sdl_event_register(SDL_EVENT_KEY_PGDN, SDL_EVENT_TYPE_KEY, NULL);
+            sdl_event_register(SDL_EVENT_KEY_UP_ARROW, SDL_EVENT_TYPE_KEY, NULL);
+            sdl_event_register(SDL_EVENT_KEY_DOWN_ARROW, SDL_EVENT_TYPE_KEY, NULL);
+            sdl_event_register(SDL_EVENT_MOUSE_MOTION, SDL_EVENT_TYPE_MOUSE_MOTION, &disp_pane);
+            sdl_event_register(SDL_EVENT_MOUSE_WHEEL, SDL_EVENT_TYPE_MOUSE_WHEEL, &disp_pane);
         }
-        sdl_render_text_font0(&disp_pane, -1, -5, "BACK", SDL_EVENT_BACK);
-        sdl_event_register(SDL_EVENT_MOUSE_MOTION, SDL_EVENT_TYPE_MOUSE_MOTION, &disp_pane);
-        sdl_event_register(SDL_EVENT_MOUSE_WHEEL, SDL_EVENT_TYPE_MOUSE_WHEEL, &disp_pane);
+        sdl_render_text(&disp_pane, -1, -7, 0, "(ESC)", LIGHT_BLUE, BLACK);
+        sdl_event_register(SDL_EVENT_KEY_ESC, SDL_EVENT_TYPE_KEY, NULL);
 
         // present the display
         sdl_display_present();
@@ -280,7 +288,13 @@ void sdl_display_text(char * text)
         case SDL_EVENT_KEY_PGDN:
             text_y += (lines_per_display - 2) * pixels_per_row;
             break;
-        case SDL_EVENT_BACK:
+        case SDL_EVENT_KEY_UP_ARROW:
+            text_y -= pixels_per_row;
+            break;
+        case SDL_EVENT_KEY_DOWN_ARROW:
+            text_y += pixels_per_row;
+            break;
+        case SDL_EVENT_KEY_ESC:
         case SDL_EVENT_QUIT: 
             done = true;
         }
@@ -296,7 +310,7 @@ void  sdl_display_choose_from_list(char * title_str, char ** choice, int32_t max
 {
     texture_t      title_texture = NULL;
     texture_t    * texture = NULL;
-    rect_t         disp_pane;
+    rect_t         disp_pane_full, disp_pane;
     sdl_event_t  * event;
     int32_t        i;
     int32_t        lines_per_display;
@@ -328,7 +342,7 @@ void  sdl_display_choose_from_list(char * title_str, char ** choice, int32_t max
 
         // init 
         sdl_get_state(&win_width, &win_height, NULL);
-        sdl_init_pane(&disp_pane, 0, 0, win_width, win_height);
+        sdl_init_pane(&disp_pane_full, &disp_pane, 0, 0, win_width, win_height);
         sdl_display_init();
         lines_per_display = (win_height - 2*pixels_per_row) / pixels_per_row;
 
@@ -380,14 +394,23 @@ void  sdl_display_choose_from_list(char * title_str, char ** choice, int32_t max
 
         // display controls 
         if (2*(max_choice+1)-1 > lines_per_display) {
-            sdl_render_text_font0(&disp_pane, 0, -5, "HOME", SDL_EVENT_KEY_HOME);
-            sdl_render_text_font0(&disp_pane, 2, -5, "END",  SDL_EVENT_KEY_END);
-            sdl_render_text_font0(&disp_pane, 4, -5, "PGUP", SDL_EVENT_KEY_PGUP);
-            sdl_render_text_font0(&disp_pane, 6, -5, "PGDN", SDL_EVENT_KEY_PGDN);
+            sdl_render_text(&disp_pane, 0, -7, 0, "(HOME)", LIGHT_BLUE, BLACK);
+            sdl_render_text(&disp_pane, 2, -7, 0, "(END)",  LIGHT_BLUE, BLACK);
+            sdl_render_text(&disp_pane, 4, -7, 0, "(PGUP)", LIGHT_BLUE, BLACK);
+            sdl_render_text(&disp_pane, 6, -7, 0, "(PGDN)", LIGHT_BLUE, BLACK);
+            sdl_render_text(&disp_pane, 8, -7, 0, "(UP^)",  LIGHT_BLUE, BLACK);
+            sdl_render_text(&disp_pane,10, -7, 0, "(DNv)",  LIGHT_BLUE, BLACK);
+            sdl_event_register(SDL_EVENT_KEY_HOME, SDL_EVENT_TYPE_KEY, NULL);
+            sdl_event_register(SDL_EVENT_KEY_END, SDL_EVENT_TYPE_KEY, NULL);
+            sdl_event_register(SDL_EVENT_KEY_PGUP, SDL_EVENT_TYPE_KEY, NULL);
+            sdl_event_register(SDL_EVENT_KEY_PGDN, SDL_EVENT_TYPE_KEY, NULL);
+            sdl_event_register(SDL_EVENT_KEY_UP_ARROW, SDL_EVENT_TYPE_KEY, NULL);
+            sdl_event_register(SDL_EVENT_KEY_DOWN_ARROW, SDL_EVENT_TYPE_KEY, NULL);
+            sdl_event_register(SDL_EVENT_MOUSE_MOTION, SDL_EVENT_TYPE_MOUSE_MOTION, &disp_pane);
+            sdl_event_register(SDL_EVENT_MOUSE_WHEEL, SDL_EVENT_TYPE_MOUSE_WHEEL, &disp_pane);
         }
-        sdl_render_text_font0(&disp_pane, -1, -5, "BACK", SDL_EVENT_BACK);
-        sdl_event_register(SDL_EVENT_MOUSE_MOTION, SDL_EVENT_TYPE_MOUSE_MOTION, &disp_pane);
-        sdl_event_register(SDL_EVENT_MOUSE_WHEEL, SDL_EVENT_TYPE_MOUSE_WHEEL, &disp_pane);
+        sdl_render_text(&disp_pane, -1, -7, 0, "(ESC)", LIGHT_BLUE, BLACK);
+        sdl_event_register(SDL_EVENT_KEY_ESC, SDL_EVENT_TYPE_KEY, NULL);
 
         // present the display
         sdl_display_present();
@@ -417,7 +440,13 @@ void  sdl_display_choose_from_list(char * title_str, char ** choice, int32_t max
         case SDL_EVENT_KEY_PGDN:
             text_y += (lines_per_display - 2) * pixels_per_row;
             break;
-        case SDL_EVENT_BACK:
+        case SDL_EVENT_KEY_UP_ARROW:
+            text_y -= pixels_per_row;
+            break;
+        case SDL_EVENT_KEY_DOWN_ARROW:
+            text_y += pixels_per_row;
+            break;
+        case SDL_EVENT_KEY_ESC:
         case SDL_EVENT_QUIT: 
             done = true;
         }
@@ -434,7 +463,7 @@ done:
 
 void sdl_display_error(char * err_str0, char * err_str1, char * err_str2)
 {
-    rect_t        disp_pane;
+    rect_t        disp_pane_full, disp_pane;
     sdl_event_t * event;
     int32_t       row, col;
     bool          done = false;
@@ -447,7 +476,7 @@ void sdl_display_error(char * err_str0, char * err_str1, char * err_str2)
 
         // init 
         sdl_get_state(&win_width, &win_height, NULL);
-        sdl_init_pane(&disp_pane, 0, 0, win_width, win_height);
+        sdl_init_pane(&disp_pane_full, &disp_pane, 0, 0, win_width, win_height);
         sdl_display_init();
 
         // display the error strings
@@ -456,12 +485,13 @@ void sdl_display_error(char * err_str0, char * err_str1, char * err_str2)
             row = 0;
         }
         col = 0;
-        sdl_render_text_ex(&disp_pane, row,   col, err_str0, SDL_EVENT_NONE, 0, true, 0);
-        sdl_render_text_ex(&disp_pane, row+1, col, err_str1, SDL_EVENT_NONE, 0, true, 0);
-        sdl_render_text_ex(&disp_pane, row+2, col, err_str2, SDL_EVENT_NONE, 0, true, 0);
+        sdl_render_text(&disp_pane, row,   col, 0, err_str0, LIGHT_BLUE, BLACK);
+        sdl_render_text(&disp_pane, row+1, col, 0, err_str1, LIGHT_BLUE, BLACK);
+        sdl_render_text(&disp_pane, row+2, col, 0, err_str2, LIGHT_BLUE, BLACK);
 
         // display controls 
-        sdl_render_text_font0(&disp_pane, -1, -5, "BACK", SDL_EVENT_BACK);
+        sdl_render_text(&disp_pane, -1, -7, 0, "(ESC)", LIGHT_BLUE, BLACK);
+        sdl_event_register(SDL_EVENT_KEY_ESC, SDL_EVENT_TYPE_KEY, NULL);
 
         // present the display
         sdl_display_present();
@@ -469,7 +499,7 @@ void sdl_display_error(char * err_str0, char * err_str1, char * err_str2)
         // check for event
         event = sdl_poll_event();
         switch (event->event) {
-        case SDL_EVENT_BACK:
+        case SDL_EVENT_KEY_ESC:
         case SDL_EVENT_QUIT: 
             done = true;
         }

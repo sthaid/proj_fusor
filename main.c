@@ -646,7 +646,7 @@ data_t * get_data(void)
             if (idx < 0 || idx >= MAX_HISTORY) {
                 FATAL("invalid history idx = %d\n", idx);
             }
-            printf("XXX ADDING HISTORY %d\n", idx);
+            //printf("XXX ADDING HISTORY %d\n", idx);
 
             // save the data in history, and
             // update the graph cursor_time
@@ -662,7 +662,7 @@ data_t * get_data(void)
                 jpeg_buff_offset += data2.jpeg_buff_len;
 
                 len = pwrite(fd, history[idx].jpeg_buff_ptr, data2.jpeg_buff_len, data2.jpeg_buff_offset);
-                printf("write %d\n", len);
+                // printf("XXX write %d\n", len);
                 if (len !=  data2.jpeg_buff_len) {
                     FATAL("failed write jpeg to file, len=%d, %s\n", len, strerror(errno));
                 }
@@ -672,7 +672,7 @@ data_t * get_data(void)
             }
 
             len = pwrite(fd, &data2, sizeof(data2), idx * sizeof(data2));
-            printf("write %d\n", len);
+            // printf("XXX write %d\n", len);
             if (len != sizeof(data2)) {
                 FATAL("failed write data2 to file, len=%d, %s\n", len, strerror(errno));
             }

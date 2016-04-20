@@ -171,6 +171,7 @@ static void sdl_exit_handler(void)
         Mix_CloseAudio();
     }
 
+// XXX ifs 
     for (i = 0; i < MAX_FONT; i++) {
         TTF_CloseFont(sdl_font[i].font);
     }
@@ -495,8 +496,16 @@ sdl_event_t * sdl_poll_event(void)
                 possible_event = SDL_EVENT_KEY_PGDN;
             }
 
-            if ((possible_event >= 'a' && possible_event <= 'z') && shift) {
-                possible_event = toupper(possible_event);
+            if (shift) {
+                if (possible_event >= 'a' && possible_event <= 'z') {
+                    possible_event = toupper(possible_event);
+                } else if (possible_event >= '0' && possible_event <= '9') {
+                    possible_event = ")!@#$%^&*("[possible_event-'0'];
+                } else if (possible_event == '-') {
+                    possible_event = '_';
+                } else if (possible_event == '=') {
+                    possible_event = '+';
+                }
             }
 
             if (possible_event != -1 && sdl_event_reg_tbl[possible_event].type == SDL_EVENT_TYPE_KEY) {

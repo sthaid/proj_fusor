@@ -163,15 +163,13 @@ static void sdl_exit_handler(void)
 {
     int32_t i;
     
-    // XXX key up ?
-    usleep(2000000);
+    usleep(1000000);
 
     if (sdl_button_sound) {
         Mix_FreeChunk(sdl_button_sound);
         Mix_CloseAudio();
     }
 
-// XXX ifs 
     for (i = 0; i < MAX_FONT; i++) {
         TTF_CloseFont(sdl_font[i].font);
     }
@@ -826,8 +824,6 @@ void sdl_render_lines(rect_t * pane, point_t * points, int32_t count, int32_t co
 {
     int32_t i;
 
-//XXX tbd use pane
-    //printf("sdl_render_lines count %d\n", count);
     if (count <= 1) {
         return;
     }

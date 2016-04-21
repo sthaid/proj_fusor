@@ -1,14 +1,17 @@
+// XXX vvv
 // 04/20/16 03:44:48.414 ERROR jpeg_decode_output_message_override: Premature end of JPEG file
 // 04/20/16 03:44:48.466 ERROR jpeg_decode_output_message_override: Premature end of JPEG file
 // 04/20/16 04:54:52.639 FATAL cam_put_buff: ioctl VIDIOC_QBUF index=24 Invalid argument
 
+// XXX vvv
 // 04/19/16 08:14:48.530 ERROR jpeg_decode_output_message_override: Premature end of JPEG file
 // 04/19/16 08:14:48.592 ERROR jpeg_decode_output_message_override: Premature end of JPEG file
 // 04/19/16 08:14:48.621 FATAL cam_put_buff: ioctl VIDIOC_QBUF index=9 Invalid argument
 
-// XXX make static vars and procs
 // XXX is data_t this same size on fedora and rpi
 // XXX measure the timing and cpu utilization
+
+// xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -78,6 +81,7 @@ typedef struct {
     float        voltage_max_kv;
     float        current_ma;
     float        pressure_mtorr;
+    float        reserved[5];
 
     bool         jpeg_valid;
     uint32_t     jpeg_buff_len;
@@ -94,39 +98,39 @@ typedef struct {
 // variables
 //
 
-enum mode     mode;
-bool          no_cam;
-bool          no_dataq;
+static enum mode     mode;
+static bool          no_cam;
+static bool          no_dataq;
 
-int32_t       fd;
-void        * fd_mmap_addr;
+static int32_t       fd;
+static void        * fd_mmap_addr;
 
-data_t      * history;
-time_t        history_start_time_sec;  //xxx review
-time_t        history_end_time_sec;    //xxx review
-time_t        cursor_time_sec;         //xxx review
+static data_t      * history;
+static time_t        history_start_time_sec;  //xxx review
+static time_t        history_end_time_sec;    //xxx review
+static time_t        cursor_time_sec;         //xxx review
 
-int32_t       graph_scale_idx;
-graph_scale_t graph_scale[] = {
-                    { 60,      1 },    // 1 minute
-                    { 600,     2 },    // 10 minutes
-                    { 3600,   12 },    // 1 hour
-                    { 36000, 120 },    // 10 hours
-                                        };
+static int32_t       graph_scale_idx;
+static graph_scale_t graph_scale[] = {
+                            { 60,      1 },    // 1 minute
+                            { 600,     2 },    // 10 minutes
+                            { 3600,   12 },    // 1 hour
+                            { 36000, 120 },    // 10 hours
+                                                };
 
 //
 // prototypes
 //
 
-void initialize(int32_t argc, char ** argv);
-void usage(void);
-char * bool2str(bool b);
-void display_handler();
-void draw_camera_image(data_t * data, rect_t * cam_pane, texture_t cam_texture);
-void draw_data_values(data_t *data, rect_t * data_pane);
-void draw_graph(rect_t * graph_pane);
-data_t *  get_data(void);
-void free_data(data_t * data);
+static void initialize(int32_t argc, char ** argv);
+static void usage(void);
+static char * bool2str(bool b);
+static void display_handler();
+static void draw_camera_image(data_t * data, rect_t * cam_pane, texture_t cam_texture);
+static void draw_data_values(data_t *data, rect_t * data_pane);
+static void draw_graph(rect_t * graph_pane);
+static data_t *  get_data(void);
+static void free_data(data_t * data);
 
 // -----------------  MAIN  ----------------------------------------------------------
 
@@ -144,7 +148,7 @@ void initialize(int32_t argc, char ** argv)
     char filename[100];
 
     // XXX check is same size on fedora 64bit
-    printf("XXX sizeof datat %d\n", sizeof(data_t));  // XXX = 96
+    printf("sizeof datat %d\n", sizeof(data_t));
 
     // parse options
     // -n cam   : no camera, applies only in live mode
@@ -181,7 +185,7 @@ void initialize(int32_t argc, char ** argv)
     // determine if in LIVE_MODE or PLAYBACK mode, and
     // the filename to be used
     if (argc == optind) {
-        sprintf(filename, "fusor_xxx.dat"); // XXX
+        sprintf(filename, "fusor_xxx.dat"); // XXX NEXT
         mode = LIVE_MODE;
     } else {
         strcpy(filename, argv[optind]);
@@ -230,7 +234,7 @@ void initialize(int32_t argc, char ** argv)
 
         history_start_time_sec = get_real_time_us() / 1000000; 
         history_end_time_sec = history_start_time_sec - 1;
-        cursor_time_sec = history_end_time_sec;  // XXX realyy -1?
+        cursor_time_sec = history_end_time_sec;
     } else {
         char    start_time_str[MAX_TIME_STR];
         char    end_time_str[MAX_TIME_STR];
@@ -267,7 +271,7 @@ void initialize(int32_t argc, char ** argv)
 
         history_start_time_sec = history[0].time_us / 1000000;
         history_end_time_sec = history_start_time_sec + max_history - 1;
-        cursor_time_sec = history_start_time_sec;
+        cursor_time_sec = history_start_time_sec + 30; // XXX
 
         time2str(start_time_str, history_start_time_sec*(uint64_t)1000000, false, false, true);
         time2str(end_time_str, history_end_time_sec*(uint64_t)1000000, false, false, true);
@@ -275,19 +279,19 @@ void initialize(int32_t argc, char ** argv)
     }
 }
 
-void usage(void)
+static void usage(void)
 {
-    printf("XXX usage tbd\n");
+    printf("XXX NEXT usage tbd\n");
 }
 
-char * bool2str(bool b)
+static char * bool2str(bool b)
 {
     return b ? "true" : "false";
 }
 
 // -----------------  DISPLAY HANDLER  -----------------------------------------------
 
-void display_handler(void)
+static void display_handler(void)
 {
     bool          done;
     data_t      * data;
@@ -376,13 +380,11 @@ void display_handler(void)
             break;
         case '+':
         case '=':
-            printf("XXX graph plus\n");
             if (graph_scale_idx < MAX_GRAPH_SCALE-1) {
                 graph_scale_idx++;
             }
             break;
         case '-':
-            printf("XXX graph minus\n");
             if (graph_scale_idx > 0) {
                 graph_scale_idx--;
             }
@@ -398,7 +400,7 @@ void display_handler(void)
     INFO("terminating\n");
 }
 
-void draw_camera_image(data_t * data, rect_t * cam_pane, texture_t cam_texture)
+static void draw_camera_image(data_t * data, rect_t * cam_pane, texture_t cam_texture)
 {
     uint8_t * pixel_buff;
     uint32_t  pixel_buff_width;
@@ -429,7 +431,7 @@ void draw_camera_image(data_t * data, rect_t * cam_pane, texture_t cam_texture)
     free(pixel_buff);
 }
 
-void draw_data_values(data_t *data, rect_t * data_pane)
+static void draw_data_values(data_t *data, rect_t * data_pane)
 {
     char str[100];
 
@@ -449,7 +451,7 @@ void draw_data_values(data_t *data, rect_t * data_pane)
     sdl_render_text(data_pane, 4, 0, 1, str, WHITE, BLACK);
 }
 
-void draw_graph(rect_t * graph_pane)
+static void draw_graph(rect_t * graph_pane)
 {
     #define MAX_GRAPH_CONFIG (sizeof(graph_config)/sizeof(graph_config[0]))
     static struct graph_config {
@@ -485,15 +487,20 @@ void draw_graph(rect_t * graph_pane)
 
     // determine graph_start_sec and graph_end_sec
     if (mode == LIVE_MODE) {
+#if 0 // XXX delete
         graph_start_time_sec = history_start_time_sec;
         graph_end_time_sec = graph_start_time_sec + (T_span - 1);
         if (cursor_time_sec > graph_end_time_sec) {
             graph_end_time_sec = cursor_time_sec;
             graph_start_time_sec = graph_end_time_sec - (T_span - 1);
         }
+#else
+        graph_end_time_sec = cursor_time_sec;
+        graph_start_time_sec = graph_end_time_sec - (T_span - 1);
+#endif
     } else {
-        // XXX tbd
-        graph_start_time_sec = history_start_time_sec;
+        // XXX tbd  NEXT, center XXX CHECK THIS
+        graph_start_time_sec = cursor_time_sec - T_span / 2;
         graph_end_time_sec = graph_start_time_sec + T_span - 1;
     }
 
@@ -507,9 +514,10 @@ void draw_graph(rect_t * graph_pane)
 
     // draw the graphs
     for (i = 0; i < MAX_GRAPH_CONFIG; i++) {
+        #define MAX_POINTS 1000
         struct graph_config * gc;
         int32_t max_points, idx;
-        point_t points[1000];
+        point_t points[MAX_POINTS];
         time_t  t;
         float   X, X_delta, Y_scale;
 
@@ -528,13 +536,15 @@ void draw_graph(rect_t * graph_pane)
                 } else if (value > gc->max_value) {
                     value = gc->max_value;
                 }
-                if (max_points >= (sizeof(points)/sizeof(points[0]))) {
-                    FATAL("max_points=%d is too big\n", max_points);
-                }
                 points[max_points].x = X;
                 points[max_points].y = Y_origin - value * Y_scale;
                 max_points++;
-                // XXX if full then reset points
+                if (max_points == MAX_POINTS) {
+                    sdl_render_lines(graph_pane, points, max_points, gc->color);
+                    points[0].x = X;
+                    points[0].y = Y_origin - value * Y_scale;
+                    max_points = 1;
+                }
             } else {
                 sdl_render_lines(graph_pane, points, max_points, gc->color);
                 max_points = 0;
@@ -613,7 +623,7 @@ void draw_graph(rect_t * graph_pane)
 
 // -----------------  GET AND FREE DATA  ---------------------------------------------
 
-data_t * get_data(void)
+static data_t * get_data(void)
 {
     data_t * data;
 
@@ -653,8 +663,8 @@ data_t * get_data(void)
                 break;
             }
 
-            data->voltage_rms_kv = (float)(time(NULL) - history_start_time_sec) / 10;  // XXX tbd
-
+            // XXX start working on this NEXT add routines to do some of the xlates ???
+            data->voltage_rms_kv = (float)(time(NULL) - history_start_time_sec) / 10;
             data->voltage_min_kv = 10;
             data->voltage_max_kv = 10;
             data->current_ma = 10;
@@ -676,7 +686,6 @@ data_t * get_data(void)
             if (idx < 0 || idx >= MAX_HISTORY) {
                 FATAL("invalid history idx = %d\n", idx);
             }
-            //printf("XXX ADDING HISTORY %d\n", idx);
 
             // save the data in history, and
             // update the graph cursor_time
@@ -692,7 +701,6 @@ data_t * get_data(void)
                 jpeg_buff_offset += data2.jpeg_buff_len;
 
                 len = pwrite(fd, history[idx].jpeg_buff_ptr, data2.jpeg_buff_len, data2.jpeg_buff_offset);
-                // printf("XXX write %d\n", len);
                 if (len !=  data2.jpeg_buff_len) {
                     FATAL("failed write jpeg to file, len=%d, %s\n", len, strerror(errno));
                 }
@@ -702,7 +710,6 @@ data_t * get_data(void)
             }
 
             len = pwrite(fd, &data2, sizeof(data2), idx * sizeof(data2));
-            // printf("XXX write %d\n", len);
             if (len != sizeof(data2)) {
                 FATAL("failed write data2 to file, len=%d, %s\n", len, strerror(errno));
             }
@@ -739,7 +746,7 @@ data_t * get_data(void)
     return data;
 }
 
-void free_data(data_t * data) 
+static void free_data(data_t * data) 
 {
     if (mode == LIVE_MODE) {
         if (data->jpeg_valid) {

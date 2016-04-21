@@ -107,7 +107,7 @@ void dataq_init(float averaging_duration_sec, int32_t max_adc_chan, ...)
          averaging_duration_sec, adc_channels_str);
 
     // setup serial port
-    // XXX LATER perhaps use termios tcsetattr instead
+    // LATER perhaps use termios tcsetattr instead
     sprintf(cmd_str, "stty -F %s %s\n", DATAQ_DEVICE, STTY_SETTINGS);
     system(cmd_str);
 
@@ -208,8 +208,8 @@ void dataq_init(float averaging_duration_sec, int32_t max_adc_chan, ...)
     pthread_create(&thread_id, NULL, dataq_test_thread, NULL);
 #endif
 
-    // XXX  wait for adc data to be available
-    sleep(1);
+    // delay to allow adc data to be available
+    usleep(averaging_duration_sec*1000000 + 250000);
 }
 
 int32_t dataq_get_adc(int32_t adc_chan, float * rms, float * mean, float * sdev, float * min, float * max)
@@ -394,7 +394,7 @@ static void * dataq_recv_data_thread(void * cx)
         // and to validate sync then extract adc values
         while (buff_len >= max_slist_idx*2+1) {
             // if not sychronized then abort for now
-            // XXX LATER improve this to resync, if needed
+            // LATER improve this to resync, if needed
             if (((buff[0] & 1) != 0) || ((buff[max_slist_idx*2] & 1) != 0)) {
                 FATAL("not synced\n");
             }

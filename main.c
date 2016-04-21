@@ -1,17 +1,9 @@
-// XXX vvv
-// 04/20/16 03:44:48.414 ERROR jpeg_decode_output_message_override: Premature end of JPEG file
-// 04/20/16 03:44:48.466 ERROR jpeg_decode_output_message_override: Premature end of JPEG file
-// 04/20/16 04:54:52.639 FATAL cam_put_buff: ioctl VIDIOC_QBUF index=24 Invalid argument
-
-// XXX vvv
-// 04/19/16 08:14:48.530 ERROR jpeg_decode_output_message_override: Premature end of JPEG file
-// 04/19/16 08:14:48.592 ERROR jpeg_decode_output_message_override: Premature end of JPEG file
-// 04/19/16 08:14:48.621 FATAL cam_put_buff: ioctl VIDIOC_QBUF index=9 Invalid argument
-
-// XXX is data_t this same size on fedora and rpi
 // XXX measure the timing and cpu utilization
-
-// xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+// XXX review initialization prints
+// XXX review all files
+// XXX -g option, if not present then use the 1920x1080 or fullscrn
+// XXX move cursor in playback
+// XXX scaling code
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -45,7 +37,7 @@
 //
 
 #define WIN_WIDTH   1920
-#define WIN_HEIGHT  1080
+#define WIN_HEIGHT  1000
 
 #define CAM_WIDTH   960
 #define CAM_HEIGHT  720
@@ -71,6 +63,8 @@
 
 enum mode {LIVE_MODE, PLAYBACK_MODE};
 
+// this struct is designed to be same size on 32bit and 64bit systems, so 
+// that the fusor data file is portable
 typedef struct {
     uint64_t     magic;
     uint64_t     time_us;
@@ -81,12 +75,12 @@ typedef struct {
     float        voltage_max_kv;
     float        current_ma;
     float        pressure_mtorr;
-    float        reserved[5];
+    float        reserved[4];
 
     bool         jpeg_valid;
     uint32_t     jpeg_buff_len;
     uint8_t    * jpeg_buff_ptr;
-    off_t        jpeg_buff_offset;
+    uint64_t     jpeg_buff_offset;
 } data_t;
 
 typedef struct {
@@ -147,9 +141,6 @@ void initialize(int32_t argc, char ** argv)
 {
     char filename[100];
 
-    // XXX check is same size on fedora 64bit
-    printf("sizeof datat %d\n", sizeof(data_t));
-
     // parse options
     // -n cam   : no camera, applies only in live mode
     // -n dataq : no data acquisition, applies only in live mode
@@ -185,7 +176,13 @@ void initialize(int32_t argc, char ** argv)
     // determine if in LIVE_MODE or PLAYBACK mode, and
     // the filename to be used
     if (argc == optind) {
-        sprintf(filename, "fusor_xxx.dat"); // XXX NEXT
+        time_t t;
+        struct tm * tm;
+        t = time(NULL);
+        tm = localtime(&t);
+        sprintf(filename, "fusor_%2.2d%2.2d%2.2d_%2.2d%2.2d%2.2d.dat",
+                tm->tm_mon+1, tm->tm_mday, tm->tm_year-100,
+                tm->tm_hour, tm->tm_min, tm->tm_sec);
         mode = LIVE_MODE;
     } else {
         strcpy(filename, argv[optind]);
@@ -271,7 +268,11 @@ void initialize(int32_t argc, char ** argv)
 
         history_start_time_sec = history[0].time_us / 1000000;
         history_end_time_sec = history_start_time_sec + max_history - 1;
-        cursor_time_sec = history_start_time_sec + 30; // XXX
+        if (max_history > 60) {
+            cursor_time_sec = history_start_time_sec + 30;
+        } else {
+            cursor_time_sec = history_start_time_sec + max_history / 2;
+        }
 
         time2str(start_time_str, history_start_time_sec*(uint64_t)1000000, false, false, true);
         time2str(end_time_str, history_end_time_sec*(uint64_t)1000000, false, false, true);
@@ -281,7 +282,30 @@ void initialize(int32_t argc, char ** argv)
 
 static void usage(void)
 {
-    printf("XXX NEXT usage tbd\n");
+    printf("\
+NAME\n\
+    fusor - display live or recorded camera and analog values from a fusor\n\
+\n\
+SYNOPSIS\n\
+    fusor [OPTIONS] [FILE]\n\
+\n\
+DESCRIPTION\n\
+    If FILE is not supplied then fusor runs in live mode. The camera image is\n\
+    is read from the camera and displayed. The analog values are read from the \n\
+    dataq device, scaled, and the scaled values are displayed.\n\
+\n\
+    If FILE is supplied then fusor runs in playback mode. The camera image and\n\
+    scaled values are read from the FILE and displayed.\n\
+\n\
+OPTIONS\n\
+    -n cam   : no camera, applies only in live mode\n\
+\n\
+    -n dataq : no data acquisition, applies only in live mode\n\
+\n\
+    -v       : version\n\
+\n\
+    -h       : help\n\
+");
 }
 
 static char * bool2str(bool b)
@@ -460,7 +484,9 @@ static void draw_graph(rect_t * graph_pane)
         int32_t  color;
         off_t    field_offset;
     } graph_config[] = {
-        { "kV : 30 MAX", 30.0, RED, offsetof(data_t, voltage_rms_kv) },
+        { "kV    : 30 MAX", 30.0, RED, offsetof(data_t, voltage_rms_kv) },
+        { "mA    : 30 MAX", 30.0, GREEN, offsetof(data_t, current_ma) },
+        { "mTorr : 30 MAX", 30.0, BLUE, offsetof(data_t, pressure_mtorr) },
                             };
 
     time_t  graph_start_time_sec, graph_end_time_sec;
@@ -487,7 +513,7 @@ static void draw_graph(rect_t * graph_pane)
 
     // determine graph_start_sec and graph_end_sec
     if (mode == LIVE_MODE) {
-#if 0 // XXX delete
+#if 0 
         graph_start_time_sec = history_start_time_sec;
         graph_end_time_sec = graph_start_time_sec + (T_span - 1);
         if (cursor_time_sec > graph_end_time_sec) {
@@ -499,7 +525,6 @@ static void draw_graph(rect_t * graph_pane)
         graph_start_time_sec = graph_end_time_sec - (T_span - 1);
 #endif
     } else {
-        // XXX tbd  NEXT, center XXX CHECK THIS
         graph_start_time_sec = cursor_time_sec - T_span / 2;
         graph_end_time_sec = graph_start_time_sec + T_span - 1;
     }
@@ -665,10 +690,10 @@ static data_t * get_data(void)
 
             // XXX start working on this NEXT add routines to do some of the xlates ???
             data->voltage_rms_kv = (float)(time(NULL) - history_start_time_sec) / 10;
-            data->voltage_min_kv = 10;
+            data->voltage_min_kv = 5;
             data->voltage_max_kv = 10;
-            data->current_ma = 10;
-            data->pressure_mtorr = 10;
+            data->current_ma = 15;
+            data->pressure_mtorr = 20;
         } while (0);
 
         // if data time is 1 second beyond the end of current saved history then

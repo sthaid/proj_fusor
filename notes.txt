@@ -4,6 +4,17 @@ learn apt-get
 
 how to select git commit editor
 
+// XXX vvv
+// 04/20/16 03:44:48.414 ERROR jpeg_decode_output_message_override: Premature end of JPEG file
+// 04/20/16 03:44:48.466 ERROR jpeg_decode_output_message_override: Premature end of JPEG file
+// 04/20/16 04:54:52.639 FATAL cam_put_buff: ioctl VIDIOC_QBUF index=24 Invalid argument
+
+// XXX vvv
+// 04/19/16 08:14:48.530 ERROR jpeg_decode_output_message_override: Premature end of JPEG file
+// 04/19/16 08:14:48.592 ERROR jpeg_decode_output_message_override: Premature end of JPEG file
+// 04/19/16 08:14:48.621 FATAL cam_put_buff: ioctl VIDIOC_QBUF index=9 Invalid argument
+
+
 ================================
 TITLE: INSTALL RASPBERRY PI
 ================================

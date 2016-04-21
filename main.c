@@ -6,7 +6,6 @@
 // 04/19/16 08:14:48.592 ERROR jpeg_decode_output_message_override: Premature end of JPEG file
 // 04/19/16 08:14:48.621 FATAL cam_put_buff: ioctl VIDIOC_QBUF index=9 Invalid argument
 
-// XXX retest the predefined displays
 // XXX make static vars and procs
 // XXX is data_t this same size on fedora and rpi
 // XXX measure the timing and cpu utilization
@@ -61,9 +60,7 @@
 
 #define MAGIC 0x1122334455667788
 
-//#define SDL_EVENT_EXIT          (SDL_EVENT_USER_START + 0)
-//#define SDL_EVENT_GRAPH_PLUS    (SDL_EVENT_USER_START + 1)
-//#define SDL_EVENT_GRAPH_MINUS   (SDL_EVENT_USER_START + 2)
+#define MAX_GRAPH_SCALE (sizeof(graph_scale)/sizeof(graph_scale[0]))
 
 //
 // typedefs
@@ -88,21 +85,34 @@ typedef struct {
     off_t        jpeg_buff_offset;
 } data_t;
 
+typedef struct {
+    int32_t span;   // must be multiple of 60
+    int32_t delta;
+} graph_scale_t;
+
 //
 // variables
 //
 
-enum mode  mode;
-bool       no_cam;
-bool       no_dataq;
+enum mode     mode;
+bool          no_cam;
+bool          no_dataq;
 
-int32_t    fd;
-void     * fd_mmap_addr;
+int32_t       fd;
+void        * fd_mmap_addr;
 
-data_t    * history;
-time_t      history_start_time_sec;  //xxx review
-time_t      history_end_time_sec;    //xxx review
-time_t      cursor_time_sec;         //xxx review
+data_t      * history;
+time_t        history_start_time_sec;  //xxx review
+time_t        history_end_time_sec;    //xxx review
+time_t        cursor_time_sec;         //xxx review
+
+int32_t       graph_scale_idx;
+graph_scale_t graph_scale[] = {
+                    { 60,      1 },    // 1 minute
+                    { 600,     2 },    // 10 minutes
+                    { 3600,   12 },    // 1 hour
+                    { 36000, 120 },    // 10 hours
+                                        };
 
 //
 // prototypes
@@ -348,6 +358,7 @@ void display_handler(void)
         sdl_event_register(SDL_EVENT_KEY_ESC, SDL_EVENT_TYPE_KEY, NULL);
         sdl_event_register('?', SDL_EVENT_TYPE_KEY, NULL);
         sdl_event_register('+', SDL_EVENT_TYPE_KEY, NULL);
+        sdl_event_register('=', SDL_EVENT_TYPE_KEY, NULL);
         sdl_event_register('-', SDL_EVENT_TYPE_KEY, NULL);
 
         // present the display
@@ -361,20 +372,20 @@ void display_handler(void)
             done = true;
             break;
         case '?':  
-            // XXX not gathering data whenin these 
-            // XXX about.h,  text and widht
-/*
-void sdl_display_get_string(int32_t count, ...);
-void sdl_display_choose_from_list(char * title_str, char ** choices, int32_t max_choices, int32_t * selection);
-void sdl_display_error(char * err_str0, char * err_str1, char * err_str2);
-*/
             sdl_display_text(about);
             break;
         case '+':
+        case '=':
             printf("XXX graph plus\n");
+            if (graph_scale_idx < MAX_GRAPH_SCALE-1) {
+                graph_scale_idx++;
+            }
             break;
         case '-':
             printf("XXX graph minus\n");
+            if (graph_scale_idx > 0) {
+                graph_scale_idx--;
+            }
             break;
         default:
             break;
@@ -455,9 +466,17 @@ void draw_graph(rect_t * graph_pane)
     float   X_pixels_per_sec;
     int32_t i;
 
+    // sanitize scale_idx
+    while (graph_scale_idx < 0) {
+        graph_scale_idx += MAX_GRAPH_SCALE;
+    }
+    while (graph_scale_idx >= MAX_GRAPH_SCALE) {
+        graph_scale_idx -= MAX_GRAPH_SCALE;
+    }
+
     // init
-    T_delta = 1;  // xxx
-    T_span = 60;   // xxx
+    T_span = graph_scale[graph_scale_idx].span;
+    T_delta = graph_scale[graph_scale_idx].delta;
     X_origin = 10;
     X_pixels = 1200;
     X_pixels_per_sec = (float)X_pixels / T_span;
@@ -574,24 +593,15 @@ void draw_graph(rect_t * graph_pane)
                     0, str, PURPLE, WHITE);
 
     // draw x axis span time
-    sprintf(str, "%d MIN (+/-)", T_span/60);    // XXX comment multiple of 60
+    if (T_span/60 < 60) {
+        sprintf(str, "%d MINUTES (+/-)", T_span/60);
+    } else {
+        sprintf(str, "%d HOURS (+/-)", T_span/3600);
+    }
     str_col = (X_pixels + X_origin) / FONT0_WIDTH + 9;
     sdl_render_text(graph_pane, 
                     -1, str_col,
                     0, str, BLACK, WHITE);
-
-#if 0
-    // draw x axis span time controls
-    sdl_render_text_with_event(graph_pane, 
-                               -1, str_col + 8,
-                               0, "+", BLACK, WHITE, SDL_EVENT_GRAPH_PLUS);
-    sdl_event_register('+', SDL_EVENT_TYPE_KEY, NULL);
-
-    sdl_render_text_with_event(graph_pane, 
-                               -1, str_col + 11,
-                               0, "-", BLACK, WHITE, SDL_EVENT_GRAPH_MINUS);
-    sdl_event_register('-', SDL_EVENT_TYPE_KEY, NULL);
-#endif
 
     // draw graph names 
     for (i = 0; i < MAX_GRAPH_CONFIG; i++) {

@@ -1,7 +1,9 @@
-// XXX scaling code
+// XXX scaling code for pressure
 // XXX measure the timing and cpu utilization
-// XXX review all files
 // XXX check cpu utilization when in playback mode, maybe a delay is needed
+// XXX review all files
+// XXX update about.h
+// XXX test adc with battery
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -107,9 +109,9 @@ static int32_t       fd;
 static void        * fd_mmap_addr;
 
 static data_t      * history;
-static time_t        history_start_time_sec;  //xxx review
-static time_t        history_end_time_sec;    //xxx review
-static time_t        cursor_time_sec;         //xxx review
+static time_t        history_start_time_sec;
+static time_t        history_end_time_sec;
+static time_t        cursor_time_sec;
 
 static int32_t       graph_scale_idx;
 static graph_scale_t graph_scale[] = {
@@ -133,6 +135,9 @@ static void draw_graph(rect_t * graph_pane);
 static data_t *  get_data(void);
 static void free_data(data_t * data);
 static void record_data(data_t * data);
+static float convert_adc_voltage(float adc_volts);
+static float convert_adc_current(float adc_volts);
+static float convert_adc_pressure(float adc_volts);
 
 // -----------------  MAIN  ----------------------------------------------------------
 
@@ -284,15 +289,7 @@ void initialize(int32_t argc, char ** argv)
 
         history_start_time_sec = history[0].time_us / 1000000;
         history_end_time_sec = history_start_time_sec + max_history - 1;
-#if 0
-        if (max_history > 60) {
-            cursor_time_sec = history_start_time_sec + 30;
-        } else {
-            cursor_time_sec = history_start_time_sec + max_history / 2;
-        }
-#else
         cursor_time_sec = history_start_time_sec;
-#endif
 
         time2str(start_time_str, history_start_time_sec*(uint64_t)1000000, false, false, true);
         time2str(end_time_str, history_end_time_sec*(uint64_t)1000000, false, false, true);
@@ -351,7 +348,13 @@ static void display_handler(void)
     struct tm   * tm;
     time_t        t;
 
-    // xxx verify cam width >= height, and explain
+    // this program requires CAM_WIDTH to be >= CAM_HEIGHT; 
+    // the reason being that a square texture is created with dimension
+    // of CAM_HEIGHT x CAM_HEIGHT, and this texture is updated with the
+    // pixels centered around CAM_WIDTH/2
+    if (CAM_WIDTH < CAM_HEIGHT) {
+        FATAL("CAM_WIDTH must be >= CAM_HEIGHT\n");
+    }
 
     // initializae 
     done = false;
@@ -438,7 +441,11 @@ static void display_handler(void)
             done = true;
             break;
         case '?':  
-            sdl_display_text(about);
+            // LATER, get ca_get_buff discarding when select '?'
+            //XXX sdl_display_text(about);
+            // XXX ^c from here doesn't kill pgm
+            { char retstr[100];
+            sdl_display_get_string(1, "prompt", "123", retstr); }
             break;
         case '-':
             if (graph_scale_idx < MAX_GRAPH_SCALE-1) {
@@ -741,26 +748,37 @@ static data_t * get_data(void)
             data->jpeg_valid = true;
         }
 
-        // get adc data from the dataq device, and convert to voltage, current, and pressure
+        // get adc data from the dataq device, and 
+        // convert to the values which will be displayed
         if (!no_dataq) do {
             float rms, mean, min, max;
-            int32_t ret1, ret2, ret3;
+            int32_t ret;
 
-            ret1 = dataq_get_adc(ADC_CHAN_VOLTAGE, &rms, NULL, NULL, &min, &max);
-            ret2 = dataq_get_adc(ADC_CHAN_CURRENT, NULL, &mean, NULL, NULL, NULL);
-            ret3 = dataq_get_adc(ADC_CHAN_PRESSURE, NULL, &mean, NULL, NULL, NULL);
-            data->data_valid = (ret1 == 0 && ret2 == 0 && ret3 == 0);
-
-            if (!data->data_valid) {
+            // read ADC_CHAN_VOLTAGE and convert to kV
+            ret = dataq_get_adc(ADC_CHAN_VOLTAGE, &rms, NULL, NULL, &min, &max);
+            if (ret != 0) {
                 break;
             }
+            data->voltage_rms_kv = convert_adc_voltage(rms);
+            data->voltage_min_kv = convert_adc_voltage(min);
+            data->voltage_max_kv = convert_adc_voltage(max);
 
-            // XXX start working on this NEXT add routines to do some of the xlates ???
-            data->voltage_rms_kv = (float)(time(NULL) - history_start_time_sec) / 10;
-            data->voltage_min_kv = 5;
-            data->voltage_max_kv = 10;
-            data->current_ma = 15;
-            data->pressure_mtorr = 20;
+            // read ADC_CHAN_CURRENT and convert to mA
+            ret = dataq_get_adc(ADC_CHAN_CURRENT, NULL, &mean, NULL, NULL, NULL);
+            if (ret != 0) {
+                break;
+            }
+            data->current_ma = convert_adc_current(mean);
+
+            // read ADC_CHAN_PRESSURE and convert to mTorr
+            ret = dataq_get_adc(ADC_CHAN_PRESSURE, NULL, &mean, NULL, NULL, NULL);
+            if (ret != 0) {
+                break;
+            }
+            data->pressure_mtorr = convert_adc_pressure(mean);
+
+            // set data_valid flag
+            data->data_valid = true;
         } while (0);
     } else {
         int32_t len, idx;
@@ -856,4 +874,51 @@ static void record_data(data_t * data)
     if (len != sizeof(data2)) {
         FATAL("failed write data2 to file, len=%d, %s\n", len, strerror(errno));
     }
+}
+
+// -----------------  CONVERT ADC VALUES ---------------------------------------------
+
+// These routines convert the voltage read from the dataq adc channels to
+// the value which will be displayed. 
+//
+// For example assume that the HV voltage divider is 10000 to 1, thus an adc 
+// voltage reading of 2 V means the HV is 20000 Volts. The HV is displayed in
+// kV, so the value returned would be 20.
+
+static float convert_adc_voltage(float adc_volts)
+{
+    // My fusor's voltage divider is made up of a 1G Ohm resistor, and
+    // a 100K Ohm resistor. In parallel with the 100K Ohm resistor are
+    // the panel meter and the dataq adc input, which have resistances of
+    // 10M Ohm and 2M Ohm respectively. So, use 94.34K instead of 100K
+    // in the conversion calculation.
+
+    // I = Vhv / (1G + 94.34K) 
+    //
+    // I = Vhv / 1G                           (approximately)
+    //
+    // Vadc = (Vhv / 1G) * 94.34K
+    //
+    // Vhv = Vadc * (1G / 94.34K)             (volts)
+    //
+    // Vhv = Vadc * (1G / 94.34K) / 1000      (killo-volts)
+
+    return adc_volts * (1E9 / 94.34E3 / 1000.);    // kV
+}
+
+static float convert_adc_current(float adc_volts)
+{
+    // My fusor's current measurement resistor is 100 Ohm.
+
+    // I = Vadc / 100            (amps)
+    //
+    // I = Vadc / 100 * 1000     (milli-amps)
+
+    return adc_volts * 10.;    // mA
+}
+
+static float convert_adc_pressure(float adc_volts)
+{
+    // XXX tbd
+    return 1;
 }

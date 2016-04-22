@@ -99,7 +99,7 @@ void sdl_display_get_string(int32_t count, ...)
             }
         }
         sdl_render_text_with_event(&keybdpane, r+6, c+27, 1, "SPACE",  LIGHT_BLUE, BLACK, ' ');
-        sdl_render_text_with_event(&keybdpane, r+8, c+0,  1, "SHIFT",  LIGHT_BLUE, BLACK, SDL_EVENT_KEY_SHIFT);
+        sdl_render_text_with_event(&keybdpane, r+8, c+0,  1, "SHIFT",  LIGHT_BLUE, BLACK, SDL_EVENT_KEY_SHIFT);  //XXX
         sdl_render_text_with_event(&keybdpane, r+8, c+8,  1, "BS",     LIGHT_BLUE, BLACK, SDL_EVENT_KEY_BS);
         sdl_render_text_with_event(&keybdpane, r+8, c+13, 1, "TAB",    LIGHT_BLUE, BLACK, SDL_EVENT_KEY_TAB);
         sdl_render_text_with_event(&keybdpane, r+8, c+19, 1, "ESC",    LIGHT_BLUE, BLACK, SDL_EVENT_KEY_ESC);

@@ -245,12 +245,13 @@ try_again:
         DEBUG("GET: index=%d addr=%p length=%d flags=0x%x\n", 
               buffer.index, bufmap[buffer.index].addr, bufmap[buffer.index].length,  buffer.flags);
 
-        // if error flag is set then requeue the buffer and continue
+        // if error flag is set then requeue the buffer and break out of this loop
+        // so that the duration check is made below
         if (buffer.flags & V4L2_BUF_FLAG_ERROR) {
             WARN("V4L2_BUF_FLAG_ERROR is set, index=%d flags=0x%x\n", 
                  buffer.index, buffer.flags);
             cam_put_buff(bufmap[buffer.index].addr);
-            continue;
+            break;
         }
 
         // save buffer at end of buffer_avail array

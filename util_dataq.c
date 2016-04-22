@@ -107,7 +107,11 @@ void dataq_init(float averaging_duration_sec, int32_t max_adc_chan, ...)
          averaging_duration_sec, adc_channels_str);
 
     // setup serial port
-    // LATER perhaps use termios tcsetattr instead
+    // - LATER perhaps use termios tcsetattr instead
+    // - I first ran this program on Fedora20, and had no problem
+    //   communicating to the dataq. When first run on RaspberryPi the
+    //   comm to dataq failed. To resolve this I captured the stty settings
+    //   on Fedora (stty -g) and apply them here.
     sprintf(cmd_str, "stty -F %s %s\n", DATAQ_DEVICE, STTY_SETTINGS);
     system(cmd_str);
 
@@ -154,7 +158,8 @@ void dataq_init(float averaging_duration_sec, int32_t max_adc_chan, ...)
         FATAL("failed to clear non blocking, %s\n", strerror(errno));
     }
 
-    // issue 'info 0' command
+    // issue 'info 0' command, 
+    // this is just a dataq communication sanity check
     dataq_issue_cmd("info 0", resp);
 
     // configure scanning of the desired adc channels

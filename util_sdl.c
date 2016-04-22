@@ -478,6 +478,8 @@ sdl_event_t * sdl_poll_event(void)
             bool     alt = (ev.key.keysym.mod & KMOD_ALT) != 0;
             int32_t  possible_event = -1;
 
+            INFO("GOT KEYDN %x\n", key); //XXX
+
             if (ctrl && key == 'p') {
                 print_screen();
                 play_event_sound();
@@ -534,10 +536,19 @@ sdl_event_t * sdl_poll_event(void)
                 }
             }
 
-            if (possible_event != -1 && sdl_event_reg_tbl[possible_event].type == SDL_EVENT_TYPE_KEY) {
+            if ((possible_event != -1) && 
+                (sdl_event_reg_tbl[possible_event].type == SDL_EVENT_TYPE_KEY ||
+                 sdl_event_reg_tbl[possible_event].type == SDL_EVENT_TYPE_TEXT))
+            {
                 event.event = possible_event;
                 play_event_sound();
             }
+            break; }
+
+        case SDL_KEYUP: {
+            int32_t  key = ev.key.keysym.sym;
+
+            INFO("GOT KEYUP %x\n", key); //XXX
             break; }
 
        case SDL_WINDOWEVENT: {

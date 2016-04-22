@@ -1,6 +1,7 @@
 // Note max line length is 44 chars.  XXX
 
 static char about[] = "\
+123456789 123456789 123456789 123456789 123456789 123456789 123456789 123456789\n\
 Simulations to further understanding of \n\
 physics.\n\
 \n\

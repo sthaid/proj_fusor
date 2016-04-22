@@ -1,6 +1,7 @@
 // XXX scaling code
 // XXX measure the timing and cpu utilization
 // XXX review all files
+// XXX check cpu utilization when in playback mode, maybe a delay is needed
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -131,6 +132,7 @@ static void draw_data_values(data_t *data, rect_t * data_pane);
 static void draw_graph(rect_t * graph_pane);
 static data_t *  get_data(void);
 static void free_data(data_t * data);
+static void record_data(data_t * data);
 
 // -----------------  MAIN  ----------------------------------------------------------
 
@@ -374,6 +376,11 @@ static void display_handler(void)
     while (!done) {
         // get data to be displayed
         data = get_data();
+
+        // record data when in live mode
+        if (mode == LIVE_MODE) {
+            record_data(data);
+        }
 
         // initialize for display update
         sdl_display_init();
@@ -728,7 +735,7 @@ static data_t * get_data(void)
         data->time_us = get_real_time_us();
 
         // get camera data
-        // LATER may need a status rturn from cam_get_buff
+        // LATER may need a status return from cam_get_buff
         if (!no_cam) {
             cam_get_buff(&data->jpeg_buff_ptr, &data->jpeg_buff_len);
             data->jpeg_valid = true;
@@ -755,51 +762,6 @@ static data_t * get_data(void)
             data->current_ma = 15;
             data->pressure_mtorr = 20;
         } while (0);
-
-        // XXX move this to new routine
-        // if data time is 1 second beyond the end of current saved history then
-        //   store data in history, and
-        //   write to file
-        // endif
-        time_t t = data->time_us / 1000000;
-        if (t > history_end_time_sec) {
-            data_t data2;
-            int32_t len;
-            static off_t jpeg_buff_offset = MAX_HISTORY * sizeof(data_t);
-
-            // determine the index into history buffer, indexed by seconds
-            int32_t idx = t - history_start_time_sec;
-            if (idx < 0 || idx >= MAX_HISTORY) {
-                FATAL("invalid history idx = %d\n", idx);
-            }
-
-            // save the data in history, and
-            // update the graph cursor_time
-            history_end_time_sec = t;
-            history[idx] = *data;
-            cursor_time_sec = history_end_time_sec;
-
-            // write to history file
-            data2 = history[idx];
-            if (data2.jpeg_valid) {
-                data2.jpeg_buff_offset = jpeg_buff_offset;
-                data2.jpeg_buff_ptr = NULL;
-                jpeg_buff_offset += data2.jpeg_buff_len;
-
-                len = pwrite(fd, history[idx].jpeg_buff_ptr, data2.jpeg_buff_len, data2.jpeg_buff_offset);
-                if (len !=  data2.jpeg_buff_len) {
-                    FATAL("failed write jpeg to file, len=%d, %s\n", len, strerror(errno));
-                }
-            } else {
-                data2.jpeg_buff_offset = 0;
-                data2.jpeg_buff_ptr = NULL;
-            }
-
-            len = pwrite(fd, &data2, sizeof(data2), idx * sizeof(data2));
-            if (len != sizeof(data2)) {
-                FATAL("failed write data2 to file, len=%d, %s\n", len, strerror(errno));
-            }
-        }
     } else {
         int32_t len, idx;
 
@@ -845,4 +807,53 @@ static void free_data(data_t * data)
     }
 
     free(data);
+}
+
+// -----------------  RECORD DATA  ---------------------------------------------------
+
+static void record_data(data_t * data)
+{
+    static off_t jpeg_buff_offset = MAX_HISTORY * sizeof(data_t);
+
+    // if the caller supplied data's time is not beyond the end of saved history then return
+    time_t t = data->time_us / 1000000;
+    if (t <= history_end_time_sec) {
+        return;
+    }
+
+    // save the data in history
+    // - determine the index into history buffer, indexed by seconds
+    // - copy the data to the history buffer
+    // - update the history_end_time_sec
+    // - update the graph cursor_time
+    int32_t idx = t - history_start_time_sec;
+    DEBUG("adding history at idx %d\n", idx);
+    if (idx < 0 || idx >= MAX_HISTORY) {
+        FATAL("invalid history idx = %d\n", idx);
+    }
+    history[idx] = *data;
+    history_end_time_sec = t;
+    cursor_time_sec = history_end_time_sec; 
+
+    // write the new history entry to the file
+    int32_t len;
+    data_t data2 = history[idx];
+    if (data2.jpeg_valid) {
+        data2.jpeg_buff_offset = jpeg_buff_offset;
+        data2.jpeg_buff_ptr = NULL;
+        jpeg_buff_offset += data2.jpeg_buff_len;
+
+        len = pwrite(fd, history[idx].jpeg_buff_ptr, data2.jpeg_buff_len, data2.jpeg_buff_offset);
+        if (len != data2.jpeg_buff_len) {
+            FATAL("failed write jpeg to file, len=%d, %s\n", len, strerror(errno));
+        }
+    } else {
+        data2.jpeg_buff_offset = 0;
+        data2.jpeg_buff_ptr = NULL;
+    }
+
+    len = pwrite(fd, &data2, sizeof(data2), idx * sizeof(data2));
+    if (len != sizeof(data2)) {
+        FATAL("failed write data2 to file, len=%d, %s\n", len, strerror(errno));
+    }
 }

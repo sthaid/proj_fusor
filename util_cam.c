@@ -289,7 +289,7 @@ try_again:
 
     // shift the remaining, slot 0 needs to be the oldest
     max_buffer_avail--;
-    memmove(&buffer_avail[0], &buffer_avail[1], max_buffer_avail*sizeof(void*));
+    memmove(&buffer_avail[0], &buffer_avail[1], max_buffer_avail*sizeof(struct v4l2_buffer));
 }
 
 void cam_put_buff(uint8_t * buff)   

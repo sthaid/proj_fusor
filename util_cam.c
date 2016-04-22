@@ -74,6 +74,9 @@ void cam_init(int32_t width, int32_t height)
     enum   v4l2_buf_type       buf_type;
     int32_t                    i;
 
+    // print args
+    INFO("width=%d height=%d\n", width, height);
+
     // open webcam, try devices /dev/video0 to 1
     for (i = 0; i < 2; i++) {
         char devpath[100];
@@ -224,6 +227,9 @@ try_again:
     // dequeue buffers until no more available
     while (true) {
         struct v4l2_buffer buffer;
+
+        // dequeue camera buffer, 
+        // if no buffers available then break out of this loop
         bzero(&buffer, sizeof(buffer));
         buffer.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
         buffer.memory = V4L2_MEMORY_MMAP;
@@ -235,6 +241,19 @@ try_again:
             }
         }
 
+        // debug print
+        DEBUG("GET: index=%d addr=%p length=%d flags=0x%x\n", 
+              buffer.index, bufmap[buffer.index].addr, bufmap[buffer.index].length,  buffer.flags);
+
+        // if error flag is set then requeue the buffer and continue
+        if (buffer.flags & V4L2_BUF_FLAG_ERROR) {
+            WARN("V4L2_BUF_FLAG_ERROR is set, index=%d flags=0x%x\n", 
+                 buffer.index, buffer.flags);
+            cam_put_buff(bufmap[buffer.index].addr);
+            continue;
+        }
+
+        // save buffer at end of buffer_avail array
         if (max_buffer_avail >= MAX_BUFMAP) {
             FATAL("max_buffer_avail = %d\n", max_buffer_avail);
         }
@@ -276,9 +295,9 @@ try_again:
 void cam_put_buff(uint8_t * buff)   
 {
     struct v4l2_buffer buffer;
-    int32_t i, buff_id;
+    int32_t i, buff_idx;
 
-    // find the buff_id
+    // find the buff_idx
     for (i = 0; i < MAX_BUFMAP; i++) {
         if (bufmap[i].addr == buff) {
             break;
@@ -287,14 +306,19 @@ void cam_put_buff(uint8_t * buff)
     if (i == MAX_BUFMAP) {
         FATAL("invalid buff addr %p\n", buff);
     }
-    buff_id = i;
+    buff_idx = i;
+
+    // debug print
+    DEBUG("PUT: index=%d addr=%p length=%d\n",
+           buff_idx, bufmap[buff_idx].addr, bufmap[buff_idx].length);
 
     // give the buffer back to the driver
     bzero(&buffer,sizeof(struct v4l2_buffer));
     buffer.type   = V4L2_BUF_TYPE_VIDEO_CAPTURE;
     buffer.memory = V4L2_MEMORY_MMAP;
-    buffer.index  = buff_id;
+    buffer.length = bufmap[buff_idx].length;
+    buffer.index  = buff_idx;
     if (ioctl(cam_fd, VIDIOC_QBUF, &buffer) < 0) {
-        FATAL("ioctl VIDIOC_QBUF index=%d %s\n", buff_id, strerror(errno));
+        FATAL("ioctl VIDIOC_QBUF index=%d %s\n", buff_idx, strerror(errno));
     }
 }

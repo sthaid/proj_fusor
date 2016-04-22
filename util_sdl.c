@@ -157,6 +157,9 @@ void sdl_init(uint32_t w, uint32_t h)
 
     // register exit handler
     atexit(sdl_exit_handler);
+
+    // print success
+    INFO("success\n");
 }
 
 static void sdl_exit_handler(void)
@@ -472,13 +475,12 @@ sdl_event_t * sdl_poll_event(void)
             int32_t  key = ev.key.keysym.sym;
             bool     shift = (ev.key.keysym.mod & KMOD_SHIFT) != 0;
             bool     ctrl = (ev.key.keysym.mod & KMOD_CTRL) != 0;
+            bool     alt = (ev.key.keysym.mod & KMOD_ALT) != 0;
             int32_t  possible_event = -1;
 
-            if (ctrl) {
-                if (key == 'p') {
-                    print_screen();
-                    play_event_sound();
-                }
+            if (ctrl && key == 'p') {
+                print_screen();
+                play_event_sound();
                 break;
             }
 
@@ -502,7 +504,6 @@ sdl_event_t * sdl_poll_event(void)
                 possible_event = SDL_EVENT_KEY_RIGHT_ARROW;
             }
 
-
             if (shift) {
                 if (possible_event >= 'a' && possible_event <= 'z') {
                     possible_event = toupper(possible_event);
@@ -514,6 +515,22 @@ sdl_event_t * sdl_poll_event(void)
                     possible_event = '+';
                 } else if (possible_event == '/') {
                     possible_event = '?';
+                }
+            }
+
+            if (ctrl) {
+                if (possible_event == SDL_EVENT_KEY_LEFT_ARROW) {
+                    possible_event = SDL_EVENT_KEY_CTRL_LEFT_ARROW;
+                } else if (possible_event == SDL_EVENT_KEY_RIGHT_ARROW) {
+                    possible_event = SDL_EVENT_KEY_CTRL_RIGHT_ARROW;
+                }
+            }
+
+            if (alt) {
+                if (possible_event == SDL_EVENT_KEY_LEFT_ARROW) {
+                    possible_event = SDL_EVENT_KEY_ALT_LEFT_ARROW;
+                } else if (possible_event == SDL_EVENT_KEY_RIGHT_ARROW) {
+                    possible_event = SDL_EVENT_KEY_ALT_RIGHT_ARROW;
                 }
             }
 

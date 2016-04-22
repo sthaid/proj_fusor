@@ -7,32 +7,36 @@
 
 // events
 // - no event
-#define SDL_EVENT_NONE            0
+#define SDL_EVENT_NONE                 0
 // - ascii events 
-#define SDL_EVENT_KEY_BS          8
-#define SDL_EVENT_KEY_TAB         9
-#define SDL_EVENT_KEY_ENTER       13
-#define SDL_EVENT_KEY_ESC         27
+#define SDL_EVENT_KEY_BS               8
+#define SDL_EVENT_KEY_TAB              9
+#define SDL_EVENT_KEY_ENTER            13
+#define SDL_EVENT_KEY_ESC              27
 // - special keys
-#define SDL_EVENT_KEY_HOME        130
-#define SDL_EVENT_KEY_END         131
-#define SDL_EVENT_KEY_PGUP        132
-#define SDL_EVENT_KEY_PGDN        133
-#define SDL_EVENT_KEY_UP_ARROW    134
-#define SDL_EVENT_KEY_DOWN_ARROW  135
-#define SDL_EVENT_KEY_LEFT_ARROW  136
-#define SDL_EVENT_KEY_RIGHT_ARROW 137
-// - window  XXX do we need these
-#define SDL_EVENT_WIN_SIZE_CHANGE 140
-#define SDL_EVENT_WIN_MINIMIZED   141
-#define SDL_EVENT_WIN_RESTORED    142
+#define SDL_EVENT_KEY_HOME             130
+#define SDL_EVENT_KEY_END              131
+#define SDL_EVENT_KEY_PGUP             132
+#define SDL_EVENT_KEY_PGDN             133
+#define SDL_EVENT_KEY_UP_ARROW         134
+#define SDL_EVENT_KEY_DOWN_ARROW       135
+#define SDL_EVENT_KEY_LEFT_ARROW       136
+#define SDL_EVENT_KEY_RIGHT_ARROW      137
+#define SDL_EVENT_KEY_CTRL_LEFT_ARROW  138
+#define SDL_EVENT_KEY_CTRL_RIGHT_ARROW 139
+#define SDL_EVENT_KEY_ALT_LEFT_ARROW   140
+#define SDL_EVENT_KEY_ALT_RIGHT_ARROW  141
+// - window
+#define SDL_EVENT_WIN_SIZE_CHANGE      145
+#define SDL_EVENT_WIN_MINIMIZED        146
+#define SDL_EVENT_WIN_RESTORED         147
 // - quit
-#define SDL_EVENT_QUIT            150
+#define SDL_EVENT_QUIT                 150
 // - available to be defined by users
-#define SDL_EVENT_USER_START      160  
-#define SDL_EVENT_USER_END        999  
+#define SDL_EVENT_USER_START           160  
+#define SDL_EVENT_USER_END             999  
 // - max event
-#define SDL_EVENT_MAX             1000
+#define SDL_EVENT_MAX                  1000
 
 // event types
 #define SDL_EVENT_TYPE_NONE         0
@@ -98,7 +102,7 @@ typedef struct {
 
 // window initialize, and get_state
 void sdl_init(uint32_t w, uint32_t h);
-void sdl_get_state(int32_t * win_width, int32_t * win_height, bool * win_minimized); // XXX maybe don't need events
+void sdl_get_state(int32_t * win_width, int32_t * win_height, bool * win_minimized);
 
 // display init and present
 void sdl_display_init(void);

@@ -1,9 +1,6 @@
-// XXX measure the timing and cpu utilization
-// XXX review initialization prints
-// XXX review all files
-// XXX -g option, if not present then use the 1920x1080 or fullscrn
-// XXX move cursor in playback
 // XXX scaling code
+// XXX measure the timing and cpu utilization
+// XXX review all files
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -36,8 +33,8 @@
 // defines
 //
 
-#define WIN_WIDTH   1920
-#define WIN_HEIGHT  1000
+#define DEFAULT_WIN_WIDTH   1920
+#define DEFAULT_WIN_HEIGHT  1080
 
 #define CAM_WIDTH   960
 #define CAM_HEIGHT  720
@@ -56,6 +53,13 @@
 #define MAGIC 0x1122334455667788
 
 #define MAX_GRAPH_SCALE (sizeof(graph_scale)/sizeof(graph_scale[0]))
+
+#define ASSERT_IN_PLAYBACK_MODE() \
+    do { \
+        if (mode != PLAYBACK_MODE) { \
+            FATAL("mode must be PLACKBACK_MODE\n"); \
+        } \
+    } while (0)
 
 //
 // typedefs
@@ -95,6 +99,8 @@ typedef struct {
 static enum mode     mode;
 static bool          no_cam;
 static bool          no_dataq;
+static uint32_t      win_width = DEFAULT_WIN_WIDTH;
+static uint32_t      win_height = DEFAULT_WIN_HEIGHT;
 
 static int32_t       fd;
 static void        * fd_mmap_addr;
@@ -142,16 +148,23 @@ void initialize(int32_t argc, char ** argv)
     char filename[100];
 
     // parse options
+    // -g WxH   : window width and height, default 1920x1080
     // -n cam   : no camera, applies only in live mode
     // -n dataq : no data acquisition, applies only in live mode
     // -v       : version
     // -h       : help
     while (true) {
-        char opt_char = getopt(argc, argv, "n:hv");
+        char opt_char = getopt(argc, argv, "g:n:hv");
         if (opt_char == -1) {
             break;
         }
         switch (opt_char) {
+        case 'g':
+            if (sscanf(optarg, "%dx%d", &win_width, &win_height) != 2) {
+                printf("invalid '-g %s'\n", optarg);
+                exit(1);
+            }
+            break;
         case 'n':
             if (strcmp(optarg, "cam") == 0) {
                 no_cam = true;
@@ -193,6 +206,7 @@ void initialize(int32_t argc, char ** argv)
     INFO("starting in %s mode\n",
          (mode == LIVE_MODE ? "LIVE" : "PLAYBACK"));
     INFO("  filename  = %s\n", filename);
+    INFO("  WxH       = %dx%d\n", win_width, win_height);
     INFO("  no_cam    = %s\n", bool2str(no_cam));
     INFO("  no_dataq  = %s\n", bool2str(no_dataq));
 
@@ -268,11 +282,15 @@ void initialize(int32_t argc, char ** argv)
 
         history_start_time_sec = history[0].time_us / 1000000;
         history_end_time_sec = history_start_time_sec + max_history - 1;
+#if 0
         if (max_history > 60) {
             cursor_time_sec = history_start_time_sec + 30;
         } else {
             cursor_time_sec = history_start_time_sec + max_history / 2;
         }
+#else
+        cursor_time_sec = history_start_time_sec;
+#endif
 
         time2str(start_time_str, history_start_time_sec*(uint64_t)1000000, false, false, true);
         time2str(end_time_str, history_end_time_sec*(uint64_t)1000000, false, false, true);
@@ -298,6 +316,8 @@ DESCRIPTION\n\
     scaled values are read from the FILE and displayed.\n\
 \n\
 OPTIONS\n\
+    -g WxH   : window width and height, default 1920x1080\n\
+\n\
     -n cam   : no camera, applies only in live mode\n\
 \n\
     -n dataq : no data acquisition, applies only in live mode\n\
@@ -334,21 +354,21 @@ static void display_handler(void)
     // initializae 
     done = false;
 
-    sdl_init(WIN_WIDTH, WIN_HEIGHT);
+    sdl_init(win_width, win_height);
     cam_texture = sdl_create_yuy2_texture(CAM_HEIGHT,CAM_HEIGHT);
 
     sdl_init_pane(&title_pane_full, &title_pane, 
                   0, 0, 
-                  WIN_WIDTH, FONT0_HEIGHT+4);
+                  win_width, FONT0_HEIGHT+4);
     sdl_init_pane(&cam_pane_full, &cam_pane, 
                   0, FONT0_HEIGHT+2, 
                   CAM_HEIGHT+4, CAM_HEIGHT+4); 
     sdl_init_pane(&data_pane_full, &data_pane, 
                   CAM_HEIGHT+2, FONT0_HEIGHT+2, 
-                  WIN_WIDTH-(CAM_HEIGHT+2), CAM_HEIGHT+4); 
+                  win_width-(CAM_HEIGHT+2), CAM_HEIGHT+4); 
     sdl_init_pane(&graph_pane_full, &graph_pane, 
                   0, FONT0_HEIGHT+CAM_HEIGHT+4,
-                  WIN_WIDTH, WIN_HEIGHT-(FONT0_HEIGHT+CAM_HEIGHT+4));
+                  win_width, win_height-(FONT0_HEIGHT+CAM_HEIGHT+4));
 
     // loop until done
     while (!done) {
@@ -388,6 +408,16 @@ static void display_handler(void)
         sdl_event_register('+', SDL_EVENT_TYPE_KEY, NULL);
         sdl_event_register('=', SDL_EVENT_TYPE_KEY, NULL);
         sdl_event_register('-', SDL_EVENT_TYPE_KEY, NULL);
+        if (mode == PLAYBACK_MODE) {
+            sdl_event_register(SDL_EVENT_KEY_LEFT_ARROW, SDL_EVENT_TYPE_KEY, NULL);
+            sdl_event_register(SDL_EVENT_KEY_RIGHT_ARROW, SDL_EVENT_TYPE_KEY, NULL);
+            sdl_event_register(SDL_EVENT_KEY_CTRL_LEFT_ARROW, SDL_EVENT_TYPE_KEY, NULL);
+            sdl_event_register(SDL_EVENT_KEY_CTRL_RIGHT_ARROW, SDL_EVENT_TYPE_KEY, NULL);
+            sdl_event_register(SDL_EVENT_KEY_ALT_LEFT_ARROW, SDL_EVENT_TYPE_KEY, NULL);
+            sdl_event_register(SDL_EVENT_KEY_ALT_RIGHT_ARROW, SDL_EVENT_TYPE_KEY, NULL);
+            sdl_event_register(SDL_EVENT_KEY_HOME, SDL_EVENT_TYPE_KEY, NULL);
+            sdl_event_register(SDL_EVENT_KEY_END, SDL_EVENT_TYPE_KEY, NULL);
+        }
 
         // present the display
         sdl_display_present();
@@ -395,6 +425,7 @@ static void display_handler(void)
         // process events
         event = sdl_poll_event();
         switch (event->event) {
+        // live or playback mode ...
         case SDL_EVENT_QUIT: 
         case SDL_EVENT_KEY_ESC: 
             done = true;
@@ -402,16 +433,46 @@ static void display_handler(void)
         case '?':  
             sdl_display_text(about);
             break;
-        case '+':
-        case '=':
+        case '-':
             if (graph_scale_idx < MAX_GRAPH_SCALE-1) {
                 graph_scale_idx++;
             }
             break;
-        case '-':
+        case '+': case '=':
             if (graph_scale_idx > 0) {
                 graph_scale_idx--;
             }
+            break;
+        // playback mode only ...
+        case SDL_EVENT_KEY_LEFT_ARROW:
+        case SDL_EVENT_KEY_CTRL_LEFT_ARROW:
+        case SDL_EVENT_KEY_ALT_LEFT_ARROW:
+            ASSERT_IN_PLAYBACK_MODE();
+            cursor_time_sec -= (event->event == SDL_EVENT_KEY_LEFT_ARROW      ? 1 :
+                                event->event == SDL_EVENT_KEY_CTRL_LEFT_ARROW ? 10 
+                                                                              : 60);
+            if (cursor_time_sec < history_start_time_sec) {
+                cursor_time_sec = history_start_time_sec;
+            }
+            break;
+        case SDL_EVENT_KEY_RIGHT_ARROW:
+        case SDL_EVENT_KEY_CTRL_RIGHT_ARROW:
+        case SDL_EVENT_KEY_ALT_RIGHT_ARROW:
+            ASSERT_IN_PLAYBACK_MODE();
+            cursor_time_sec += (event->event == SDL_EVENT_KEY_RIGHT_ARROW      ? 1 :
+                                event->event == SDL_EVENT_KEY_CTRL_RIGHT_ARROW ? 10 
+                                                                               : 60);
+            if (cursor_time_sec > history_end_time_sec) {
+                cursor_time_sec = history_end_time_sec;
+            }
+            break;
+        case SDL_EVENT_KEY_HOME:
+            ASSERT_IN_PLAYBACK_MODE();
+            cursor_time_sec = history_start_time_sec;
+            break;
+        case SDL_EVENT_KEY_END:
+            ASSERT_IN_PLAYBACK_MODE();
+            cursor_time_sec = history_end_time_sec;
             break;
         default:
             break;
@@ -513,17 +574,8 @@ static void draw_graph(rect_t * graph_pane)
 
     // determine graph_start_sec and graph_end_sec
     if (mode == LIVE_MODE) {
-#if 0 
-        graph_start_time_sec = history_start_time_sec;
-        graph_end_time_sec = graph_start_time_sec + (T_span - 1);
-        if (cursor_time_sec > graph_end_time_sec) {
-            graph_end_time_sec = cursor_time_sec;
-            graph_start_time_sec = graph_end_time_sec - (T_span - 1);
-        }
-#else
         graph_end_time_sec = cursor_time_sec;
         graph_start_time_sec = graph_end_time_sec - (T_span - 1);
-#endif
     } else {
         graph_start_time_sec = cursor_time_sec - T_span / 2;
         graph_end_time_sec = graph_start_time_sec + T_span - 1;
@@ -638,6 +690,13 @@ static void draw_graph(rect_t * graph_pane)
                     -1, str_col,
                     0, str, BLACK, WHITE);
 
+    // draw playback mode controls
+    if (mode == PLAYBACK_MODE) {
+        sdl_render_text(graph_pane, 
+                        -2, str_col,
+                        0, "CURSOR (</>/CTRL/ALT)", BLACK, WHITE);
+    }
+
     // draw graph names 
     for (i = 0; i < MAX_GRAPH_CONFIG; i++) {
         sdl_render_text(graph_pane, 
@@ -669,6 +728,7 @@ static data_t * get_data(void)
         data->time_us = get_real_time_us();
 
         // get camera data
+        // LATER may need a status rturn from cam_get_buff
         if (!no_cam) {
             cam_get_buff(&data->jpeg_buff_ptr, &data->jpeg_buff_len);
             data->jpeg_valid = true;
@@ -696,6 +756,7 @@ static data_t * get_data(void)
             data->pressure_mtorr = 20;
         } while (0);
 
+        // XXX move this to new routine
         // if data time is 1 second beyond the end of current saved history then
         //   store data in history, and
         //   write to file

@@ -210,6 +210,9 @@ void dataq_init(float averaging_duration_sec, int32_t max_adc_chan, ...)
 
     // delay to allow adc data to be available
     usleep(averaging_duration_sec*1000000 + 250000);
+
+    // print success
+    INFO("success\n");
 }
 
 int32_t dataq_get_adc(int32_t adc_chan, float * rms, float * mean, float * sdev, float * min, float * max)

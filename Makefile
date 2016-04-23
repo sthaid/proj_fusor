@@ -1,37 +1,35 @@
 TARGETS = fusor
 
 CC = gcc
+OUTPUT_OPTION=-MMD -MP -o $@
 CFLAGS = -c -g -O2 -pthread -fsigned-char -Wall \
          $(shell sdl2-config --cflags) 
 
-OBJS = main.o \
-       util_sdl.o \
-       util_sdl_predefined_displays.o \
-       util_jpeg_decode.o \
-       util_dataq.o \
-       util_cam.o \
-       util_misc.o
+SRC = main.c \
+      util_sdl.c \
+      util_sdl_predefined_displays.c \
+      util_jpeg_decode.c \
+      util_dataq.c \
+      util_cam.c \
+      util_misc.c
+OBJ=$(SRC:.c=.o)
+DEP=$(SRC:.c=.d)
 
 #
 # build rules
 #
 
-all: $(TARGETS)
-
-fusor: $(OBJS) 
-	$(CC) -pthread -lrt -ljpeg -lpng -lm -lSDL2 -lSDL2_ttf -lSDL2_mixer -o $@ $(OBJS)
+fusor: $(OBJ) 
+	$(CC) -pthread -lrt -ljpeg -lpng -lm -lSDL2 -lSDL2_ttf -lSDL2_mixer -o $@ $(OBJ)
 	sudo chown root:root fusor
 	sudo chmod 4777 fusor
+
+-include $(DEP)
 
 #
 # clean rule
 #
 
 clean:
-	rm -f $(TARGETS) $(OBJS)
-
-#
-# compile rules
-# XXX use makedepend
-#
+	rm -f $(TARGETS) $(OBJ) $(DEP)
 

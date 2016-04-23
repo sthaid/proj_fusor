@@ -478,7 +478,6 @@ sdl_event_t * sdl_poll_event(void)
             bool     alt = (ev.key.keysym.mod & KMOD_ALT) != 0;
             int32_t  possible_event = -1;
 
-            INFO("GOT KEYDN %x\n", key); //XXX
 
             if (ctrl && key == 'p') {
                 print_screen();
@@ -504,6 +503,8 @@ sdl_event_t * sdl_poll_event(void)
                 possible_event = SDL_EVENT_KEY_LEFT_ARROW;
             } else if (key == SDLK_RIGHT) {
                 possible_event = SDL_EVENT_KEY_RIGHT_ARROW;
+            } else if (key == SDLK_RSHIFT || key == SDLK_LSHIFT) {
+                possible_event = SDL_EVENT_KEY_SHIFT;
             }
 
             if (shift) {
@@ -518,17 +519,13 @@ sdl_event_t * sdl_poll_event(void)
                 } else if (possible_event == '/') {
                     possible_event = '?';
                 }
-            }
-
-            if (ctrl) {
+            } else if (ctrl) {
                 if (possible_event == SDL_EVENT_KEY_LEFT_ARROW) {
                     possible_event = SDL_EVENT_KEY_CTRL_LEFT_ARROW;
                 } else if (possible_event == SDL_EVENT_KEY_RIGHT_ARROW) {
                     possible_event = SDL_EVENT_KEY_CTRL_RIGHT_ARROW;
                 }
-            }
-
-            if (alt) {
+            } else if (alt) {
                 if (possible_event == SDL_EVENT_KEY_LEFT_ARROW) {
                     possible_event = SDL_EVENT_KEY_ALT_LEFT_ARROW;
                 } else if (possible_event == SDL_EVENT_KEY_RIGHT_ARROW) {
@@ -547,8 +544,12 @@ sdl_event_t * sdl_poll_event(void)
 
         case SDL_KEYUP: {
             int32_t  key = ev.key.keysym.sym;
+            bool     shift = (ev.key.keysym.mod & KMOD_SHIFT) != 0;
 
-            INFO("GOT KEYUP %x\n", key); //XXX
+            if ((key == SDLK_RSHIFT || key == SDLK_LSHIFT) && !shift) {
+                event.event = SDL_EVENT_KEY_UNSHIFT;
+                play_event_sound();
+            }
             break; }
 
        case SDL_WINDOWEVENT: {

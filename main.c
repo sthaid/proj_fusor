@@ -1,9 +1,4 @@
 // XXX scaling code for pressure
-// XXX measure the timing and cpu utilization
-// XXX check cpu utilization when in playback mode, maybe a delay is needed
-// XXX review all files
-// XXX update about.h
-// XXX test adc with battery
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -29,12 +24,13 @@
 #include "util_cam.h"
 #include "util_misc.h"
 
-#define VERSION_STR  "1.0"
 #include "about.h"
 
 //
 // defines
 //
+
+#define VERSION_STR  "1.0"
 
 #define DEFAULT_WIN_WIDTH   1920
 #define DEFAULT_WIN_HEIGHT  1080
@@ -441,11 +437,8 @@ static void display_handler(void)
             done = true;
             break;
         case '?':  
-            // LATER, get ca_get_buff discarding when select '?'
-            //XXX sdl_display_text(about);
-            // XXX ^c from here doesn't kill pgm
-            { char retstr[100];
-            sdl_display_get_string(1, "prompt", "123", retstr); }
+            // LATER, get cam_get_buff discarding when selected '?'
+            sdl_display_text(about);
             break;
         case '-':
             if (graph_scale_idx < MAX_GRAPH_SCALE-1) {
@@ -854,6 +847,8 @@ static void record_data(data_t * data)
     cursor_time_sec = history_end_time_sec; 
 
     // write the new history entry to the file
+    // XXX got the following error when writing:
+    //     failed write jpeg to file, len=82899, Resource temporarily unavailable
     int32_t len;
     data_t data2 = history[idx];
     if (data2.jpeg_valid) {
@@ -919,6 +914,6 @@ static float convert_adc_current(float adc_volts)
 
 static float convert_adc_pressure(float adc_volts)
 {
-    // XXX tbd
+    // XXX tbd convert_adc_pressure
     return 1;
 }

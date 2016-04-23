@@ -1,12 +1,9 @@
 XXX
 ---
 XXX copyright notices
-
-learn apt-get
-how to select git commit editor
-
+XXX learn apt-get
+XXX how to select git commit editor
 XXX update this file
-
 
 ================================
 TITLE: INSTALL RASPBERRY PI

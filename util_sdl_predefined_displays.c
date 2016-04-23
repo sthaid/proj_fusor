@@ -13,14 +13,17 @@
 #include "util_sdl.h"
 #include "util_misc.h"
 
-// -----------------  PREDEFINED DISPLAYS  ----------------------------- 
+//
+// defines
+//
 
-// user events used in this file
-#define SDL_EVENT_KEY_SHIFT       (SDL_EVENT_USER_START+0)
+#define SDL_EVENT_SHIFT           (SDL_EVENT_USER_START+0)
 #define SDL_EVENT_MOUSE_MOTION    (SDL_EVENT_USER_START+1)
 #define SDL_EVENT_MOUSE_WHEEL     (SDL_EVENT_USER_START+2)
 #define SDL_EVENT_FIELD_SELECT    (SDL_EVENT_USER_START+3)    // through +9
 #define SDL_EVENT_LIST_CHOICE     (SDL_EVENT_USER_START+10)   // through +49
+
+// -----------------  PREDEFINED DISPLAYS  ----------------------------- 
 
 void sdl_display_get_string(int32_t count, ...)
 {
@@ -99,11 +102,13 @@ void sdl_display_get_string(int32_t count, ...)
             }
         }
         sdl_render_text_with_event(&keybdpane, r+6, c+27, 1, "SPACE",  LIGHT_BLUE, BLACK, ' ');
-        sdl_render_text_with_event(&keybdpane, r+8, c+0,  1, "SHIFT",  LIGHT_BLUE, BLACK, SDL_EVENT_KEY_SHIFT);  //XXX
+        sdl_render_text_with_event(&keybdpane, r+8, c+0,  1, "SHIFT",  LIGHT_BLUE, BLACK, SDL_EVENT_SHIFT);
         sdl_render_text_with_event(&keybdpane, r+8, c+8,  1, "BS",     LIGHT_BLUE, BLACK, SDL_EVENT_KEY_BS);
         sdl_render_text_with_event(&keybdpane, r+8, c+13, 1, "TAB",    LIGHT_BLUE, BLACK, SDL_EVENT_KEY_TAB);
         sdl_render_text_with_event(&keybdpane, r+8, c+19, 1, "ESC",    LIGHT_BLUE, BLACK, SDL_EVENT_KEY_ESC);
         sdl_render_text_with_event(&keybdpane, r+8, c+25, 1, "ENTER",  LIGHT_BLUE, BLACK, SDL_EVENT_KEY_ENTER);
+        sdl_event_register(SDL_EVENT_KEY_SHIFT,   SDL_EVENT_TYPE_KEY, NULL);
+        sdl_event_register(SDL_EVENT_KEY_UNSHIFT, SDL_EVENT_TYPE_KEY, NULL);
 
         // draw prompts
         for (i = 0; i < count; i++) {
@@ -124,36 +129,48 @@ void sdl_display_get_string(int32_t count, ...)
         sdl_display_present();
 
         // handle events 
-        event = sdl_poll_event();
-        if (event->event == SDL_EVENT_QUIT) {
-            break;
-        } else if (event->event == SDL_EVENT_KEY_SHIFT) {
-            shift = !shift;
-        } else if (event->event == SDL_EVENT_KEY_BS) {
-            int32_t len = strlen(ret_str[field_select]);
-            if (len > 0) {
-                ret_str[field_select][len-1] = '\0';
-            }
-        } else if (event->event == SDL_EVENT_KEY_TAB) {
-            field_select = (field_select + 1) % count;
-        } else if (event->event == SDL_EVENT_KEY_ENTER) {
-            break;
-        } else if (event->event == SDL_EVENT_KEY_ESC) {
-            if (strcmp(ret_str[field_select], curr_str[field_select])) {
-                strcpy(ret_str[field_select], curr_str[field_select]);
-            } else {
-                for (i = 0; i < count; i++) {
-                    strcpy(ret_str[i], curr_str[i]);
-                }
+        while (true)  {
+            event = sdl_poll_event();
+            if (event->event == SDL_EVENT_NONE || event->event == SDL_EVENT_QUIT) {
                 break;
+            } else if (event->event == SDL_EVENT_SHIFT) {
+                shift = !shift;
+                break;
+            } else if (event->event == SDL_EVENT_KEY_SHIFT) {
+                shift = true;
+                break;
+            } else if (event->event == SDL_EVENT_KEY_UNSHIFT) {
+                shift = false;
+                break;
+            } else if (event->event == SDL_EVENT_KEY_BS) {
+                int32_t len = strlen(ret_str[field_select]);
+                if (len > 0) {
+                    ret_str[field_select][len-1] = '\0';
+                }
+            } else if (event->event == SDL_EVENT_KEY_TAB) {
+                field_select = (field_select + 1) % count;
+            } else if (event->event == SDL_EVENT_KEY_ENTER) {
+                break;
+            } else if (event->event == SDL_EVENT_KEY_ESC) {
+                if (strcmp(ret_str[field_select], curr_str[field_select])) {
+                    strcpy(ret_str[field_select], curr_str[field_select]);
+                } else {
+                    for (i = 0; i < count; i++) {
+                        strcpy(ret_str[i], curr_str[i]);
+                    }
+                    break;
+                }
+            } else if (event->event >= SDL_EVENT_FIELD_SELECT && event->event < SDL_EVENT_FIELD_SELECT+count) {
+                field_select = event->event - SDL_EVENT_FIELD_SELECT;
+            } else if (event->event >= 0x20 && event->event <= 0x7e) {
+                char s[2];
+                s[0] = event->event;
+                s[1] = '\0';
+                strcat(ret_str[field_select], s);
             }
-        } else if (event->event >= SDL_EVENT_FIELD_SELECT && event->event < SDL_EVENT_FIELD_SELECT+count) {
-            field_select = event->event - SDL_EVENT_FIELD_SELECT;
-        } else if (event->event >= 0x20 && event->event <= 0x7e) {
-            char s[2];
-            s[0] = event->event;
-            s[1] = '\0';
-            strcat(ret_str[field_select], s);
+        }
+        if (event->event == SDL_EVENT_KEY_ENTER || event->event == SDL_EVENT_QUIT) {
+            break;
         }
     }
 }

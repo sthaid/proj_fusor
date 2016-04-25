@@ -1,3 +1,10 @@
+// XXX display numeric values in graph pane too
+// XXX scaling code for pressure
+// XXX got the following error when writing:
+//     failed write jpeg to file, len=82899, Resource temporarily unavailable
+//     RETEST
+// XXX test building on linux and reading file made on rpi
+
 /*
 Copyright (c) 2016 Steven Haid
 
@@ -20,7 +27,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-// XXX scaling code for pressure
+#define _FILE_OFFSET_BITS 64
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -36,6 +43,7 @@ SOFTWARE.
 
 #include <time.h>
 #include <fcntl.h>
+#include <math.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/mman.h>
@@ -75,12 +83,28 @@ SOFTWARE.
 
 #define MAX_GRAPH_SCALE (sizeof(graph_scale)/sizeof(graph_scale[0]))
 
+#define ASSERT_IN_LIVE_MODE() \
+    do { \
+        if (mode != LIVE_MODE) { \
+            FATAL("mode must be LIVE_MODE\n"); \
+        } \
+    } while (0)
 #define ASSERT_IN_PLAYBACK_MODE() \
     do { \
         if (mode != PLAYBACK_MODE) { \
             FATAL("mode must be PLACKBACK_MODE\n"); \
         } \
     } while (0)
+
+#define IS_ERROR(x) ((int32_t)(x) >= ERROR_FIRST && (int32_t)(x) <= ERROR_LAST)
+#define ERROR_FIRST                   1000000
+#define ERROR_PRESSURE_SENSOR_FAULTY  1000000
+#define ERROR_OVER_PRESSURE           1000001
+#define ERROR_LAST                    1000001
+#define ERROR_TEXT(x) \
+    ((int32_t)(x) == ERROR_PRESSURE_SENSOR_FAULTY ? "FAULTY" : \
+     (int32_t)(x) == ERROR_OVER_PRESSURE          ? "OVPRES"  \
+                                                  : "????")
 
 //
 // typedefs
@@ -95,14 +119,17 @@ typedef struct {
     uint64_t     time_us;
 
     bool         data_valid;
+    uint8_t      gas_id;
+    uint8_t      reserved1[2];
     float        voltage_rms_kv;
     float        voltage_min_kv;
     float        voltage_max_kv;
     float        current_ma;
     float        pressure_mtorr;
-    float        reserved[4];
+    float        reserved2[4];
 
     bool         jpeg_valid;
+    uint8_t      reserved3[3];
     uint32_t     jpeg_buff_len;
     uint8_t    * jpeg_buff_ptr;
     uint64_t     jpeg_buff_offset;
@@ -149,18 +176,24 @@ static char * bool2str(bool b);
 static void display_handler();
 static void draw_camera_image(data_t * data, rect_t * cam_pane, texture_t cam_texture);
 static void draw_data_values(data_t *data, rect_t * data_pane);
+static char * val2str(char * str, float val, char * trailer_str);
 static void draw_graph(rect_t * graph_pane);
 static data_t *  get_data(void);
 static void free_data(data_t * data);
 static void record_data(data_t * data);
 static float convert_adc_voltage(float adc_volts);
 static float convert_adc_current(float adc_volts);
-static float convert_adc_pressure(float adc_volts);
+static float convert_adc_pressure(float adc_volts, uint32_t gas_id);
+static uint32_t gas_get_id(void);
+static void gas_id_cycle(void);
+static char * gas_get_name(uint32_t gas_id);
 
 // -----------------  MAIN  ----------------------------------------------------------
 
 int32_t main(int32_t argc, char **argv)
 {
+    printf("XXX sizeof data_t = %zd\n", sizeof(data_t));
+
     initialize(argc, argv);
     display_handler();
     return 0;
@@ -436,6 +469,9 @@ static void display_handler(void)
         sdl_event_register('+', SDL_EVENT_TYPE_KEY, NULL);
         sdl_event_register('=', SDL_EVENT_TYPE_KEY, NULL);
         sdl_event_register('-', SDL_EVENT_TYPE_KEY, NULL);
+        if (mode == LIVE_MODE) {
+            sdl_event_register('g', SDL_EVENT_TYPE_KEY, NULL);
+        }
         if (mode == PLAYBACK_MODE) {
             sdl_event_register(SDL_EVENT_KEY_LEFT_ARROW, SDL_EVENT_TYPE_KEY, NULL);
             sdl_event_register(SDL_EVENT_KEY_RIGHT_ARROW, SDL_EVENT_TYPE_KEY, NULL);
@@ -459,7 +495,6 @@ static void display_handler(void)
             done = true;
             break;
         case '?':  
-            // LATER, get cam_get_buff discarding when selected '?'
             sdl_display_text(about);
             break;
         case '-':
@@ -471,6 +506,10 @@ static void display_handler(void)
             if (graph_scale_idx > 0) {
                 graph_scale_idx--;
             }
+            break;
+        // live mode only
+        case 'g':
+            gas_id_cycle();
             break;
         // playback mode only ...
         case SDL_EVENT_KEY_LEFT_ARROW:
@@ -548,21 +587,42 @@ static void draw_camera_image(data_t * data, rect_t * cam_pane, texture_t cam_te
 static void draw_data_values(data_t *data, rect_t * data_pane)
 {
     char str[100];
+    char trailer_str[100];
 
     if (!data->data_valid) {
         return;
     }
         
-    sprintf(str, "%4.1f kV rms", data->voltage_rms_kv);
+    val2str(str, data->voltage_rms_kv, "kV rms");
     sdl_render_text(data_pane, 0, 0, 1, str, WHITE, BLACK);
-    sprintf(str, "%4.1f kV min", data->voltage_min_kv);
+
+    val2str(str, data->voltage_min_kv, "kV min");
     sdl_render_text(data_pane, 1, 0, 1, str, WHITE, BLACK);
-    sprintf(str, "%4.1f kV max", data->voltage_max_kv);
+
+    val2str(str, data->voltage_max_kv, "kV max");
     sdl_render_text(data_pane, 2, 0, 1, str, WHITE, BLACK);
-    sprintf(str, "%4.1f mA", data->current_ma);
+
+    val2str(str, data->current_ma, "mA");
     sdl_render_text(data_pane, 3, 0, 1, str, WHITE, BLACK);
-    sprintf(str, "%4.1f mTorr", data->pressure_mtorr);
+
+    if (data->pressure_mtorr < 1000 || IS_ERROR(data->pressure_mtorr)) {
+        sprintf(trailer_str, "mTorr %s (g)", gas_get_name(data->gas_id));
+        val2str(str, data->pressure_mtorr, trailer_str);
+    } else {
+        sprintf(trailer_str, "Torr %s (g)", gas_get_name(data->gas_id));
+        val2str(str, data->pressure_mtorr/1000, trailer_str);
+    }
     sdl_render_text(data_pane, 4, 0, 1, str, WHITE, BLACK);
+}
+
+static char * val2str(char * str, float val, char * trailer_str)
+{
+    if (!IS_ERROR(val)) {
+        sprintf(str, "%6.2f %s", val, trailer_str);
+    } else {
+        sprintf(str, "%6s %s", ERROR_TEXT(val), trailer_str);
+    }
+    return str;
 }
 
 static void draw_graph(rect_t * graph_pane)
@@ -634,9 +694,13 @@ static void draw_graph(rect_t * graph_pane)
         max_points = 0;
 
         for (t = graph_end_time_sec; t >= graph_start_time_sec; t -= T_delta) {
+            float value;
             idx = t - history_start_time_sec;
-            if ((idx >= 0 && idx < MAX_HISTORY) && history[idx].data_valid) {
-                float value  = *(float*)((void*)&history[idx] + gc->field_offset);
+            if (idx >= 0 && 
+                idx < MAX_HISTORY && 
+                history[idx].data_valid &&
+                ((value = *(float*)((void*)&history[idx] + gc->field_offset)), !IS_ERROR(value)))
+            {
                 if (value < 0) {
                     value = 0;
                 } else if (value > gc->max_value) {
@@ -790,7 +854,9 @@ static data_t * get_data(void)
             if (ret != 0) {
                 break;
             }
-            data->pressure_mtorr = convert_adc_pressure(mean);
+            mean = 3.386;  // XXX temp set value for testing
+            data->gas_id = gas_get_id();
+            data->pressure_mtorr = convert_adc_pressure(mean, data->gas_id);
 
             // set data_valid flag
             data->data_valid = true;
@@ -869,8 +935,6 @@ static void record_data(data_t * data)
     cursor_time_sec = history_end_time_sec; 
 
     // write the new history entry to the file
-    // XXX got the following error when writing:
-    //     failed write jpeg to file, len=82899, Resource temporarily unavailable
     int32_t len;
     data_t data2 = history[idx];
     if (data2.jpeg_valid) {
@@ -880,7 +944,8 @@ static void record_data(data_t * data)
 
         len = pwrite(fd, history[idx].jpeg_buff_ptr, data2.jpeg_buff_len, data2.jpeg_buff_offset);
         if (len != data2.jpeg_buff_len) {
-            FATAL("failed write jpeg to file, len=%d, %s\n", len, strerror(errno));
+            FATAL("failed write jpeg to file, ret_len=%d, exp_len=%d, %s\n", 
+                  len, data2.jpeg_buff_len, strerror(errno));
         }
     } else {
         data2.jpeg_buff_offset = 0;
@@ -889,11 +954,12 @@ static void record_data(data_t * data)
 
     len = pwrite(fd, &data2, sizeof(data2), idx * sizeof(data2));
     if (len != sizeof(data2)) {
-        FATAL("failed write data2 to file, len=%d, %s\n", len, strerror(errno));
+        FATAL("failed write data2 to file, ret_len=%d, exp_len=%d, %s\n", 
+              len, sizeof(data2), strerror(errno));
     }
 }
 
-// -----------------  CONVERT ADC VALUES ---------------------------------------------
+// -----------------  CONVERT ADC HV VOLTAGE & CURRENT  ------------------------------
 
 // These routines convert the voltage read from the dataq adc channels to
 // the value which will be displayed. 
@@ -934,8 +1000,129 @@ static float convert_adc_current(float adc_volts)
     return adc_volts * 10.;    // mA
 }
 
-static float convert_adc_pressure(float adc_volts)
+// -----------------  CONVERT ADC PRESSURE GAUGE  ------------------------------------
+
+// Notes:
+// 1- Refer to http://www.lesker.com/newweb/gauges/pdf/manuals/275iusermanual.pdf
+// 2- XXX cvt pgm
+
+// --- defines ---
+
+#define MAX_GAS_TBL (sizeof(gas_tbl)/sizeof(gas_tbl[0]))
+
+// --- typedefs ---
+
+typedef struct {
+    char * name;
+    struct {
+        float pressure;
+        float voltage;
+    } interp_tbl[50];
+} gas_t;
+
+// --- variables ---
+
+gas_t gas_tbl[] = { 
+    { "D2",
+      { {     0.00001,     0.000 },  // added by me
+        {     0.00002,     0.301 },  // added by me
+        {     0.00005,     0.699 },  // added by me
+        {     0.0001,      1.000 },
+        {     0.0002,      1.301 },
+        {     0.0005,      1.699 },
+        {     0.0010,      2.114 },
+        {     0.0020,      2.380 },
+        {     0.0050,      2.778 },
+        {     0.0100,      3.083 },
+        {     0.0200,      3.386 },
+        {     0.0500,      3.778 },
+        {     0.1000,      4.083 },
+        {     0.2000,      4.398 },
+        {     0.5000,      4.837 },
+        {     1.0000,      5.190 },
+        {     2.0000,      5.616 },
+        {     5.0000,      7.391 }, } },
+    { "N2",
+      { {     0.00001,     0.000 },  // added by me
+        {     0.00002,     0.301 },  // added by me
+        {     0.00005,     0.699 },  // added by me
+        {     0.0001,      1.000 },
+        {     0.0002,      1.301 },
+        {     0.0005,      1.699 },
+        {     0.0010,      2.000 },
+        {     0.0020,      2.301 },
+        {     0.0050,      2.699 },
+        {     0.0100,      3.000 },
+        {     0.0200,      3.301 },
+        {     0.0500,      3.699 },
+        {     0.1000,      4.000 },
+        {     0.2000,      4.301 },
+        {     0.5000,      4.699 },
+        {     1.0000,      5.000 },
+        {     2.0000,      5.301 },
+        {     5.0000,      5.699 },
+        {    10.0000,      6.000 },
+        {    20.0000,      6.301 },
+        {    50.0000,      6.699 },
+        {   100.0000,      7.000 },
+        {   200.0000,      7.301 },
+        {   300.0000,      7.477 },
+        {   400.0000,      7.602 },
+        {   500.0000,      7.699 },
+        {   600.0000,      7.778 },
+        {   700.0000,      7.845 },
+        {   760.0000,      7.881 },
+        {   800.0000,      7.903 },
+        {   900.0000,      7.954 },
+        {  1000.0000,      8.000 }, } },
+                                            };
+
+// --- code ---
+
+static float convert_adc_pressure(float adc_volts, uint32_t gas_id)
 {
-    // XXX tbd convert_adc_pressure
-    return 1;
+    gas_t * gas = &gas_tbl[gas_id];
+    int32_t i = 0;
+
+    if (adc_volts < 0.01) {
+        return ERROR_PRESSURE_SENSOR_FAULTY;
+    }
+
+    while (true) {
+        if (gas->interp_tbl[i+1].voltage == 0) {
+            return ERROR_OVER_PRESSURE;
+        }
+
+        if (adc_volts >= gas->interp_tbl[i].voltage &&
+            adc_volts <= gas->interp_tbl[i+1].voltage)
+        {
+            float p0 = gas->interp_tbl[i].pressure;
+            float p1 = gas->interp_tbl[i+1].pressure;
+            float v0 = gas->interp_tbl[i].voltage;
+            float v1 = gas->interp_tbl[i+1].voltage;
+            float torr =  p0 + (p1 - p0) * (adc_volts - v0) / (v1 - v0);
+            return torr * 1000.0;
+        }
+        i++;
+    }
+}    
+
+static uint32_t gas_live_mode_id;
+
+static uint32_t gas_get_id(void)
+{
+    ASSERT_IN_LIVE_MODE();
+    return gas_live_mode_id;
 }
+
+static void gas_id_cycle(void) 
+{
+    ASSERT_IN_LIVE_MODE();
+    gas_live_mode_id = (gas_live_mode_id + 1) % MAX_GAS_TBL;
+}
+
+static char * gas_get_name(uint32_t gas_id)
+{
+    return gas_tbl[gas_id].name;
+}
+

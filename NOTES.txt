@@ -1,8 +1,5 @@
 XXX
 ---
-XXX copyright notices
-XXX learn apt-get
-XXX how to select git commit editor
 XXX update this file
 
 ================================

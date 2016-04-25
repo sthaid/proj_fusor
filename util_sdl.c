@@ -130,6 +130,7 @@ void sdl_init(uint32_t w, uint32_t h)
     SDL_GetWindowSize(sdl_window, &sdl_win_width, &sdl_win_height);
     INFO("sdl_win_width=%d sdl_win_height=%d\n", sdl_win_width, sdl_win_height);
 
+#if 0
     // init button_sound
     if (Mix_OpenAudio( 22050, MIX_DEFAULT_FORMAT, 2, 4096) < 0) {
         WARN("Mix_OpenAudio failed\n");
@@ -140,6 +141,7 @@ void sdl_init(uint32_t w, uint32_t h)
         }
         Mix_VolumeChunk(sdl_button_sound,MIX_MAX_VOLUME/2);
     }
+#endif
 
     // initialize True Type Font
     if (TTF_Init() < 0) {

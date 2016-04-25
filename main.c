@@ -606,10 +606,14 @@ static void draw_data_values(data_t *data, rect_t * data_pane)
     sdl_render_text(data_pane, 3, 0, 1, str, WHITE, BLACK);
 
     if (data->pressure_mtorr < 1000 || IS_ERROR(data->pressure_mtorr)) {
-        sprintf(trailer_str, "mTorr %s (g)", gas_get_name(data->gas_id));
+        sprintf(trailer_str, "mTorr %s %s", 
+                gas_get_name(data->gas_id),
+                mode == LIVE_MODE ? "(g)" : "");
         val2str(str, data->pressure_mtorr, trailer_str);
     } else {
-        sprintf(trailer_str, "Torr %s (g)", gas_get_name(data->gas_id));
+        sprintf(trailer_str, "Torr %s %s", 
+                gas_get_name(data->gas_id),
+                mode == LIVE_MODE ? "(g)" : "");
         val2str(str, data->pressure_mtorr/1000, trailer_str);
     }
     sdl_render_text(data_pane, 4, 0, 1, str, WHITE, BLACK);
@@ -954,7 +958,7 @@ static void record_data(data_t * data)
 
     len = pwrite(fd, &data2, sizeof(data2), idx * sizeof(data2));
     if (len != sizeof(data2)) {
-        FATAL("failed write data2 to file, ret_len=%d, exp_len=%d, %s\n", 
+        FATAL("failed write data2 to file, ret_len=%d, exp_len=%zd, %s\n", 
               len, sizeof(data2), strerror(errno));
     }
 }

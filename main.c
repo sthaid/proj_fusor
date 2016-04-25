@@ -1,9 +1,10 @@
-// XXX display numeric values in graph pane too
-// XXX scaling code for pressure
+// XXX review all files
+
+// XXX update NOTES and README
+
 // XXX got the following error when writing:
 //     failed write jpeg to file, len=82899, Resource temporarily unavailable
 //     RETEST
-// XXX test building on linux and reading file made on rpi
 
 /*
 Copyright (c) 2016 Steven Haid
@@ -72,7 +73,8 @@ SOFTWARE.
 #define ADC_CHAN_CURRENT   2
 #define ADC_CHAN_PRESSURE  3
 
-#define MAX_HISTORY  100000
+//#define MAX_HISTORY  100000
+#define MAX_HISTORY  15
 
 #define FONT0_HEIGHT (sdl_font_char_height(0))
 #define FONT0_WIDTH  (sdl_font_char_width(0))
@@ -180,7 +182,7 @@ static char * val2str(char * str, float val, char * trailer_str);
 static void draw_graph(rect_t * graph_pane);
 static data_t *  get_data(void);
 static void free_data(data_t * data);
-static void record_data(data_t * data);
+static bool record_data(data_t * data);
 static float convert_adc_voltage(float adc_volts);
 static float convert_adc_current(float adc_volts);
 static float convert_adc_pressure(float adc_volts, uint32_t gas_id);
@@ -192,8 +194,6 @@ static char * gas_get_name(uint32_t gas_id);
 
 int32_t main(int32_t argc, char **argv)
 {
-    printf("XXX sizeof data_t = %zd\n", sizeof(data_t));
-
     initialize(argc, argv);
     display_handler();
     return 0;
@@ -223,7 +223,7 @@ void initialize(int32_t argc, char ** argv)
                 exit(1);
             }
             break;
-        case 'n':
+        case 'n': // XXX error if not in live mode
             if (strcmp(optarg, "cam") == 0) {
                 no_cam = true;
             } else if (strcmp(optarg, "dataq") == 0) {
@@ -387,7 +387,7 @@ static char * bool2str(bool b)
 
 static void display_handler(void)
 {
-    bool          done;
+    bool          quit;
     data_t      * data;
     sdl_event_t * event;
     rect_t        title_pane_full, title_pane; 
@@ -398,6 +398,7 @@ static void display_handler(void)
     char          str[100];
     struct tm   * tm;
     time_t        t;
+    bool          data_file_full;
 
     // this program requires CAM_WIDTH to be >= CAM_HEIGHT; 
     // the reason being that a square texture is created with dimension
@@ -408,7 +409,7 @@ static void display_handler(void)
     }
 
     // initializae 
-    done = false;
+    quit = false;
 
     sdl_init(win_width, win_height);
     cam_texture = sdl_create_yuy2_texture(CAM_HEIGHT,CAM_HEIGHT);
@@ -426,14 +427,20 @@ static void display_handler(void)
                   0, FONT0_HEIGHT+CAM_HEIGHT+4,
                   win_width, win_height-(FONT0_HEIGHT+CAM_HEIGHT+4));
 
-    // loop until done
-    while (!done) {
+    // loop until quit
+    while (!quit) {
         // get data to be displayed
         data = get_data();
 
         // record data when in live mode
         if (mode == LIVE_MODE) {
-            record_data(data);
+            data_file_full = record_data(data);
+            if (data_file_full) {
+                INFO("data file is full\n");
+                free_data(data);
+                quit = true;
+                break;
+            }
         }
 
         // initialize for display update
@@ -487,64 +494,66 @@ static void display_handler(void)
         sdl_display_present();
 
         // process events
-        event = sdl_poll_event();
-        switch (event->event) {
-        // live or playback mode ...
-        case SDL_EVENT_QUIT: 
-        case SDL_EVENT_KEY_ESC: 
-            done = true;
-            break;
-        case '?':  
-            sdl_display_text(about);
-            break;
-        case '-':
-            if (graph_scale_idx < MAX_GRAPH_SCALE-1) {
-                graph_scale_idx++;
-            }
-            break;
-        case '+': case '=':
-            if (graph_scale_idx > 0) {
-                graph_scale_idx--;
-            }
-            break;
-        // live mode only
-        case 'g':
-            gas_id_cycle();
-            break;
-        // playback mode only ...
-        case SDL_EVENT_KEY_LEFT_ARROW:
-        case SDL_EVENT_KEY_CTRL_LEFT_ARROW:
-        case SDL_EVENT_KEY_ALT_LEFT_ARROW:
-            ASSERT_IN_PLAYBACK_MODE();
-            cursor_time_sec -= (event->event == SDL_EVENT_KEY_LEFT_ARROW      ? 1 :
-                                event->event == SDL_EVENT_KEY_CTRL_LEFT_ARROW ? 10 
-                                                                              : 60);
-            if (cursor_time_sec < history_start_time_sec) {
+        do {
+            event = sdl_poll_event();
+            switch (event->event) {
+            // live or playback mode ...
+            case SDL_EVENT_QUIT: 
+            case SDL_EVENT_KEY_ESC: 
+                quit = true;
+                break;
+            case '?':  
+                sdl_display_text(about);
+                break;
+            case '-':
+                if (graph_scale_idx < MAX_GRAPH_SCALE-1) {
+                    graph_scale_idx++;
+                }
+                break;
+            case '+': case '=':
+                if (graph_scale_idx > 0) {
+                    graph_scale_idx--;
+                }
+                break;
+            // live mode only
+            case 'g':
+                gas_id_cycle();
+                break;
+            // playback mode only ...
+            case SDL_EVENT_KEY_LEFT_ARROW:
+            case SDL_EVENT_KEY_CTRL_LEFT_ARROW:
+            case SDL_EVENT_KEY_ALT_LEFT_ARROW:
+                ASSERT_IN_PLAYBACK_MODE();
+                cursor_time_sec -= (event->event == SDL_EVENT_KEY_LEFT_ARROW      ? 1 :
+                                    event->event == SDL_EVENT_KEY_CTRL_LEFT_ARROW ? 10 
+                                                                                  : 60);
+                if (cursor_time_sec < history_start_time_sec) {
+                    cursor_time_sec = history_start_time_sec;
+                }
+                break;
+            case SDL_EVENT_KEY_RIGHT_ARROW:
+            case SDL_EVENT_KEY_CTRL_RIGHT_ARROW:
+            case SDL_EVENT_KEY_ALT_RIGHT_ARROW:
+                ASSERT_IN_PLAYBACK_MODE();
+                cursor_time_sec += (event->event == SDL_EVENT_KEY_RIGHT_ARROW      ? 1 :
+                                    event->event == SDL_EVENT_KEY_CTRL_RIGHT_ARROW ? 10 
+                                                                                   : 60);
+                if (cursor_time_sec > history_end_time_sec) {
+                    cursor_time_sec = history_end_time_sec;
+                }
+                break;
+            case SDL_EVENT_KEY_HOME:
+                ASSERT_IN_PLAYBACK_MODE();
                 cursor_time_sec = history_start_time_sec;
-            }
-            break;
-        case SDL_EVENT_KEY_RIGHT_ARROW:
-        case SDL_EVENT_KEY_CTRL_RIGHT_ARROW:
-        case SDL_EVENT_KEY_ALT_RIGHT_ARROW:
-            ASSERT_IN_PLAYBACK_MODE();
-            cursor_time_sec += (event->event == SDL_EVENT_KEY_RIGHT_ARROW      ? 1 :
-                                event->event == SDL_EVENT_KEY_CTRL_RIGHT_ARROW ? 10 
-                                                                               : 60);
-            if (cursor_time_sec > history_end_time_sec) {
+                break;
+            case SDL_EVENT_KEY_END:
+                ASSERT_IN_PLAYBACK_MODE();
                 cursor_time_sec = history_end_time_sec;
+                break;
+            default:
+                break;
             }
-            break;
-        case SDL_EVENT_KEY_HOME:
-            ASSERT_IN_PLAYBACK_MODE();
-            cursor_time_sec = history_start_time_sec;
-            break;
-        case SDL_EVENT_KEY_END:
-            ASSERT_IN_PLAYBACK_MODE();
-            cursor_time_sec = history_end_time_sec;
-            break;
-        default:
-            break;
-        }
+        } while (event->event != SDL_EVENT_NONE && !quit);
 
         // free the data
         free_data(data);
@@ -621,10 +630,12 @@ static void draw_data_values(data_t *data, rect_t * data_pane)
 
 static char * val2str(char * str, float val, char * trailer_str)
 {
-    if (!IS_ERROR(val)) {
-        sprintf(str, "%6.2f %s", val, trailer_str);
+    if (IS_ERROR(val)) {
+        sprintf(str, "%-6s %s", ERROR_TEXT(val), trailer_str);
+    } else if (val < 1000.0) {
+        sprintf(str, "%-6.2f %s", val, trailer_str);
     } else {
-        sprintf(str, "%6s %s", ERROR_TEXT(val), trailer_str);
+        sprintf(str, "%-6.0f %s", val, trailer_str);
     }
     return str;
 }
@@ -782,7 +793,7 @@ static void draw_graph(rect_t * graph_pane)
     } else {
         sprintf(str, "%d HOURS (+/-)", T_span/3600);
     }
-    str_col = (X_pixels + X_origin) / FONT0_WIDTH + 9;
+    str_col = (X_pixels + X_origin) / FONT0_WIDTH + 6;
     sdl_render_text(graph_pane, 
                     -1, str_col,
                     0, str, BLACK, WHITE);
@@ -794,11 +805,23 @@ static void draw_graph(rect_t * graph_pane)
                         0, "CURSOR (</>/CTRL/ALT)", BLACK, WHITE);
     }
 
-    // draw graph names 
+    // draw graph names, and current values
     for (i = 0; i < MAX_GRAPH_CONFIG; i++) {
+        char str[100];
+        float value;
+        int32_t idx;
+        struct graph_config * gc = &graph_config[i];
+
+        idx = cursor_time_sec - history_start_time_sec;
+        if (idx < 0 || idx >= MAX_HISTORY) {
+            FATAL("idx %d out of range\n", idx);
+        }
+        value = *(float*)((void*)&history[idx] + gc->field_offset);
+        val2str(str, value, graph_config[i].name);
+
         sdl_render_text(graph_pane, 
                         i, str_col,
-                        0, graph_config[i].name, graph_config[i].color, WHITE);
+                        0, str, graph_config[i].color, WHITE);
     }
 }
 
@@ -914,14 +937,14 @@ static void free_data(data_t * data)
 
 // -----------------  RECORD DATA  ---------------------------------------------------
 
-static void record_data(data_t * data)
+static bool record_data(data_t * data)
 {
     static off_t jpeg_buff_offset = MAX_HISTORY * sizeof(data_t);
 
     // if the caller supplied data's time is not beyond the end of saved history then return
     time_t t = data->time_us / 1000000;
     if (t <= history_end_time_sec) {
-        return;
+        return false;
     }
 
     // save the data in history
@@ -931,7 +954,10 @@ static void record_data(data_t * data)
     // - update the graph cursor_time
     int32_t idx = t - history_start_time_sec;
     DEBUG("adding history at idx %d\n", idx);
-    if (idx < 0 || idx >= MAX_HISTORY) {
+    if (idx >= MAX_HISTORY) {
+        return true;  // data file is full
+    }
+    if (idx < 0) {
         FATAL("invalid history idx = %d\n", idx);
     }
     history[idx] = *data;
@@ -961,6 +987,9 @@ static void record_data(data_t * data)
         FATAL("failed write data2 to file, ret_len=%d, exp_len=%zd, %s\n", 
               len, sizeof(data2), strerror(errno));
     }
+
+    // return, data file is not full
+    return false;
 }
 
 // -----------------  CONVERT ADC HV VOLTAGE & CURRENT  ------------------------------
@@ -1007,8 +1036,11 @@ static float convert_adc_current(float adc_volts)
 // -----------------  CONVERT ADC PRESSURE GAUGE  ------------------------------------
 
 // Notes:
-// 1- Refer to http://www.lesker.com/newweb/gauges/pdf/manuals/275iusermanual.pdf
-// 2- XXX cvt pgm
+// - Refer to http://www.lesker.com/newweb/gauges/pdf/manuals/275iusermanual.pdf
+//   section 7.2
+// - The gas_tbl below is generated from the table in Section 7.2 of 
+//   275iusermanual.pdf. The devel_tools/kjl_275i_log_linear_tbl program
+//   converted the table to C code.
 
 // --- defines ---
 
@@ -1028,9 +1060,9 @@ typedef struct {
 
 gas_t gas_tbl[] = { 
     { "D2",
-      { {     0.00001,     0.000 },  // added by me
-        {     0.00002,     0.301 },  // added by me
-        {     0.00005,     0.699 },  // added by me
+      { {     0.00001,     0.000 },
+        {     0.00002,     0.301 },
+        {     0.00005,     0.699 },
         {     0.0001,      1.000 },
         {     0.0002,      1.301 },
         {     0.0005,      1.699 },
@@ -1047,9 +1079,9 @@ gas_t gas_tbl[] = {
         {     2.0000,      5.616 },
         {     5.0000,      7.391 }, } },
     { "N2",
-      { {     0.00001,     0.000 },  // added by me
-        {     0.00002,     0.301 },  // added by me
-        {     0.00005,     0.699 },  // added by me
+      { {     0.00001,     0.000 },
+        {     0.00002,     0.301 },
+        {     0.00005,     0.699 },
         {     0.0001,      1.000 },
         {     0.0002,      1.301 },
         {     0.0005,      1.699 },

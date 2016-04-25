@@ -1,6 +1,8 @@
-// XXX add the extras to the begining and take off the end
-
-// this program ...
+// This program converts the JKL 275i Log Linear Analog Output Pressure/Voltage 
+// table (section 7.2 in the Instruction Manual) to C code.
+//
+// Refer to http://www.lesker.com/newweb/gauges/pdf/manuals/275iusermanual.pdf
+// section 7.2.
 
 #include <stdio.h>
 #include <stdint.h>
@@ -16,6 +18,7 @@ int main()
 {
     int32_t i,g;
     char * s;
+    bool last_line;
 
     // read the lines from stdin
     while (fgets(line[max_line],sizeof(line[0]),stdin) != NULL) {
@@ -49,31 +52,31 @@ int main()
     //      { { "pressure", "voltage" },
     //        { "pressure", "voltage" },
     //        { "pressure", "voltage" }, } }
+    //
+    // Add the 3 entries at the begining to interpolate pressure gauge
+    // output voltages in the range 1 to 1 volt. According to the documentation
+    // voltages below 0.01 volts means faulty sensor, which implies voltages
+    // above 0.01 volts are valid.
+    //
+    // If a voltage in the table is 8.041 volts, this means the pressure is
+    // too high to be measured. So stop generating the output when 8.041 volts
+    // is encountered.
     for (g = 1; g < max_parse[0]; g++) {
         printf("    { \"%s\",\n", parse[0][g]);
+        printf("      { {     0.00001,     0.000 },\n");
+        printf("        {     0.00002,     0.301 },\n");
+        printf("        {     0.00005,     0.699 },\n");
         for (i = 1; i < max_line; i++) {
-            printf("      %s { %10s, %10s },%s\n", 
-                   i == 1 ? "{" : " ",
+            last_line = (i == max_line-1) ||
+                        (strcmp(parse[i+1][g], "8.041") == 0);
+            printf("        { %10s, %10s },%s\n", 
                    parse[i][0], parse[i][g],
-                   i == max_line-1 ? " } }" : "");
+                   last_line ? " } }" : "");
+            if (last_line) {
+                break;
+            }
         }
         printf("\n");
     }
     return 0;
 }
-
-/*
-gas_t gas_Ne       = { "Ne",
-                       { {     0.0001,         Ne },
-    {     0.0002,         Ne },
-
-typedef struct {
-    char * name;
-    struct {
-        float pressure;
-        float voltage;
-    } interp_tbl[50];
-} gas_t;
-
-
-*/

@@ -73,8 +73,7 @@ SOFTWARE.
 #define ADC_CHAN_CURRENT   2
 #define ADC_CHAN_PRESSURE  3
 
-//#define MAX_HISTORY  100000
-#define MAX_HISTORY  15
+#define MAX_HISTORY  100000
 
 #define FONT0_HEIGHT (sdl_font_char_height(0))
 #define FONT0_WIDTH  (sdl_font_char_width(0))

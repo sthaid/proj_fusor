@@ -1,11 +1,3 @@
-// XXX review all files
-
-// XXX update NOTES and README
-
-// XXX got the following error when writing:
-//     failed write jpeg to file, len=82899, Resource temporarily unavailable
-//     RETEST
-
 /*
 Copyright (c) 2016 Steven Haid
 

@@ -1,9 +1,5 @@
-XXX
----
-XXX update this file
-
 ================================
-TITLE: INSTALL RASPBERRY PI
+TITLE: INSTALL RASPBERRY PI 3
 ================================
 
 Notes:
@@ -16,7 +12,7 @@ Notes:
 Install from NOOBS flash card
 
 Configure using raspi-config
-- disable X windows, use consle login screen
+- disable X windows, use console login screen
 - Note - X windows can be broght up later using 'startx'
 
 Add user account 
@@ -36,7 +32,7 @@ Install SDL2
 - description of problem getting keybd events
     https://forums.libsdl.org/viewtopic.php?t=10483&sid=38991cf938c103990a18f389312e0f42
 
-To Run SDL2 Test Pgm
+To Run SDL2 Program 
 - export LD_LIBRARY_PATH=/usr/local/lib
      The following note is from the SDL build output:
           If you ever happen to want to link against installed libraries
@@ -145,8 +141,6 @@ echo -e "\n${bold}Finished in $(($ELAPSED_TIME/60/60)) hr, $(($ELAPSED_TIME/60%6
 TITLE: SAMPLES of .bashrc, .bash_profile, .vimrc
 ================================
 
-XXX check these
-
 ---- .bashrc ---
 
 # .bashrc
@@ -189,8 +183,8 @@ set expandtab
 set tabstop=8
 set softtabstop=4
 set shiftwidth=4
-
-" color scheme
 set background=dark
 colors default
 syntax on
+set hlsearch
+

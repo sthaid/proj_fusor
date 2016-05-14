@@ -25,6 +25,10 @@ SOFTWARE.
 
 void dataq_init(float averaging_duration_sec, int32_t max_adc_chan, ...);
 
-int32_t dataq_get_adc(int32_t adc_chan, float * rms, float * mean, float * sdev, float * min, float * max);
+int32_t dataq_get_adc(int32_t adc_chan,
+                      int32_t * rms_mv,
+                      int32_t * mean_mv, int32_t * sdev_mv,
+                      int32_t * min_mv, int32_t * max_mv,
+                      float history_secs, int32_t ** history_mv, int32_t * max_history_mv);
 
 #endif

@@ -50,14 +50,13 @@ SOFTWARE.
 #define STTY_SETTINGS  "4:0:14b2:0:3:1c:7f:15:1:0:1:0:11:13:1a:0:12:f:17:16:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0"
 #define MAX_RESP       100
 #define MAX_ADC_CHAN   9            // channels 1 .. 8
-#define SCALE          (10.0/2048)
 
 //
 // typedefs
 //
 
 typedef struct {
-    int32_t * val;
+    int32_t * val;   // millivolts
     int32_t sum;
     int64_t sum_squares;
     int32_t idx;
@@ -242,7 +241,11 @@ void dataq_init(float averaging_duration_sec, int32_t max_adc_chan, ...)
     INFO("success\n");
 }
 
-int32_t dataq_get_adc(int32_t adc_chan, float * rms, float * mean, float * sdev, float * min, float * max)
+int32_t dataq_get_adc(int32_t adc_chan,
+                      int32_t * rms_mv,
+                      int32_t * mean_mv, int32_t * sdev_mv,
+                      int32_t * min_mv, int32_t * max_mv,
+                      float history_secs, int32_t ** history_mv, int32_t * max_history_mv)
 {
     int32_t i;
     adc_t * x;
@@ -261,39 +264,79 @@ int32_t dataq_get_adc(int32_t adc_chan, float * rms, float * mean, float * sdev,
     }
 
     // calculate rms 
-    if (rms) {
-        *rms = sqrtf((float)x->sum_squares / max_val) * SCALE;
+    if (rms_mv) {
+        *rms_mv = sqrtf((float)x->sum_squares / max_val);
     }
 
     // calculate mean voltage
-    if (mean) {
-        *mean = (float)x->sum / max_val * SCALE;
+    if (mean_mv) {
+        *mean_mv = x->sum / max_val;
     }
 
     // calculate standad deviation voltage
-    if (sdev) {
+    if (sdev_mv) {
         float u = (float)x->sum / max_val;
-        *sdev = sqrtf(((float)x->sum_squares / max_val) - (u * u)) * SCALE;
+        *sdev_mv = sqrtf(((float)x->sum_squares / max_val) - (u * u));
     }
 
     // calculate min and max voltages
-    if (min || max) {
-        int32_t minv = +10000;
-        int32_t maxv = -10000;
+    if (min_mv || max_mv) {
+        int32_t min = +10000000;
+        int32_t max = -10000000;
         for (i = 0; i < max_val; i++) {
-            if (x->val[i] < minv) {
-                minv = x->val[i];
+            if (x->val[i] < min) {
+                min = x->val[i];
             }
-            if (x->val[i] > maxv) {
-                maxv = x->val[i];
+            if (x->val[i] > max) {
+                max = x->val[i];
             }
         }
-        if (min) {
-            *min = (float)minv * SCALE;
+        if (min_mv) {
+            *min_mv = min;
         }
-        if (max) {
-            *max = (float)maxv * SCALE;
+        if (max_mv) {
+            *max_mv = max;
         }
+    }
+
+    // return history
+    if (history_mv && max_history_mv) {
+        int32_t max, idx, i;
+        int32_t * buff;
+
+        // preset returns
+        *history_mv = NULL;
+        *max_history_mv = 0;
+
+        // determine number of history values to return based on requested history_secs
+        max = history_secs * scan_hz;
+        if (max >= max_val-10 || max <= 0) {
+            ERROR("history_secs %f invalid, max=%d max_val=%d scan_hz=%d\n",
+                  history_secs, max, max_val, scan_hz);
+            return -1;
+        }
+
+        // allocate history buffer
+        buff = malloc(max*sizeof(int32_t));
+        if (buff == NULL) {
+            FATAL("malloc failed, max=%d\n", max);
+        }
+
+        // copy values to history buff
+        idx = (x->idx-1) - max + 1;
+        if (idx < 0) {
+            idx += max_val;
+        }
+        for (i = 0; i < max; i++) {
+            buff[i] = x->val[idx++];
+            if (idx >= max_val) {
+                idx = 0;
+            }
+        }
+
+        // set returns
+        *history_mv = buff;
+        *max_history_mv = max;
     }
 
     // return success
@@ -460,19 +503,23 @@ static void * dataq_recv_data_thread(void * cx)
 
 static void dataq_process_adc_raw(int32_t slist_idx, int32_t new_val)
 {
-    int32_t old_val;
+    int32_t new_mv, old_mv;
     int32_t adc_chan = slist_idx_to_adc_chan[slist_idx];
     adc_t * x = &adc[adc_chan];
     
+    // convert new_val from raw to new_mv
+    // note: a raw value of 2048 is equivalent to 10 v or 10000 mv
+    new_mv = new_val * 10000 / 2048;
+
     // save adc value in circular buffer
-    old_val = x->val[x->idx];
-    x->val[x->idx] = new_val;
+    old_mv = x->val[x->idx];
+    x->val[x->idx] = new_mv;
     x->idx = (x->idx + 1) % max_val;
 
     // update the sum of saved values, and
     // the sum^2 of saved values
-    x->sum += (new_val - old_val);
-    x->sum_squares += (new_val*new_val - old_val*old_val);
+    x->sum += (new_mv - old_mv);
+    x->sum_squares += (new_mv*new_mv - old_mv*old_mv);
 }
 
 static void * dataq_monitor_thread(void * cx)

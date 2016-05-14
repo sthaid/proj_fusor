@@ -1,3 +1,4 @@
+// XXX xxx
 /*
 Copyright (c) 2016 Steven Haid
 
@@ -74,8 +75,12 @@ SOFTWARE.
 
 #define MAGIC 0x1122334455667788
 
-#define MAX_GRAPH_SCALE (sizeof(graph_scale)/sizeof(graph_scale[0]))
-
+#define ASSERT_IN_ANY_MODE() \
+    do { \
+        if (mode != LIVE_MODE && mode != PLAYBACK_MODE) { \
+            FATAL("mode must be LIVE_MODE or PLAYBACK_MODE\n"); \
+        } \
+    } while (0)
 #define ASSERT_IN_LIVE_MODE() \
     do { \
         if (mode != LIVE_MODE) { \
@@ -124,14 +129,15 @@ typedef struct {
     bool         jpeg_valid;
     uint8_t      reserved3[3];
     uint32_t     jpeg_buff_len;
-    uint8_t    * jpeg_buff_ptr;
+    uint8_t    * jpeg_buff_ptr;  //XXX combine
     uint64_t     jpeg_buff_offset;
-} data_t;
 
-typedef struct {
-    int32_t span;   // must be multiple of 60
-    int32_t delta;
-} graph_scale_t;
+    bool         voltage_history_valid;
+    uint8_t      reserved4[3];
+    uint32_t     voltage_history_buff_len;
+    float      * voltage_history_buff_ptr;  //XXX combine
+    uint64_t     voltage_history_buff_offset;
+} data_t;
 
 //
 // variables
@@ -151,14 +157,6 @@ static time_t        history_start_time_sec;
 static time_t        history_end_time_sec;
 static time_t        cursor_time_sec;
 
-static int32_t       graph_scale_idx;
-static graph_scale_t graph_scale[] = {
-                            { 60,      1 },    // 1 minute
-                            { 600,     2 },    // 10 minutes
-                            { 3600,   12 },    // 1 hour
-                            { 36000, 120 },    // 10 hours
-                                                };
-
 //
 // prototypes
 //
@@ -170,7 +168,9 @@ static void display_handler();
 static void draw_camera_image(data_t * data, rect_t * cam_pane, texture_t cam_texture);
 static void draw_data_values(data_t *data, rect_t * data_pane);
 static char * val2str(char * str, float val, char * trailer_str);
-static void draw_graph(rect_t * graph_pane);
+static void draw_graph1(rect_t * graph_pane);
+static void graph1_scale_select(int32_t event);
+static void draw_graph2(rect_t * graph_pane);
 static data_t *  get_data(void);
 static void free_data(data_t * data);
 static bool record_data(data_t * data);
@@ -178,7 +178,7 @@ static float convert_adc_voltage(float adc_volts);
 static float convert_adc_current(float adc_volts);
 static float convert_adc_pressure(float adc_volts, uint32_t gas_id);
 static uint32_t gas_get_id(void);
-static void gas_id_cycle(void);
+static void gas_select(void);
 static char * gas_get_name(uint32_t gas_id);
 
 // -----------------  MAIN  ----------------------------------------------------------
@@ -214,7 +214,7 @@ void initialize(int32_t argc, char ** argv)
                 exit(1);
             }
             break;
-        case 'n': // XXX error if not in live mode
+        case 'n': // xxx error if not in live mode
             if (strcmp(optarg, "cam") == 0) {
                 no_cam = true;
             } else if (strcmp(optarg, "dataq") == 0) {
@@ -374,7 +374,7 @@ static char * bool2str(bool b)
     return b ? "true" : "false";
 }
 
-// -----------------  DISPLAY HANDLER  -----------------------------------------------
+// -----------------  DISPLAY HANDLER - MAIN  ----------------------------------------
 
 static void display_handler(void)
 {
@@ -390,6 +390,7 @@ static void display_handler(void)
     struct tm   * tm;
     time_t        t;
     bool          data_file_full;
+    int32_t       graph_select = 1;
 
     // this program requires CAM_WIDTH to be >= CAM_HEIGHT; 
     // the reason being that a square texture is created with dimension
@@ -459,17 +460,31 @@ static void display_handler(void)
         // draw the graph
         draw_camera_image(data, &cam_pane, cam_texture);
         draw_data_values(data, &data_pane);
-        draw_graph(&graph_pane);
+        switch (graph_select) {
+        case 1:
+            draw_graph1(&graph_pane);
+            break;
+        case 2:
+            draw_graph2(&graph_pane);
+            break;
+        }
 
-        // register for events
+        // register for events   
+        // - quit and help
         sdl_event_register(SDL_EVENT_KEY_ESC, SDL_EVENT_TYPE_KEY, NULL);
         sdl_event_register('?', SDL_EVENT_TYPE_KEY, NULL);
-        sdl_event_register('+', SDL_EVENT_TYPE_KEY, NULL);
-        sdl_event_register('=', SDL_EVENT_TYPE_KEY, NULL);
-        sdl_event_register('-', SDL_EVENT_TYPE_KEY, NULL);
+        // - gas select
         if (mode == LIVE_MODE) {
             sdl_event_register('g', SDL_EVENT_TYPE_KEY, NULL);
         }
+        // - graph select
+        sdl_event_register('s', SDL_EVENT_TYPE_KEY, NULL);
+        // - graph 1 zoom
+        if (graph_select == 1) {
+            sdl_event_register('+', SDL_EVENT_TYPE_KEY, NULL);
+            sdl_event_register('-', SDL_EVENT_TYPE_KEY, NULL);
+        }
+        // - graph 1 & 2 cursor time
         if (mode == PLAYBACK_MODE) {
             sdl_event_register(SDL_EVENT_KEY_LEFT_ARROW, SDL_EVENT_TYPE_KEY, NULL);
             sdl_event_register(SDL_EVENT_KEY_RIGHT_ARROW, SDL_EVENT_TYPE_KEY, NULL);
@@ -488,29 +503,29 @@ static void display_handler(void)
         do {
             event = sdl_poll_event();
             switch (event->event) {
-            // live or playback mode ...
-            case SDL_EVENT_QUIT: 
-            case SDL_EVENT_KEY_ESC: 
+            case SDL_EVENT_QUIT: case SDL_EVENT_KEY_ESC: 
+                ASSERT_IN_ANY_MODE();
                 quit = true;
                 break;
             case '?':  
+                ASSERT_IN_ANY_MODE();
                 sdl_display_text(about);
                 break;
-            case '-':
-                if (graph_scale_idx < MAX_GRAPH_SCALE-1) {
-                    graph_scale_idx++;
-                }
-                break;
-            case '+': case '=':
-                if (graph_scale_idx > 0) {
-                    graph_scale_idx--;
-                }
-                break;
-            // live mode only
             case 'g':
-                gas_id_cycle();
+                ASSERT_IN_LIVE_MODE();
+                gas_select();
                 break;
-            // playback mode only ...
+            case 's':
+                ASSERT_IN_ANY_MODE();
+                graph_select++;
+                if (graph_select > 2) {
+                    graph_select = 1;
+                }
+                break;
+            case '-': case '+':
+                ASSERT_IN_ANY_MODE();
+                graph1_scale_select(event->event);
+                break;
             case SDL_EVENT_KEY_LEFT_ARROW:
             case SDL_EVENT_KEY_CTRL_LEFT_ARROW:
             case SDL_EVENT_KEY_ALT_LEFT_ARROW:
@@ -553,6 +568,8 @@ static void display_handler(void)
     INFO("terminating\n");
 }
 
+// - - - - - - - - -  DISPLAY HANDLER - DRAW CAMERA IMAGE  - - - - - - - - - - - - - - 
+
 static void draw_camera_image(data_t * data, rect_t * cam_pane, texture_t cam_texture)
 {
     uint8_t * pixel_buff;
@@ -583,6 +600,8 @@ static void draw_camera_image(data_t * data, rect_t * cam_pane, texture_t cam_te
 
     free(pixel_buff);
 }
+
+// - - - - - - - - -  DISPLAY HANDLER - DRAW DATA VALUES  - - - - - - - - - - - - - - 
 
 static void draw_data_values(data_t *data, rect_t * data_pane)
 {
@@ -631,49 +650,67 @@ static char * val2str(char * str, float val, char * trailer_str)
     return str;
 }
 
-static void draw_graph(rect_t * graph_pane)
+// - - - - - - - - -  DISPLAY HANDLER - DRAW GRAPH 1  - - - - - - - - - - - - - - - 
+
+#define MAX_GRAPH1_SCALE (sizeof(graph1_scale)/sizeof(graph1_scale[0]))
+
+typedef struct {
+    int32_t span;   // must be multiple of 60
+    int32_t delta;
+} graph1_scale_t;
+
+static int32_t       graph1_scale_idx;
+static graph1_scale_t graph1_scale[] = {
+                            { 60,      1 },    // 1 minute
+                            { 600,     2 },    // 10 minutes
+                            { 3600,   12 },    // 1 hour
+                            { 36000, 120 },    // 10 hours
+                                                };
+
+
+static void draw_graph1(rect_t * graph_pane)
 {
-    #define MAX_GRAPH_CONFIG (sizeof(graph_config)/sizeof(graph_config[0]))
-    static struct graph_config {
+    #define MAX_GRAPH1_CONFIG (sizeof(graph1_config)/sizeof(graph1_config[0]))
+    static struct graph1_config {
         char   * name;
         float    max_value;
         int32_t  color;
         off_t    field_offset;
-    } graph_config[] = {
+    } graph1_config[] = {
         { "kV    : 30 MAX", 30.0, RED, offsetof(data_t, voltage_rms_kv) },
         { "mA    : 30 MAX", 30.0, GREEN, offsetof(data_t, current_ma) },
         { "mTorr : 30 MAX", 30.0, BLUE, offsetof(data_t, pressure_mtorr) },
                             };
 
-    time_t  graph_start_time_sec, graph_end_time_sec;
+    time_t  graph1_start_time_sec, graph1_end_time_sec;
     int32_t X_origin, X_pixels, Y_origin, Y_pixels, T_delta, T_span;
     float   X_pixels_per_sec;
     int32_t i;
 
     // sanitize scale_idx
-    while (graph_scale_idx < 0) {
-        graph_scale_idx += MAX_GRAPH_SCALE;
+    while (graph1_scale_idx < 0) {
+        graph1_scale_idx += MAX_GRAPH1_SCALE;
     }
-    while (graph_scale_idx >= MAX_GRAPH_SCALE) {
-        graph_scale_idx -= MAX_GRAPH_SCALE;
+    while (graph1_scale_idx >= MAX_GRAPH1_SCALE) {
+        graph1_scale_idx -= MAX_GRAPH1_SCALE;
     }
 
     // init
-    T_span = graph_scale[graph_scale_idx].span;
-    T_delta = graph_scale[graph_scale_idx].delta;
+    T_span = graph1_scale[graph1_scale_idx].span;
+    T_delta = graph1_scale[graph1_scale_idx].delta;
     X_origin = 10;
     X_pixels = 1200;
     X_pixels_per_sec = (float)X_pixels / T_span;
     Y_origin = graph_pane->h - FONT0_HEIGHT - 4;
     Y_pixels = graph_pane->h - FONT0_HEIGHT - 10;
 
-    // determine graph_start_sec and graph_end_sec
+    // determine graph1_start_sec and graph1_end_sec
     if (mode == LIVE_MODE) {
-        graph_end_time_sec = cursor_time_sec;
-        graph_start_time_sec = graph_end_time_sec - (T_span - 1);
+        graph1_end_time_sec = cursor_time_sec;
+        graph1_start_time_sec = graph1_end_time_sec - (T_span - 1);
     } else {
-        graph_start_time_sec = cursor_time_sec - T_span / 2;
-        graph_end_time_sec = graph_start_time_sec + T_span - 1;
+        graph1_start_time_sec = cursor_time_sec - T_span / 2;
+        graph1_end_time_sec = graph1_start_time_sec + T_span - 1;
     }
 
     // fill white
@@ -684,22 +721,22 @@ static void draw_graph(rect_t * graph_pane)
     rect.h = graph_pane->h;
     sdl_render_fill_rect(graph_pane, &rect, WHITE);
 
-    // draw the graphs
-    for (i = 0; i < MAX_GRAPH_CONFIG; i++) {
+    // draw the graph1s
+    for (i = 0; i < MAX_GRAPH1_CONFIG; i++) {
         #define MAX_POINTS 1000
-        struct graph_config * gc;
+        struct graph1_config * gc;
         int32_t max_points, idx;
         point_t points[MAX_POINTS];
         time_t  t;
         float   X, X_delta, Y_scale;
 
-        gc = &graph_config[i];
+        gc = &graph1_config[i];
         X = X_origin + X_pixels - 1;
         X_delta = X_pixels_per_sec * T_delta;
         Y_scale  = Y_pixels / gc->max_value;
         max_points = 0;
 
-        for (t = graph_end_time_sec; t >= graph_start_time_sec; t -= T_delta) {
+        for (t = graph1_end_time_sec; t >= graph1_start_time_sec; t -= T_delta) {
             float value;
             idx = t - history_start_time_sec;
             if (idx >= 0 && 
@@ -760,7 +797,7 @@ static void draw_graph(rect_t * graph_pane)
 
     // draw cursor
     int32_t X_cursor = (X_origin + X_pixels - 1) -
-                       (graph_end_time_sec - cursor_time_sec) * X_pixels_per_sec;
+                       (graph1_end_time_sec - cursor_time_sec) * X_pixels_per_sec;
     sdl_render_line(graph_pane, 
                     X_cursor, Y_origin,
                     X_cursor, Y_origin-Y_pixels,
@@ -796,24 +833,48 @@ static void draw_graph(rect_t * graph_pane)
                         0, "CURSOR (</>/CTRL/ALT)", BLACK, WHITE);
     }
 
-    // draw graph names, and current values
-    for (i = 0; i < MAX_GRAPH_CONFIG; i++) {
+    // draw graph1 names, and current values
+    for (i = 0; i < MAX_GRAPH1_CONFIG; i++) {
         char str[100];
         float value;
         int32_t idx;
-        struct graph_config * gc = &graph_config[i];
+        struct graph1_config * gc = &graph1_config[i];
 
         idx = cursor_time_sec - history_start_time_sec;
         if (idx < 0 || idx >= MAX_HISTORY) {
             FATAL("idx %d out of range\n", idx);
         }
         value = *(float*)((void*)&history[idx] + gc->field_offset);
-        val2str(str, value, graph_config[i].name);
+        val2str(str, value, graph1_config[i].name);
 
         sdl_render_text(graph_pane, 
                         i, str_col,
-                        0, str, graph_config[i].color, WHITE);
+                        0, str, graph1_config[i].color, WHITE);
     }
+}
+
+static void graph1_scale_select(int32_t event)
+{
+    if (event != '+' && event != '-') {
+        FATAL("event must be '+' or '-'\n");
+    }
+
+    if (event == '+') {
+        if (graph1_scale_idx > 0) {
+            graph1_scale_idx--;
+        }
+    } else {
+        if (graph1_scale_idx < MAX_GRAPH1_SCALE-1) {
+            graph1_scale_idx++;
+        }
+    }
+}
+
+// - - - - - - - - -  DISPLAY HANDLER - DRAW GRAPH 2  - - - - - - - - - - - - - - - 
+
+static void draw_graph2(rect_t * graph_pane)
+{
+    //XXX add graph2
 }
 
 // -----------------  GET AND FREE DATA  ---------------------------------------------
@@ -848,36 +909,62 @@ static data_t * get_data(void)
         // get adc data from the dataq device, and 
         // convert to the values which will be displayed
         if (!no_dataq) do {
-            float rms, mean, min, max;
-            int32_t ret;
+            int32_t rms_mv, mean_mv, min_mv, max_mv;
+            int32_t * history_mv;
+            int32_t ret, max_history_mv;
 
             // read ADC_CHAN_VOLTAGE and convert to kV
-            ret = dataq_get_adc(ADC_CHAN_VOLTAGE, &rms, NULL, NULL, &min, &max);
+            ret = dataq_get_adc(ADC_CHAN_VOLTAGE, &rms_mv, NULL, NULL, &min_mv, &max_mv,
+                                0, NULL, NULL);
             if (ret != 0) {
                 break;
             }
-            data->voltage_rms_kv = convert_adc_voltage(rms);
-            data->voltage_min_kv = convert_adc_voltage(min);
-            data->voltage_max_kv = convert_adc_voltage(max);
+            data->voltage_rms_kv = convert_adc_voltage(rms_mv/1000.);
+            data->voltage_min_kv = convert_adc_voltage(min_mv/1000.);
+            data->voltage_max_kv = convert_adc_voltage(max_mv/1000.);
 
             // read ADC_CHAN_CURRENT and convert to mA
-            ret = dataq_get_adc(ADC_CHAN_CURRENT, NULL, &mean, NULL, NULL, NULL);
+            ret = dataq_get_adc(ADC_CHAN_CURRENT, NULL, &mean_mv, NULL, NULL, NULL,
+                                0, NULL, NULL);
             if (ret != 0) {
                 break;
             }
-            data->current_ma = convert_adc_current(mean);
+            data->current_ma = convert_adc_current(mean_mv/1000.);
 
             // read ADC_CHAN_PRESSURE and convert to mTorr
-            ret = dataq_get_adc(ADC_CHAN_PRESSURE, NULL, &mean, NULL, NULL, NULL);
+            ret = dataq_get_adc(ADC_CHAN_PRESSURE, NULL, &mean_mv, NULL, NULL, NULL,
+                                0, NULL, NULL);
             if (ret != 0) {
                 break;
             }
-            mean = 3.386;  // XXX temp set value for testing
+            mean_mv = 3386;  // XXX temp set value for testing
             data->gas_id = gas_get_id();
-            data->pressure_mtorr = convert_adc_pressure(mean, data->gas_id);
+            data->pressure_mtorr = convert_adc_pressure(mean_mv/1000., data->gas_id);
 
             // set data_valid flag
             data->data_valid = true;
+
+            // read ADC_CHAN_VOLTAGE XXX comment
+            ret = dataq_get_adc(ADC_CHAN_VOLTAGE, &rms_mv, NULL, NULL, &min_mv, &max_mv,
+                                0.25, &history_mv, &max_history_mv);
+            if (ret != 0) {
+                break;
+            }
+
+// XXX free and realloc
+            float * history_kv = (float*)history_mv;
+
+            int32_t i;
+            //printf("max_history_mv %d\n", max_history_mv);
+            for (i = 0; i < max_history_mv; i++) {
+                history_kv[i] = convert_adc_voltage(history_mv[i]/1000.);
+            }
+
+            // XXX
+            // data->voltage_history_buff_len  
+            data->voltage_history_buff_ptr = history_kv;
+            // data->voltage_history_buff_offset;
+            data->voltage_history_valid = true;
         } while (0);
     } else {
         int32_t len, idx;
@@ -918,9 +1005,8 @@ static void free_data(data_t * data)
             cam_put_buff(data->jpeg_buff_ptr);
         }
     } else {
-        if (data->jpeg_valid) {
-            free(data->jpeg_buff_ptr);
-        }
+        free(data->jpeg_buff_ptr);
+        free(data->voltage_history_buff_ptr);
     }
 
     free(data);
@@ -978,6 +1064,8 @@ static bool record_data(data_t * data)
         FATAL("failed write data2 to file, ret_len=%d, exp_len=%zd, %s\n", 
               len, sizeof(data2), strerror(errno));
     }
+
+//XXX write voltage
 
     // return, data file is not full
     return false;
@@ -1142,7 +1230,7 @@ static uint32_t gas_get_id(void)
     return gas_live_mode_id;
 }
 
-static void gas_id_cycle(void) 
+static void gas_select(void) 
 {
     ASSERT_IN_LIVE_MODE();
     gas_live_mode_id = (gas_live_mode_id + 1) % MAX_GAS_TBL;

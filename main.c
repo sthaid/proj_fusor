@@ -1,3 +1,4 @@
+// XXX use top to check for memory leak in both live and playback modes
 // XXX xxx
 /*
 Copyright (c) 2016 Steven Haid
@@ -41,6 +42,8 @@ SOFTWARE.
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/mman.h>
+#include <sys/time.h>
+#include <sys/resource.h>
 
 #include "util_sdl.h"
 #include "util_jpeg_decode.h"
@@ -112,6 +115,7 @@ enum mode {LIVE_MODE, PLAYBACK_MODE};
 
 // this struct is designed to be same size on 32bit and 64bit systems, so 
 // that the fusor data file is portable
+// XXX check this
 typedef struct {
     uint64_t     magic;
     uint64_t     time_us;
@@ -129,14 +133,18 @@ typedef struct {
     bool         jpeg_valid;
     uint8_t      reserved3[3];
     uint32_t     jpeg_buff_len;
-    uint8_t    * jpeg_buff_ptr;  //XXX combine
-    uint64_t     jpeg_buff_offset;
+    union {
+        uint8_t * ptr;
+        uint64_t  offset;
+    } jpeg_buff;
 
     bool         voltage_history_valid;
     uint8_t      reserved4[3];
     uint32_t     voltage_history_buff_len;
-    float      * voltage_history_buff_ptr;  //XXX combine
-    uint64_t     voltage_history_buff_offset;
+    union {
+        float   * ptr;  
+        uint64_t  offset;
+    } voltage_history_buff;
 } data_t;
 
 //
@@ -185,6 +193,8 @@ static char * gas_get_name(uint32_t gas_id);
 
 int32_t main(int32_t argc, char **argv)
 {
+    printf("XXX SIZEOF DATA_T  %zd\n", sizeof(data_t));
+
     initialize(argc, argv);
     display_handler();
     return 0;
@@ -195,6 +205,13 @@ int32_t main(int32_t argc, char **argv)
 void initialize(int32_t argc, char ** argv)
 {
     char filename[100];
+    struct rlimit rl;
+
+    // init core dumps
+    // note - requires fs.suid_dumpable=1  in /etc/sysctl.conf
+    rl.rlim_cur = RLIM_INFINITY;
+    rl.rlim_max = RLIM_INFINITY;
+    setrlimit(RLIMIT_CORE, &rl);
 
     // parse options
     // -g WxH   : window width and height, default 1920x1080
@@ -583,7 +600,7 @@ static void draw_camera_image(data_t * data, rect_t * cam_pane, texture_t cam_te
 
     ret = jpeg_decode(0,  // cxid
                      JPEG_DECODE_MODE_YUY2,      
-                     data->jpeg_buff_ptr, data->jpeg_buff_len,
+                     data->jpeg_buff.ptr, data->jpeg_buff_len,
                      &pixel_buff, &pixel_buff_width, &pixel_buff_height);
     if (ret < 0) {
         FATAL("jpeg_decode failed\n");
@@ -902,7 +919,7 @@ static data_t * get_data(void)
         // get camera data
         // LATER may need a status return from cam_get_buff
         if (!no_cam) {
-            cam_get_buff(&data->jpeg_buff_ptr, &data->jpeg_buff_len);
+            cam_get_buff(&data->jpeg_buff.ptr, &data->jpeg_buff_len);
             data->jpeg_valid = true;
         }
 
@@ -911,7 +928,7 @@ static data_t * get_data(void)
         if (!no_dataq) do {
             int32_t rms_mv, mean_mv, min_mv, max_mv;
             int32_t * history_mv;
-            int32_t ret, max_history_mv;
+            int32_t ret, max_history_mv, i;
 
             // read ADC_CHAN_VOLTAGE and convert to kV
             ret = dataq_get_adc(ADC_CHAN_VOLTAGE, &rms_mv, NULL, NULL, &min_mv, &max_mv,
@@ -944,30 +961,28 @@ static data_t * get_data(void)
             // set data_valid flag
             data->data_valid = true;
 
-            // read ADC_CHAN_VOLTAGE XXX comment
+            // read ADC_CHAN_VOLTAGE and save history in data->voltage_history_buff
+            // XXX make the 0.25 a define, and also the 0.5
             ret = dataq_get_adc(ADC_CHAN_VOLTAGE, &rms_mv, NULL, NULL, &min_mv, &max_mv,
                                 0.25, &history_mv, &max_history_mv);
             if (ret != 0) {
                 break;
             }
-
-// XXX free and realloc
-            float * history_kv = (float*)history_mv;
-
-            int32_t i;
-            //printf("max_history_mv %d\n", max_history_mv);
-            for (i = 0; i < max_history_mv; i++) {
-                history_kv[i] = convert_adc_voltage(history_mv[i]/1000.);
+            data->voltage_history_buff.ptr = malloc(max_history_mv*sizeof(float));
+            if (data->voltage_history_buff.ptr == NULL) {
+                FATAL("failed malloc voltage_hisotyr_buff, len=%d\n", data->jpeg_buff_len);
             }
-
-            // XXX
-            // data->voltage_history_buff_len  
-            data->voltage_history_buff_ptr = history_kv;
-            // data->voltage_history_buff_offset;
+            for (i = 0; i < max_history_mv; i++) {
+                data->voltage_history_buff.ptr[i] = convert_adc_voltage(history_mv[i]/1000.);
+            }
+            free(history_mv);
+            data->voltage_history_buff_len  = max_history_mv*sizeof(float);
             data->voltage_history_valid = true;
         } while (0);
     } else {
         int32_t len, idx;
+        uint8_t * jpeg_buff_ptr;
+        float * voltage_history_buff_ptr;
 
         // PLAYBACK_MODE ...
 
@@ -978,20 +993,43 @@ static data_t * get_data(void)
         }
         *data = history[idx];
 
-        // malloc and read the jpeg
+        // if jpeg_valid then get the jpeg from the data file
         if (data->jpeg_valid) {
-            data->jpeg_buff_ptr = malloc(data->jpeg_buff_len);
-            if (data->jpeg_buff_ptr == NULL){
+            // malloc buffer for jpeg
+            jpeg_buff_ptr = malloc(data->jpeg_buff_len);
+            if (jpeg_buff_ptr == NULL){
                 FATAL("failed malloc jpeg buff, len=%d\n", data->jpeg_buff_len);
             }
-            len = pread(fd, data->jpeg_buff_ptr, data->jpeg_buff_len, data->jpeg_buff_offset);
+
+            // read the jpeg into the allocated buffer
+            len = pread(fd, jpeg_buff_ptr, data->jpeg_buff_len, data->jpeg_buff.offset);
             if (len != data->jpeg_buff_len) {
                 FATAL("read jpeg buff, len=%d, %s\n", len, strerror(errno));
             }
+
+            // replace jpeg_buff.offset with jpeg_buff.ptr
+            data->jpeg_buff.offset = 0;
+            data->jpeg_buff.ptr = jpeg_buff_ptr;
         }
 
-        // clear data->jpeg_buff_offset, this is not used by caller
-        data->jpeg_buff_offset = 0;
+        // if voltage_history_valid then get the voltage_history from the data file
+        if (data->voltage_history_valid) {
+            // malloc buffer for voltage_history
+            voltage_history_buff_ptr = malloc(data->voltage_history_buff_len);
+            if (voltage_history_buff_ptr == NULL){
+                FATAL("failed malloc voltage_history buff, len=%d\n", data->voltage_history_buff_len);
+            }
+
+            // read the voltage_history into the allocated buffer
+            len = pread(fd, voltage_history_buff_ptr, data->voltage_history_buff_len, data->voltage_history_buff.offset);
+            if (len != data->voltage_history_buff_len) {
+                FATAL("read voltage_history buff, len=%d, %s\n", len, strerror(errno));
+            }
+
+            // replace voltage_history_buff.offset with voltage_history_buff.ptr
+            data->voltage_history_buff.offset = 0;
+            data->voltage_history_buff.ptr = voltage_history_buff_ptr;
+        }
     }
 
     // return data
@@ -1002,11 +1040,12 @@ static void free_data(data_t * data)
 {
     if (mode == LIVE_MODE) {
         if (data->jpeg_valid) {
-            cam_put_buff(data->jpeg_buff_ptr);
+            cam_put_buff(data->jpeg_buff.ptr);
         }
+        free(data->voltage_history_buff.ptr);
     } else {
-        free(data->jpeg_buff_ptr);
-        free(data->voltage_history_buff_ptr);
+        free(data->jpeg_buff.ptr);
+        free(data->voltage_history_buff.ptr);
     }
 
     free(data);
@@ -1016,7 +1055,7 @@ static void free_data(data_t * data)
 
 static bool record_data(data_t * data)
 {
-    static off_t jpeg_buff_offset = MAX_HISTORY * sizeof(data_t);
+    static off_t file_offset = MAX_HISTORY * sizeof(data_t);
 
     // if the caller supplied data's time is not beyond the end of saved history then return
     time_t t = data->time_us / 1000000;
@@ -1045,18 +1084,25 @@ static bool record_data(data_t * data)
     int32_t len;
     data_t data2 = history[idx];
     if (data2.jpeg_valid) {
-        data2.jpeg_buff_offset = jpeg_buff_offset;
-        data2.jpeg_buff_ptr = NULL;
-        jpeg_buff_offset += data2.jpeg_buff_len;
+        data2.jpeg_buff.offset = file_offset;
+        file_offset += data2.jpeg_buff_len;
 
-        len = pwrite(fd, history[idx].jpeg_buff_ptr, data2.jpeg_buff_len, data2.jpeg_buff_offset);
+        len = pwrite(fd, history[idx].jpeg_buff.ptr, data2.jpeg_buff_len, data2.jpeg_buff.offset);
         if (len != data2.jpeg_buff_len) {
             FATAL("failed write jpeg to file, ret_len=%d, exp_len=%d, %s\n", 
                   len, data2.jpeg_buff_len, strerror(errno));
         }
-    } else {
-        data2.jpeg_buff_offset = 0;
-        data2.jpeg_buff_ptr = NULL;
+    }
+
+    if (data2.voltage_history_valid) {
+        data2.voltage_history_buff.offset = file_offset;
+        file_offset += data2.voltage_history_buff_len;
+
+        len = pwrite(fd, history[idx].voltage_history_buff.ptr, data2.voltage_history_buff_len, data2.voltage_history_buff.offset);
+        if (len != data2.voltage_history_buff_len) {
+            FATAL("failed write voltage_history to file, ret_len=%d, exp_len=%d, %s\n", 
+                  len, data2.voltage_history_buff_len, strerror(errno));
+        }
     }
 
     len = pwrite(fd, &data2, sizeof(data2), idx * sizeof(data2));
@@ -1064,8 +1110,6 @@ static bool record_data(data_t * data)
         FATAL("failed write data2 to file, ret_len=%d, exp_len=%zd, %s\n", 
               len, sizeof(data2), strerror(errno));
     }
-
-//XXX write voltage
 
     // return, data file is not full
     return false;

@@ -55,6 +55,10 @@ Apply USB Patch
 - see https://github.com/raspberrypi/linux/issues/618 for information
 - this seems to fix a webcam failure that occurs when closing and reopening the /dev/video0
 
+Enable core dumps for suid processes
+- add te following to /etc/sysctl.conf, and reboot
+      fs.suid_dumpable=1
+
 =================================
 TITLE: GRAPHICS ACCELERATOR
 =================================

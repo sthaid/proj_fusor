@@ -1,5 +1,4 @@
 // XXX use top to check for memory leak in both live and playback modes
-// XXX xxx
 /*
 Copyright (c) 2016 Steven Haid
 
@@ -126,9 +125,10 @@ typedef struct {
     float        voltage_rms_kv;
     float        voltage_min_kv;
     float        voltage_max_kv;
+    float        voltage_mean_kv;
     float        current_ma;
     float        pressure_mtorr;
-    float        reserved2[4];
+    float        reserved2[3];
 
     bool         jpeg_valid;
     uint8_t      reserved3[3];
@@ -139,8 +139,9 @@ typedef struct {
     } jpeg_buff;
 
     bool         voltage_history_valid;
-    uint8_t      reserved4[3];
-    uint32_t     voltage_history_buff_len;
+    uint8_t      reserved4[1];
+    uint16_t     voltage_history_buff_len;
+    float        voltage_history_buff_secs;
     union {
         float   * ptr;  
         uint64_t  offset;
@@ -178,7 +179,7 @@ static void draw_data_values(data_t *data, rect_t * data_pane);
 static char * val2str(char * str, float val, char * trailer_str);
 static void draw_graph1(rect_t * graph_pane);
 static void graph1_scale_select(int32_t event);
-static void draw_graph2(rect_t * graph_pane);
+static void draw_graph2(rect_t * graph_pane, data_t * data);
 static data_t *  get_data(void);
 static void free_data(data_t * data);
 static bool record_data(data_t * data);
@@ -231,7 +232,7 @@ void initialize(int32_t argc, char ** argv)
                 exit(1);
             }
             break;
-        case 'n': // xxx error if not in live mode
+        case 'n': // XXX error if not in live mode
             if (strcmp(optarg, "cam") == 0) {
                 no_cam = true;
             } else if (strcmp(optarg, "dataq") == 0) {
@@ -482,7 +483,7 @@ static void display_handler(void)
             draw_graph1(&graph_pane);
             break;
         case 2:
-            draw_graph2(&graph_pane);
+            draw_graph2(&graph_pane, data);
             break;
         }
 
@@ -850,6 +851,9 @@ static void draw_graph1(rect_t * graph_pane)
                         0, "CURSOR (</>/CTRL/ALT)", BLACK, WHITE);
     }
 
+    // draw graph select control
+    sdl_render_text(graph_pane, 0, -3, 0, "(s)", BLACK, WHITE);
+
     // draw graph1 names, and current values
     for (i = 0; i < MAX_GRAPH1_CONFIG; i++) {
         char str[100];
@@ -889,9 +893,148 @@ static void graph1_scale_select(int32_t event)
 
 // - - - - - - - - -  DISPLAY HANDLER - DRAW GRAPH 2  - - - - - - - - - - - - - - - 
 
-static void draw_graph2(rect_t * graph_pane)
+static void draw_graph2(rect_t * graph_pane, data_t * data)
 {
-    //XXX add graph2
+    int32_t X_origin, X_pixels, Y_origin, Y_pixels;
+    float   Y_scale, *v;
+    int32_t max_points, max_v, max_v_graph;
+    point_t points[MAX_POINTS];  // XXX where to define MAX_POINT
+
+    // XXX verify MAX_POINTS is big enough
+
+    // verify that voltage_history_buff_secs is big enough
+    if (data->voltage_history_buff_secs < 2 * 0.10) {
+        FATAL("voltage_history_buff_secs %4.2f must be >= %4.2f\n",
+              data->voltage_history_buff_secs,
+              2 * 0.10);
+    }
+
+    // init
+    X_origin    = 10;
+    X_pixels    = 1200;
+    Y_origin    = graph_pane->h - FONT0_HEIGHT - 4;
+    Y_pixels    = graph_pane->h - FONT0_HEIGHT - 10;
+    Y_scale     = (float)Y_pixels / 30.0;
+    v           = data->voltage_history_buff.ptr;
+    max_v       = data->voltage_history_buff_len / sizeof(float);
+    max_v_graph = max_v * (0.10 / data->voltage_history_buff_secs);
+    max_points  = 0;
+
+    // create the array of points that are to be plotted
+    do {
+        int32_t start_idx, end_idx, i;
+        bool    start_idx_found;
+        float   X, X_delta;
+
+        // if no voltage history data then max_points is 0
+        if (!data->voltage_history_valid) {
+            break;
+        }
+
+        // locate start_idx (similar to oscilloscope trigger),
+        // find idx where voltage increases from below to above the mean
+        start_idx_found = false;
+        for (start_idx = 0; start_idx < max_v/2; start_idx++) {
+            if (v[start_idx] < data->voltage_mean_kv && v[start_idx+1] >= data->voltage_mean_kv) {
+                start_idx_found = true;
+                break;
+            }
+        }
+
+        // if trigger start_idx was not found then just use 0
+        if (!start_idx_found) {
+            start_idx = 0;
+        }
+
+        // create points for 0.10 secs of data
+        end_idx = start_idx + max_v_graph - 1;
+        if (end_idx >= max_v) {
+            end_idx = max_v - 1;
+        }
+        // XXX printf("START_IDX, END_IDX %d %d MAX_V=%d MAX_V_GRAPH=%d\n", 
+               // XXX start_idx, end_idx, max_v, max_v_graph);
+        X = X_origin;
+        X_delta = (float)X_pixels / max_v_graph;
+        for (i = start_idx; i <= end_idx; i++) {
+            points[max_points].x = X;
+            points[max_points].y = Y_origin - v[i] * Y_scale;
+            if (points[max_points].y < Y_origin - Y_pixels) {
+                points[max_points].y = Y_origin - Y_pixels;
+            }
+
+            max_points++;
+            X += X_delta;
+        }
+    } while (0);
+
+    // fill white
+    rect_t rect;
+    rect.x = 0;
+    rect.y = 0;
+    rect.w = graph_pane->w;
+    rect.h = graph_pane->h;
+    sdl_render_fill_rect(graph_pane, &rect, WHITE);
+
+    // draw graph of voltage_history
+    sdl_render_lines(graph_pane, points, max_points, RED);
+
+    // draw x axis
+    sdl_render_line(graph_pane, 
+                    X_origin-1, Y_origin+1, 
+                    X_origin+X_pixels, Y_origin+1,
+                    BLACK);
+    sdl_render_line(graph_pane, 
+                    X_origin-2, Y_origin+2, 
+                    X_origin+X_pixels, Y_origin+2,
+                    BLACK);
+    sdl_render_line(graph_pane, 
+                    X_origin-3, Y_origin+3, 
+                    X_origin+X_pixels, Y_origin+3,
+                    BLACK);
+
+    // draw y axis
+    sdl_render_line(graph_pane, 
+                    X_origin-1, Y_origin+1, 
+                    X_origin-1, Y_origin-Y_pixels,
+                    BLACK);
+    sdl_render_line(graph_pane, 
+                    X_origin-2, Y_origin+2, 
+                    X_origin-2, Y_origin-Y_pixels,
+                    BLACK);
+    sdl_render_line(graph_pane, 
+                    X_origin-3, Y_origin+3, 
+                    X_origin-3, Y_origin-Y_pixels,
+                    BLACK);
+
+    // draw time
+    int32_t str_col;
+    char    str[100];
+    time2str(str, (uint64_t)cursor_time_sec*1000000, false, false, false);
+    str_col = (mode == LIVE_MODE
+               ? (X_origin + X_pixels) / FONT0_WIDTH - 4
+               : (X_origin + X_pixels/2) / FONT0_WIDTH - 4);
+    if (str_col < 0) {
+        str_col = 0;
+    }
+    sdl_render_text(graph_pane, 
+                    -1, str_col,
+                    0, str, PURPLE, WHITE);
+
+    // draw x axis span time
+    sprintf(str, "%4.2f SECS", 0.10);  // XXX define
+    str_col = (X_pixels + X_origin) / FONT0_WIDTH + 6;
+    sdl_render_text(graph_pane, 
+                    -1, str_col,
+                    0, str, BLACK, WHITE);
+
+    // draw name
+    sprintf(str, "kV : %2.0f MAX", 30.0);  // XXX
+    sdl_render_text(graph_pane, 
+                    0, str_col,
+                    0, str, RED, WHITE);
+
+    // draw graph select control
+    sdl_render_text(graph_pane, 0, -3, 0, "(s)", BLACK, WHITE);
 }
 
 // -----------------  GET AND FREE DATA  ---------------------------------------------
@@ -931,7 +1074,7 @@ static data_t * get_data(void)
             int32_t ret, max_history_mv, i;
 
             // read ADC_CHAN_VOLTAGE and convert to kV
-            ret = dataq_get_adc(ADC_CHAN_VOLTAGE, &rms_mv, NULL, NULL, &min_mv, &max_mv,
+            ret = dataq_get_adc(ADC_CHAN_VOLTAGE, &rms_mv, &mean_mv, NULL, &min_mv, &max_mv,
                                 0, NULL, NULL);
             if (ret != 0) {
                 break;
@@ -939,6 +1082,7 @@ static data_t * get_data(void)
             data->voltage_rms_kv = convert_adc_voltage(rms_mv/1000.);
             data->voltage_min_kv = convert_adc_voltage(min_mv/1000.);
             data->voltage_max_kv = convert_adc_voltage(max_mv/1000.);
+            data->voltage_mean_kv = convert_adc_voltage(mean_mv/1000.);
 
             // read ADC_CHAN_CURRENT and convert to mA
             ret = dataq_get_adc(ADC_CHAN_CURRENT, NULL, &mean_mv, NULL, NULL, NULL,
@@ -977,6 +1121,7 @@ static data_t * get_data(void)
             }
             free(history_mv);
             data->voltage_history_buff_len  = max_history_mv*sizeof(float);
+            data->voltage_history_buff_secs = 0.25; // XXX
             data->voltage_history_valid = true;
         } while (0);
     } else {

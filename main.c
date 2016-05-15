@@ -114,7 +114,6 @@ enum mode {LIVE_MODE, PLAYBACK_MODE};
 
 // this struct is designed to be same size on 32bit and 64bit systems, so 
 // that the fusor data file is portable
-// XXX check this
 typedef struct {
     uint64_t     magic;
     uint64_t     time_us;
@@ -194,8 +193,6 @@ static char * gas_get_name(uint32_t gas_id);
 
 int32_t main(int32_t argc, char **argv)
 {
-    printf("XXX SIZEOF DATA_T  %zd\n", sizeof(data_t));
-
     initialize(argc, argv);
     display_handler();
     return 0;
@@ -232,7 +229,7 @@ void initialize(int32_t argc, char ** argv)
                 exit(1);
             }
             break;
-        case 'n': // XXX error if not in live mode
+        case 'n':
             if (strcmp(optarg, "cam") == 0) {
                 no_cam = true;
             } else if (strcmp(optarg, "dataq") == 0) {
@@ -267,6 +264,12 @@ void initialize(int32_t argc, char ** argv)
     } else {
         strcpy(filename, argv[optind]);
         mode = PLAYBACK_MODE;
+    }
+
+    // if in PLAYBACK mode then the -n option should not be used
+    if (mode == PLAYBACK_MODE && (no_cam || no_dataq)) {
+        printf("-n not supported in playback mode\n");
+        exit(1);
     }
 
     // print args
@@ -741,10 +744,10 @@ static void draw_graph1(rect_t * graph_pane)
 
     // draw the graph1s
     for (i = 0; i < MAX_GRAPH1_CONFIG; i++) {
-        #define MAX_POINTS 1000
+        #define MAX_POINTS1 1000
         struct graph1_config * gc;
         int32_t max_points, idx;
-        point_t points[MAX_POINTS];
+        point_t points[MAX_POINTS1];
         time_t  t;
         float   X, X_delta, Y_scale;
 
@@ -770,7 +773,7 @@ static void draw_graph1(rect_t * graph_pane)
                 points[max_points].x = X;
                 points[max_points].y = Y_origin - value * Y_scale;
                 max_points++;
-                if (max_points == MAX_POINTS) {
+                if (max_points == MAX_POINTS1) {
                     sdl_render_lines(graph_pane, points, max_points, gc->color);
                     points[0].x = X;
                     points[0].y = Y_origin - value * Y_scale;
@@ -895,18 +898,22 @@ static void graph1_scale_select(int32_t event)
 
 static void draw_graph2(rect_t * graph_pane, data_t * data)
 {
+    #define X_MAX_SECS   0.10
+    #define Y_MAX_KV     30.0
+    #define MAX_POINTS2  1000
+
     int32_t X_origin, X_pixels, Y_origin, Y_pixels;
     float   Y_scale, *v;
-    int32_t max_points, max_v, max_v_graph;
-    point_t points[MAX_POINTS];  // XXX where to define MAX_POINT
-
-    // XXX verify MAX_POINTS is big enough
+    int32_t max_points, max_v;
+    point_t points[MAX_POINTS2];
 
     // verify that voltage_history_buff_secs is big enough
-    if (data->voltage_history_buff_secs < 2 * 0.10) {
+    if (data->voltage_history_valid && 
+        data->voltage_history_buff_secs < 2 * X_MAX_SECS) 
+    {
         FATAL("voltage_history_buff_secs %4.2f must be >= %4.2f\n",
               data->voltage_history_buff_secs,
-              2 * 0.10);
+              2 * X_MAX_SECS);
     }
 
     // init
@@ -914,15 +921,14 @@ static void draw_graph2(rect_t * graph_pane, data_t * data)
     X_pixels    = 1200;
     Y_origin    = graph_pane->h - FONT0_HEIGHT - 4;
     Y_pixels    = graph_pane->h - FONT0_HEIGHT - 10;
-    Y_scale     = (float)Y_pixels / 30.0;
+    Y_scale     = (float)Y_pixels / Y_MAX_KV;
     v           = data->voltage_history_buff.ptr;
     max_v       = data->voltage_history_buff_len / sizeof(float);
-    max_v_graph = max_v * (0.10 / data->voltage_history_buff_secs);
     max_points  = 0;
 
     // create the array of points that are to be plotted
     do {
-        int32_t start_idx, end_idx, i;
+        int32_t start_idx, end_idx, i, max_v_graph;
         bool    start_idx_found;
         float   X, X_delta;
 
@@ -946,13 +952,15 @@ static void draw_graph2(rect_t * graph_pane, data_t * data)
             start_idx = 0;
         }
 
-        // create points for 0.10 secs of data
+        // create points for X_MAX_SECS of data
+        max_v_graph = max_v * (X_MAX_SECS / data->voltage_history_buff_secs);
+        if (max_v_graph > MAX_POINTS2) {
+            FATAL("points array not big enough, max_v_graph=%d\n", max_v_graph);
+        }
         end_idx = start_idx + max_v_graph - 1;
         if (end_idx >= max_v) {
             end_idx = max_v - 1;
         }
-        // XXX printf("START_IDX, END_IDX %d %d MAX_V=%d MAX_V_GRAPH=%d\n", 
-               // XXX start_idx, end_idx, max_v, max_v_graph);
         X = X_origin;
         X_delta = (float)X_pixels / max_v_graph;
         for (i = start_idx; i <= end_idx; i++) {
@@ -1021,14 +1029,14 @@ static void draw_graph2(rect_t * graph_pane, data_t * data)
                     0, str, PURPLE, WHITE);
 
     // draw x axis span time
-    sprintf(str, "%4.2f SECS", 0.10);  // XXX define
+    sprintf(str, "%4.2f SECS", X_MAX_SECS);
     str_col = (X_pixels + X_origin) / FONT0_WIDTH + 6;
     sdl_render_text(graph_pane, 
                     -1, str_col,
                     0, str, BLACK, WHITE);
 
     // draw name
-    sprintf(str, "kV : %2.0f MAX", 30.0);  // XXX
+    sprintf(str, "kV : %2.0f MAX", Y_MAX_KV);
     sdl_render_text(graph_pane, 
                     0, str_col,
                     0, str, RED, WHITE);
@@ -1069,6 +1077,8 @@ static data_t * get_data(void)
         // get adc data from the dataq device, and 
         // convert to the values which will be displayed
         if (!no_dataq) do {
+            #define VOLTAGE_HISTORY_BUFF_SECS  0.25
+
             int32_t rms_mv, mean_mv, min_mv, max_mv;
             int32_t * history_mv;
             int32_t ret, max_history_mv, i;
@@ -1106,9 +1116,8 @@ static data_t * get_data(void)
             data->data_valid = true;
 
             // read ADC_CHAN_VOLTAGE and save history in data->voltage_history_buff
-            // XXX make the 0.25 a define, and also the 0.5
             ret = dataq_get_adc(ADC_CHAN_VOLTAGE, &rms_mv, NULL, NULL, &min_mv, &max_mv,
-                                0.25, &history_mv, &max_history_mv);
+                                VOLTAGE_HISTORY_BUFF_SECS, &history_mv, &max_history_mv);
             if (ret != 0) {
                 break;
             }
@@ -1121,7 +1130,7 @@ static data_t * get_data(void)
             }
             free(history_mv);
             data->voltage_history_buff_len  = max_history_mv*sizeof(float);
-            data->voltage_history_buff_secs = 0.25; // XXX
+            data->voltage_history_buff_secs = VOLTAGE_HISTORY_BUFF_SECS;
             data->voltage_history_valid = true;
         } while (0);
     } else {

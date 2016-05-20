@@ -1,4 +1,3 @@
-// XXX use top to check for memory leak in both live and playback modes
 /*
 Copyright (c) 2016 Steven Haid
 
@@ -64,9 +63,10 @@ SOFTWARE.
 #define CAM_WIDTH   960
 #define CAM_HEIGHT  720
 
-#define ADC_CHAN_VOLTAGE   1
-#define ADC_CHAN_CURRENT   2
-#define ADC_CHAN_PRESSURE  3
+#define ADC_CHAN_VOLTAGE           1
+#define ADC_CHAN_CURRENT           2
+#define ADC_CHAN_CHAMBER_PRESSURE  3
+#define ADC_CHAN_ROUGH_PRESSURE    4
 
 #define MAX_HISTORY  100000
 
@@ -126,8 +126,9 @@ typedef struct {
     float        voltage_max_kv;
     float        voltage_mean_kv;
     float        current_ma;
-    float        pressure_mtorr;
-    float        reserved2[3];
+    float        chamber_pressure_mtorr;
+    float        rough_pressure_mtorr;
+    float        reserved2[2];
 
     bool         jpeg_valid;
     uint8_t      reserved3[3];
@@ -184,7 +185,8 @@ static void free_data(data_t * data);
 static bool record_data(data_t * data);
 static float convert_adc_voltage(float adc_volts);
 static float convert_adc_current(float adc_volts);
-static float convert_adc_pressure(float adc_volts, uint32_t gas_id);
+static float convert_adc_chamber_pressure(float adc_volts, uint32_t gas_id);
+static float convert_adc_rough_pressure(float adc_volts);
 static uint32_t gas_get_id(void);
 static void gas_select(void);
 static char * gas_get_name(uint32_t gas_id);
@@ -286,7 +288,11 @@ void initialize(int32_t argc, char ** argv)
     // endif
     if (mode == LIVE_MODE) {
         if (!no_dataq) {
-            dataq_init(0.5, 3, ADC_CHAN_VOLTAGE, ADC_CHAN_CURRENT, ADC_CHAN_PRESSURE);
+            dataq_init(0.5, 4, 
+                       ADC_CHAN_VOLTAGE, 
+                       ADC_CHAN_CURRENT, 
+                       ADC_CHAN_CHAMBER_PRESSURE, 
+                       ADC_CHAN_ROUGH_PRESSURE);
         }
         if (!no_cam) {
             cam_init(CAM_WIDTH, CAM_HEIGHT);
@@ -645,18 +651,21 @@ static void draw_data_values(data_t *data, rect_t * data_pane)
     val2str(str, data->current_ma, "mA");
     sdl_render_text(data_pane, 3, 0, 1, str, WHITE, BLACK);
 
-    if (data->pressure_mtorr < 1000 || IS_ERROR(data->pressure_mtorr)) {
-        sprintf(trailer_str, "mTorr %s %s", 
+    if (data->chamber_pressure_mtorr < 1000 || IS_ERROR(data->chamber_pressure_mtorr)) {
+        sprintf(trailer_str, "mTorr CHMBR %s%s", 
                 gas_get_name(data->gas_id),
                 mode == LIVE_MODE ? "(g)" : "");
-        val2str(str, data->pressure_mtorr, trailer_str);
+        val2str(str, data->chamber_pressure_mtorr, trailer_str);
     } else {
-        sprintf(trailer_str, "Torr %s %s", 
+        sprintf(trailer_str, "Torr CHMBR %s%s", 
                 gas_get_name(data->gas_id),
                 mode == LIVE_MODE ? "(g)" : "");
-        val2str(str, data->pressure_mtorr/1000, trailer_str);
+        val2str(str, data->chamber_pressure_mtorr/1000, trailer_str);
     }
     sdl_render_text(data_pane, 4, 0, 1, str, WHITE, BLACK);
+
+    val2str(str, data->rough_pressure_mtorr, "mTorr ROUGH");
+    sdl_render_text(data_pane, 5, 0, 1, str, WHITE, BLACK);
 }
 
 static char * val2str(char * str, float val, char * trailer_str)
@@ -700,7 +709,7 @@ static void draw_graph1(rect_t * graph_pane)
     } graph1_config[] = {
         { "kV    : 30 MAX", 30.0, RED, offsetof(data_t, voltage_rms_kv) },
         { "mA    : 30 MAX", 30.0, GREEN, offsetof(data_t, current_ma) },
-        { "mTorr : 30 MAX", 30.0, BLUE, offsetof(data_t, pressure_mtorr) },
+        { "mTorr : 30 MAX", 30.0, BLUE, offsetof(data_t, chamber_pressure_mtorr) },
                             };
 
     time_t  graph1_start_time_sec, graph1_end_time_sec;
@@ -1102,15 +1111,23 @@ static data_t * get_data(void)
             }
             data->current_ma = convert_adc_current(mean_mv/1000.);
 
-            // read ADC_CHAN_PRESSURE and convert to mTorr
-            ret = dataq_get_adc(ADC_CHAN_PRESSURE, NULL, &mean_mv, NULL, NULL, NULL,
+            // read ADC_CHAN_CHAMBER_PRESSURE and convert to mTorr
+            ret = dataq_get_adc(ADC_CHAN_CHAMBER_PRESSURE, NULL, &mean_mv, NULL, NULL, NULL,
                                 0, NULL, NULL);
             if (ret != 0) {
                 break;
             }
-            mean_mv = 3386;  // XXX temp set value for testing
             data->gas_id = gas_get_id();
-            data->pressure_mtorr = convert_adc_pressure(mean_mv/1000., data->gas_id);
+            data->chamber_pressure_mtorr = convert_adc_chamber_pressure(mean_mv/1000., data->gas_id);
+
+            // read ADC_CHAN_ROUGH_PRESSURE and convert to mTorr
+            ret = dataq_get_adc(ADC_CHAN_ROUGH_PRESSURE, NULL, &mean_mv, NULL, NULL, NULL,
+                                0, NULL, NULL);
+            if (ret != 0) {
+                break;
+            }
+            mean_mv = 3300; // XXX temp
+            data->rough_pressure_mtorr = convert_adc_rough_pressure(mean_mv/1000.);
 
             // set data_valid flag
             data->data_valid = true;
@@ -1310,7 +1327,7 @@ static float convert_adc_current(float adc_volts)
     return adc_volts * 10.;    // mA
 }
 
-// -----------------  CONVERT ADC PRESSURE GAUGE  ------------------------------------
+// -----------------  CONVERT ADC CHAMBER PRESSURE GAUGE  ----------------------------
 
 // Notes:
 // - Refer to http://www.lesker.com/newweb/gauges/pdf/manuals/275iusermanual.pdf
@@ -1392,7 +1409,7 @@ gas_t gas_tbl[] = {
 
 // --- code ---
 
-static float convert_adc_pressure(float adc_volts, uint32_t gas_id)
+static float convert_adc_chamber_pressure(float adc_volts, uint32_t gas_id)
 {
     gas_t * gas = &gas_tbl[gas_id];
     int32_t i = 0;
@@ -1439,3 +1456,9 @@ static char * gas_get_name(uint32_t gas_id)
     return gas_tbl[gas_id].name;
 }
 
+// -----------------  CONVERT ADC ROUGH PRESSURE GAUGE  -------------------------------
+
+static float convert_adc_rough_pressure(float adc_volts)
+{
+    return adc_volts/300. * 1000.;  // XXX temp, cvt to gauge ctlr recorder output voltage in mv
+}

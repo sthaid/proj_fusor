@@ -69,6 +69,7 @@ SOFTWARE.
 #define ADC_CHAN_ROUGH_PRESSURE    4
 
 #define MAX_HISTORY  100000
+#define MAX_SCOPE    4
 
 #define FONT0_HEIGHT (sdl_font_char_height(0))
 #define FONT0_WIDTH  (sdl_font_char_width(0))
@@ -138,15 +139,24 @@ typedef struct {
         uint64_t  offset;
     } jpeg_buff;
 
-    bool         voltage_history_valid;
-    uint8_t      reserved4[1];
-    uint16_t     voltage_history_buff_len;
-    float        voltage_history_buff_secs;
-    union {
-        float   * ptr;  
-        uint64_t  offset;
-    } voltage_history_buff;
+    float  scope_buff_secs;
+    int8_t reserved4[4];
+    struct {
+        bool    valid;
+        uint8_t reserved5[3];
+        int32_t buff_len;
+        union {
+            int16_t * ptr;  
+            uint64_t  offset;
+        } buff;
+    } scope[MAX_SCOPE];
 } data_t;
+
+typedef struct {
+    int32_t adc_chan;
+    int32_t color;
+    char    name[32];
+} scope_t;
 
 //
 // variables
@@ -166,6 +176,12 @@ static time_t        history_start_time_sec;
 static time_t        history_end_time_sec;
 static time_t        cursor_time_sec;
 
+static scope_t       scope[MAX_SCOPE] = {
+                        { ADC_CHAN_VOLTAGE,          RED,    "voltage"     },
+                        { ADC_CHAN_CURRENT,          GREEN,  "current"     },
+                        { ADC_CHAN_CHAMBER_PRESSURE, BLUE,   "chmbr press" },
+                        { ADC_CHAN_ROUGH_PRESSURE,   PURPLE, "rough press" }, };
+
 //
 // prototypes
 //
@@ -178,8 +194,9 @@ static void draw_camera_image(data_t * data, rect_t * cam_pane, texture_t cam_te
 static void draw_data_values(data_t *data, rect_t * data_pane);
 static char * val2str(char * str, float val, char * trailer_str);
 static void draw_graph1(rect_t * graph_pane);
-static void graph1_scale_select(int32_t event);
+static void graph1_xscale_select(int32_t event);
 static void draw_graph2(rect_t * graph_pane, data_t * data);
+static void graph2_yscale_select(int32_t event);
 static data_t *  get_data(void);
 static void free_data(data_t * data);
 static bool record_data(data_t * data);
@@ -506,11 +523,9 @@ static void display_handler(void)
         }
         // - graph select
         sdl_event_register('s', SDL_EVENT_TYPE_KEY, NULL);
-        // - graph 1 zoom
-        if (graph_select == 1) {
-            sdl_event_register('+', SDL_EVENT_TYPE_KEY, NULL);
-            sdl_event_register('-', SDL_EVENT_TYPE_KEY, NULL);
-        }
+        // - graph1 xscale, graph2 yscale
+        sdl_event_register('+', SDL_EVENT_TYPE_KEY, NULL);
+        sdl_event_register('-', SDL_EVENT_TYPE_KEY, NULL);
         // - graph 1 & 2 cursor time
         if (mode == PLAYBACK_MODE) {
             sdl_event_register(SDL_EVENT_KEY_LEFT_ARROW, SDL_EVENT_TYPE_KEY, NULL);
@@ -551,7 +566,11 @@ static void display_handler(void)
                 break;
             case '-': case '+':
                 ASSERT_IN_ANY_MODE();
-                graph1_scale_select(event->event);
+                if (graph_select == 1) {
+                    graph1_xscale_select(event->event);
+                } else {
+                    graph2_yscale_select(event->event);
+                }
                 break;
             case SDL_EVENT_KEY_LEFT_ARROW:
             case SDL_EVENT_KEY_CTRL_LEFT_ARROW:
@@ -799,25 +818,25 @@ static void draw_graph1(rect_t * graph_pane)
 
     // draw x axis
     sdl_render_line(graph_pane, 
-                    X_origin-1, Y_origin+1, 
+                    X_origin, Y_origin+1, 
                     X_origin+X_pixels, Y_origin+1,
                     BLACK);
     sdl_render_line(graph_pane, 
-                    X_origin-2, Y_origin+2, 
+                    X_origin, Y_origin+2, 
                     X_origin+X_pixels, Y_origin+2,
                     BLACK);
     sdl_render_line(graph_pane, 
-                    X_origin-3, Y_origin+3, 
+                    X_origin, Y_origin+3, 
                     X_origin+X_pixels, Y_origin+3,
                     BLACK);
 
     // draw y axis
     sdl_render_line(graph_pane, 
-                    X_origin-1, Y_origin+1, 
+                    X_origin-1, Y_origin+3, 
                     X_origin-1, Y_origin-Y_pixels,
                     BLACK);
     sdl_render_line(graph_pane, 
-                    X_origin-2, Y_origin+2, 
+                    X_origin-2, Y_origin+3, 
                     X_origin-2, Y_origin-Y_pixels,
                     BLACK);
     sdl_render_line(graph_pane, 
@@ -886,7 +905,7 @@ static void draw_graph1(rect_t * graph_pane)
     }
 }
 
-static void graph1_scale_select(int32_t event)
+static void graph1_xscale_select(int32_t event)
 {
     if (event != '+' && event != '-') {
         FATAL("event must be '+' or '-'\n");
@@ -905,84 +924,87 @@ static void graph1_scale_select(int32_t event)
 
 // - - - - - - - - -  DISPLAY HANDLER - DRAW GRAPH 2  - - - - - - - - - - - - - - - 
 
+static int32_t graph2_yscale[] = { 100, 200, 500, 1000, 2000, 5000, 10000 };
+static int32_t graph2_yscale_idx = 3;
+
 static void draw_graph2(rect_t * graph_pane, data_t * data)
 {
     #define X_MAX_SECS   0.10
-    #define Y_MAX_KV     30.0
     #define MAX_POINTS2  1000
 
-    int32_t X_origin, X_pixels, Y_origin, Y_pixels;
-    float   Y_scale, *v;
-    int32_t max_points, max_v;
-    point_t points[MAX_POINTS2];
-
-    // verify that voltage_history_buff_secs is big enough
-    if (data->voltage_history_valid && 
-        data->voltage_history_buff_secs < 2 * X_MAX_SECS) 
-    {
-        FATAL("voltage_history_buff_secs %4.2f must be >= %4.2f\n",
-              data->voltage_history_buff_secs,
-              2 * X_MAX_SECS);
-    }
+    int32_t   X_origin, X_pixels, Y_origin, Y_pixels;
+    int32_t   max_points[MAX_SCOPE];
+    point_t   points[MAX_SCOPE][MAX_POINTS2];
+    int32_t   start_idx;
 
     // init
     X_origin    = 10;
     X_pixels    = 1200;
-    Y_origin    = graph_pane->h - FONT0_HEIGHT - 4;
-    Y_pixels    = graph_pane->h - FONT0_HEIGHT - 10;
-    Y_scale     = (float)Y_pixels / Y_MAX_KV;
-    v           = data->voltage_history_buff.ptr;
-    max_v       = data->voltage_history_buff_len / sizeof(float);
-    max_points  = 0;
+    Y_origin    = graph_pane->h / 2;
+    Y_pixels    = graph_pane->h / 2 - 10;
+    bzero(max_points, sizeof(max_points));
+    start_idx = 0;
 
-    // create the array of points that are to be plotted
-    do {
-        int32_t start_idx, end_idx, i, max_v_graph;
-        bool    start_idx_found;
-        float   X, X_delta;
+    // locate start_idx (similar to oscilloscope trigger),
+    // find idx where voltage increases from below to above the median
+    //
+    // note - start_idx (trigger) is computed for channel 0
+    {
+        int16_t * v;
+        int32_t   max_v, idx, min, max, median;
 
-        // if no voltage history data then max_points is 0
-        if (!data->voltage_history_valid) {
-            break;
+        v     = data->scope[0].buff.ptr;
+        max_v = data->scope[0].buff_len / sizeof(int16_t);
+
+        max = -32767;
+        min = +32767;
+        for (idx = 0; idx < max_v; idx++) {
+            if (v[idx] > max) max = v[idx];
+            if (v[idx] < min) min = v[idx];
         }
+        median = (min + max) / 2;
+        // XXX printf("median %d\n", median);
 
-        // locate start_idx (similar to oscilloscope trigger),
-        // find idx where voltage increases from below to above the mean
-        start_idx_found = false;
-        for (start_idx = 0; start_idx < max_v/2; start_idx++) {
-            if (v[start_idx] < data->voltage_mean_kv && v[start_idx+1] >= data->voltage_mean_kv) {
-                start_idx_found = true;
+        for (idx = 0; idx < max_v/2; idx++) {
+            if (v[idx] < median && v[idx+1] >= median) {
+                start_idx = idx;
                 break;
             }
         }
+        // XXX printf("max_v=%d  start_idx = %d  - %d %d %d\n", max_v, start_idx, v[start_idx+0], v[start_idx+1], v[start_idx+2]);
+    }
 
-        // if trigger start_idx was not found then just use 0
-        if (!start_idx_found) {
-            start_idx = 0;
-        }
+    // for each scope chan create the array of points that are to be plotted
+    int32_t i;
+    for (i = 0; i < MAX_SCOPE; i++) {
+        float     X, X_delta, Y_scale;
+        int32_t   idx, end_idx, max_v, max_v_graph;
+        int16_t * v;
 
-        // create points for X_MAX_SECS of data
-        max_v_graph = max_v * (X_MAX_SECS / data->voltage_history_buff_secs);
-        if (max_v_graph > MAX_POINTS2) {
-            FATAL("points array not big enough, max_v_graph=%d\n", max_v_graph);
-        }
-        end_idx = start_idx + max_v_graph - 1;
+        Y_scale     = (float)Y_pixels / graph2_yscale[graph2_yscale_idx];
+        v           = data->scope[i].buff.ptr;
+        max_v       = data->scope[i].buff_len / sizeof(int16_t);
+        max_v_graph = max_v * (X_MAX_SECS / data->scope_buff_secs);
+        end_idx     = start_idx + max_v_graph - 1;
         if (end_idx >= max_v) {
             end_idx = max_v - 1;
         }
         X = X_origin;
         X_delta = (float)X_pixels / max_v_graph;
-        for (i = start_idx; i <= end_idx; i++) {
-            points[max_points].x = X;
-            points[max_points].y = Y_origin - v[i] * Y_scale;
-            if (points[max_points].y < Y_origin - Y_pixels) {
-                points[max_points].y = Y_origin - Y_pixels;
+        for (idx = start_idx; idx <= end_idx; idx++) {
+            points[i][max_points[i]].x = X;
+            points[i][max_points[i]].y = Y_origin - v[idx] * Y_scale;
+            if (points[i][max_points[i]].y < Y_origin - Y_pixels) {
+                points[i][max_points[i]].y = Y_origin - Y_pixels;
+            }
+            if (points[i][max_points[i]].y > Y_origin + Y_pixels) {
+                points[i][max_points[i]].y = Y_origin + Y_pixels;
             }
 
-            max_points++;
+            max_points[i]++;
             X += X_delta;
         }
-    } while (0);
+    }
 
     // fill white
     rect_t rect;
@@ -993,33 +1015,35 @@ static void draw_graph2(rect_t * graph_pane, data_t * data)
     sdl_render_fill_rect(graph_pane, &rect, WHITE);
 
     // draw graph of voltage_history
-    sdl_render_lines(graph_pane, points, max_points, RED);
+    for (i = 0; i < MAX_SCOPE; i++) {
+        sdl_render_lines(graph_pane, points[i], max_points[i], scope[i].color);
+    }
 
-    // draw x axis
+    // draw x axis  
     sdl_render_line(graph_pane, 
-                    X_origin-1, Y_origin+1, 
+                    X_origin, Y_origin-1, 
+                    X_origin+X_pixels, Y_origin-1,
+                    BLACK);
+    sdl_render_line(graph_pane, 
+                    X_origin, Y_origin, 
+                    X_origin+X_pixels, Y_origin,
+                    BLACK);
+    sdl_render_line(graph_pane, 
+                    X_origin, Y_origin+1, 
                     X_origin+X_pixels, Y_origin+1,
-                    BLACK);
-    sdl_render_line(graph_pane, 
-                    X_origin-2, Y_origin+2, 
-                    X_origin+X_pixels, Y_origin+2,
-                    BLACK);
-    sdl_render_line(graph_pane, 
-                    X_origin-3, Y_origin+3, 
-                    X_origin+X_pixels, Y_origin+3,
                     BLACK);
 
     // draw y axis
     sdl_render_line(graph_pane, 
-                    X_origin-1, Y_origin+1, 
+                    X_origin-1, Y_origin+Y_pixels,
                     X_origin-1, Y_origin-Y_pixels,
                     BLACK);
     sdl_render_line(graph_pane, 
-                    X_origin-2, Y_origin+2, 
+                    X_origin-2, Y_origin+Y_pixels,
                     X_origin-2, Y_origin-Y_pixels,
                     BLACK);
     sdl_render_line(graph_pane, 
-                    X_origin-3, Y_origin+3, 
+                    X_origin-3, Y_origin+Y_pixels,
                     X_origin-3, Y_origin-Y_pixels,
                     BLACK);
 
@@ -1037,21 +1061,39 @@ static void draw_graph2(rect_t * graph_pane, data_t * data)
                     -1, str_col,
                     0, str, PURPLE, WHITE);
 
-    // draw x axis span time
-    sprintf(str, "%4.2f SECS", X_MAX_SECS);
+    // draw x axis span time, and y axis scale
+    sprintf(str, "%4.2f SECS  +/-%d MV (+/-)", X_MAX_SECS, graph2_yscale[graph2_yscale_idx]);
     str_col = (X_pixels + X_origin) / FONT0_WIDTH + 6;
     sdl_render_text(graph_pane, 
                     -1, str_col,
                     0, str, BLACK, WHITE);
 
-    // draw name
-    sprintf(str, "kV : %2.0f MAX", Y_MAX_KV);
-    sdl_render_text(graph_pane, 
-                    0, str_col,
-                    0, str, RED, WHITE);
+    // draw names
+    for (i = 0; i < MAX_SCOPE; i++) {
+        sdl_render_text(graph_pane, 
+                        i, str_col,
+                        0, scope[i].name, scope[i].color, WHITE);
+    }
 
     // draw graph select control
     sdl_render_text(graph_pane, 0, -3, 0, "(s)", BLACK, WHITE);
+}
+
+static void graph2_yscale_select(int32_t event)
+{
+    if (event != '+' && event != '-') {
+        FATAL("event must be '+' or '-'\n");
+    }
+
+    if (event == '+') {
+        if (graph2_yscale_idx > 0) {
+            graph2_yscale_idx--;
+        }
+    } else {
+        if (graph2_yscale_idx < sizeof(graph2_yscale)/sizeof(int32_t)-1) {
+            graph2_yscale_idx++;
+        }
+    }
 }
 
 // -----------------  GET AND FREE DATA  ---------------------------------------------
@@ -1086,11 +1128,10 @@ static data_t * get_data(void)
         // get adc data from the dataq device, and 
         // convert to the values which will be displayed
         if (!no_dataq) do {
-            #define VOLTAGE_HISTORY_BUFF_SECS  0.25
+            #define SCOPE_SECS  0.25
 
-            int32_t rms_mv, mean_mv, min_mv, max_mv;
-            int32_t * history_mv;
-            int32_t ret, max_history_mv, i;
+            int16_t rms_mv, mean_mv, min_mv, max_mv;
+            int32_t ret, i;
 
             // read ADC_CHAN_VOLTAGE and convert to kV
             ret = dataq_get_adc(ADC_CHAN_VOLTAGE, &rms_mv, &mean_mv, NULL, &min_mv, &max_mv,
@@ -1126,34 +1167,26 @@ static data_t * get_data(void)
             if (ret != 0) {
                 break;
             }
-            mean_mv = 3300; // XXX temp
             data->rough_pressure_mtorr = convert_adc_rough_pressure(mean_mv/1000.);
 
             // set data_valid flag
             data->data_valid = true;
 
-            // read ADC_CHAN_VOLTAGE and save history in data->voltage_history_buff
-            ret = dataq_get_adc(ADC_CHAN_VOLTAGE, &rms_mv, NULL, NULL, &min_mv, &max_mv,
-                                VOLTAGE_HISTORY_BUFF_SECS, &history_mv, &max_history_mv);
-            if (ret != 0) {
-                break;
+            // get the scope data
+            data->scope_buff_secs = SCOPE_SECS;
+            for (i = 0; i < MAX_SCOPE; i++) {
+                int32_t max_buff;
+                data->scope[i].valid = dataq_get_adc(scope[i].adc_chan, 
+                                                     NULL, NULL, NULL, NULL, NULL,
+                                                     SCOPE_SECS, 
+                                                     &data->scope[i].buff.ptr,
+                                                     &max_buff);
+                data->scope[i].buff_len = max_buff * sizeof(int16_t);
             }
-            data->voltage_history_buff.ptr = malloc(max_history_mv*sizeof(float));
-            if (data->voltage_history_buff.ptr == NULL) {
-                FATAL("failed malloc voltage_hisotyr_buff, len=%d\n", data->jpeg_buff_len);
-            }
-            for (i = 0; i < max_history_mv; i++) {
-                data->voltage_history_buff.ptr[i] = convert_adc_voltage(history_mv[i]/1000.);
-            }
-            free(history_mv);
-            data->voltage_history_buff_len  = max_history_mv*sizeof(float);
-            data->voltage_history_buff_secs = VOLTAGE_HISTORY_BUFF_SECS;
-            data->voltage_history_valid = true;
         } while (0);
     } else {
-        int32_t len, idx;
+        int32_t len, idx, i;
         uint8_t * jpeg_buff_ptr;
-        float * voltage_history_buff_ptr;
 
         // PLAYBACK_MODE ...
 
@@ -1183,23 +1216,30 @@ static data_t * get_data(void)
             data->jpeg_buff.ptr = jpeg_buff_ptr;
         }
 
-        // if voltage_history_valid then get the voltage_history from the data file
-        if (data->voltage_history_valid) {
-            // malloc buffer for voltage_history
-            voltage_history_buff_ptr = malloc(data->voltage_history_buff_len);
-            if (voltage_history_buff_ptr == NULL){
-                FATAL("failed malloc voltage_history buff, len=%d\n", data->voltage_history_buff_len);
+        // read scope data from the file
+        for (i = 0; i < MAX_SCOPE; i++) {
+            int16_t * ptr;
+
+            // if scope data for this chan is not valid then continue
+            if (!data->scope[i].valid) {
+                continue;
+            }
+
+            // malloc buffer for scope voltage values
+            ptr = malloc(data->scope[i].buff_len);
+            if (ptr == NULL){
+                FATAL("failed malloc scope buff, len=%d\n", data->scope[i].buff_len);
             }
 
             // read the voltage_history into the allocated buffer
-            len = pread(fd, voltage_history_buff_ptr, data->voltage_history_buff_len, data->voltage_history_buff.offset);
-            if (len != data->voltage_history_buff_len) {
+            len = pread(fd, ptr, data->scope[i].buff_len, data->scope[i].buff.offset);
+            if (len != data->scope[i].buff_len) {
                 FATAL("read voltage_history buff, len=%d, %s\n", len, strerror(errno));
             }
 
-            // replace voltage_history_buff.offset with voltage_history_buff.ptr
-            data->voltage_history_buff.offset = 0;
-            data->voltage_history_buff.ptr = voltage_history_buff_ptr;
+            // replace file offset with ptr
+            data->scope[i].buff.offset = 0;
+            data->scope[i].buff.ptr = ptr;
         }
     }
 
@@ -1209,14 +1249,18 @@ static data_t * get_data(void)
 
 static void free_data(data_t * data) 
 {
+    int32_t i;
+
     if (mode == LIVE_MODE) {
         if (data->jpeg_valid) {
             cam_put_buff(data->jpeg_buff.ptr);
         }
-        free(data->voltage_history_buff.ptr);
     } else {
         free(data->jpeg_buff.ptr);
-        free(data->voltage_history_buff.ptr);
+    }
+
+    for (i = 0; i < MAX_SCOPE; i++) {
+        free(data->scope[i].buff.ptr);
     }
 
     free(data);
@@ -1252,7 +1296,7 @@ static bool record_data(data_t * data)
     cursor_time_sec = history_end_time_sec; 
 
     // write the new history entry to the file
-    int32_t len;
+    int32_t len, i;
     data_t data2 = history[idx];
     if (data2.jpeg_valid) {
         data2.jpeg_buff.offset = file_offset;
@@ -1265,14 +1309,18 @@ static bool record_data(data_t * data)
         }
     }
 
-    if (data2.voltage_history_valid) {
-        data2.voltage_history_buff.offset = file_offset;
-        file_offset += data2.voltage_history_buff_len;
+    for (i = 0; i < MAX_SCOPE; i++) {
+        if (!data->scope[i].valid) {
+            continue;
+        }
 
-        len = pwrite(fd, history[idx].voltage_history_buff.ptr, data2.voltage_history_buff_len, data2.voltage_history_buff.offset);
-        if (len != data2.voltage_history_buff_len) {
+        data2.scope[i].buff.offset = file_offset;
+        file_offset += data2.scope[i].buff_len;
+
+        len = pwrite(fd, history[idx].scope[i].buff.ptr, data2.scope[i].buff_len, data2.scope[i].buff.offset);
+        if (len != data2.scope[i].buff_len) {
             FATAL("failed write voltage_history to file, ret_len=%d, exp_len=%d, %s\n", 
-                  len, data2.voltage_history_buff_len, strerror(errno));
+                  len, data2.scope[i].buff_len, strerror(errno));
         }
     }
 
@@ -1460,5 +1508,5 @@ static char * gas_get_name(uint32_t gas_id)
 
 static float convert_adc_rough_pressure(float adc_volts)
 {
-    return adc_volts/300. * 1000.;  // XXX temp, cvt to gauge ctlr recorder output voltage in mv
+    return adc_volts * 1000.;  // XXX temp, returns mv
 }

@@ -40,6 +40,9 @@ SOFTWARE.
 #include "util_dataq.h"
 #include "util_misc.h"
 
+//#define DATAQ_SIMULATOR
+#ifndef DATAQ_SIMULATOR
+
 //
 // defines
 //
@@ -56,7 +59,7 @@ SOFTWARE.
 //
 
 typedef struct {
-    int32_t * val;   // millivolts
+    int16_t * val;   // millivolts
     int32_t sum;
     int64_t sum_squares;
     int32_t idx;
@@ -206,7 +209,7 @@ void dataq_init(float averaging_duration_sec, int32_t max_adc_chan, ...)
     max_val = scan_hz * averaging_duration_sec;
     for (i = 0; i < max_slist_idx; i++) {
         int32_t adc_chan = slist_idx_to_adc_chan[i];
-        adc[adc_chan].val = calloc(max_val, sizeof(int32_t));
+        adc[adc_chan].val = calloc(max_val, sizeof(int16_t));
         if (adc[adc_chan].val == NULL) {
             FATAL("alloc adc[%d].val failed, max_val=%d\n", adc_chan, max_val);
         }
@@ -242,10 +245,10 @@ void dataq_init(float averaging_duration_sec, int32_t max_adc_chan, ...)
 }
 
 int32_t dataq_get_adc(int32_t adc_chan,
-                      int32_t * rms_mv,
-                      int32_t * mean_mv, int32_t * sdev_mv,
-                      int32_t * min_mv, int32_t * max_mv,
-                      float history_secs, int32_t ** history_mv, int32_t * max_history_mv)
+                      int16_t * rms_mv,
+                      int16_t * mean_mv, int16_t * sdev_mv,
+                      int16_t * min_mv, int16_t * max_mv,
+                      float history_secs, int16_t ** history_mv, int32_t * max_history_mv)
 {
     int32_t i;
     adc_t * x;
@@ -281,8 +284,8 @@ int32_t dataq_get_adc(int32_t adc_chan,
 
     // calculate min and max voltages
     if (min_mv || max_mv) {
-        int32_t min = +10000000;
-        int32_t max = -10000000;
+        int16_t min = +32767;
+        int16_t max = -32767;
         for (i = 0; i < max_val; i++) {
             if (x->val[i] < min) {
                 min = x->val[i];
@@ -302,7 +305,7 @@ int32_t dataq_get_adc(int32_t adc_chan,
     // return history
     if (history_mv && max_history_mv) {
         int32_t max, idx, i;
-        int32_t * buff;
+        int16_t * buff;
 
         // preset returns
         *history_mv = NULL;
@@ -317,7 +320,7 @@ int32_t dataq_get_adc(int32_t adc_chan,
         }
 
         // allocate history buffer
-        buff = malloc(max*sizeof(int32_t));
+        buff = malloc(max*sizeof(int16_t));
         if (buff == NULL) {
             FATAL("malloc failed, max=%d\n", max);
         }
@@ -604,5 +607,224 @@ static void * dataq_test_thread(void * cx)
         printf("\n");
     }
     return NULL;
+}
+#endif
+
+#else
+// -----------------  SIMULATOR  -------------------------------------------------------
+
+#define MAX_ADC_CHAN   9            // channels 1 .. 8
+
+typedef struct {
+    int16_t * val;   // millivolts
+    int32_t sum;
+    int64_t sum_squares;
+    int32_t idx;
+} adc_t;
+
+static int32_t  max_slist_idx; 
+static int32_t  slist_idx_to_adc_chan[8];
+static adc_t    adc[MAX_ADC_CHAN];
+static int32_t  max_val;
+static bool     scan_okay = true;
+static int32_t  scan_hz = 1000;
+
+static void * dataq_simulator_thread(void * cx);
+static void dataq_process_adc_raw(int32_t slist_idx, int32_t new_val);
+
+void dataq_init(float averaging_duration_sec, int32_t max_adc_chan, ...)
+{
+    int32_t   i, cnt;
+    char      adc_channels_str[100];
+    char    * p;
+    va_list   ap;
+    pthread_t thread_id;
+
+    // scan valist for adc channel numbers
+    max_slist_idx = max_adc_chan;
+    va_start(ap, max_adc_chan);
+    for (i = 0; i < max_slist_idx; i++) {
+        slist_idx_to_adc_chan[i] = va_arg(ap, int32_t);
+    }
+    va_end(ap);
+
+    // validate adc channel numbers
+    for (i = 0; i < max_slist_idx; i++) {
+        int32_t adc_chan = slist_idx_to_adc_chan[i];
+        if (adc_chan < 1 || adc_chan >= MAX_ADC_CHAN) {
+            FATAL("adc_chan %d is invalid\n", adc_chan);
+        }
+    }
+
+    // debug print args
+    p = adc_channels_str;
+    for (i = 0; i < max_slist_idx; i++) {
+        cnt = sprintf(p, "%d ",  slist_idx_to_adc_chan[i]);
+        p += cnt;
+    }
+    INFO("averaging_duration_sec=%4.2f channels=%s\n",
+         averaging_duration_sec, adc_channels_str);
+
+    // determine the number of adc values that are needed for the averaging_duration,
+    // and allocate zeroed memory for them
+    max_val = scan_hz * averaging_duration_sec;
+    for (i = 0; i < max_slist_idx; i++) {
+        int32_t adc_chan = slist_idx_to_adc_chan[i];
+        adc[adc_chan].val = calloc(max_val, sizeof(int16_t));
+        if (adc[adc_chan].val == NULL) {
+            FATAL("alloc adc[%d].val failed, max_val=%d\n", adc_chan, max_val);
+        }
+    }
+    INFO("scan_hz=%d max_val=%d\n", scan_hz, max_val);
+
+    // create the simulator thread
+    pthread_create(&thread_id, NULL, dataq_simulator_thread, NULL);
+}
+
+int32_t dataq_get_adc(int32_t adc_chan,
+                      int16_t * rms_mv,
+                      int16_t * mean_mv, int16_t * sdev_mv,
+                      int16_t * min_mv, int16_t * max_mv,
+                      float history_secs, int16_t ** history_mv, int32_t * max_history_mv)
+{
+    int32_t i;
+    adc_t * x;
+
+    // validate adc_chan
+    if (adc_chan < 1 || adc_chan >= MAX_ADC_CHAN || adc[adc_chan].val == NULL) {
+        ERROR("adc_chan %d is not valid\n", adc_chan);
+        return -1;
+    }
+    x = &adc[adc_chan];
+
+    // if dataq scan is not working then return error
+    if (!scan_okay) {
+        ERROR("adc data not available\n");
+        return -1;
+    }
+
+    // calculate rms 
+    if (rms_mv) {
+        *rms_mv = sqrtf((float)x->sum_squares / max_val);
+    }
+
+    // calculate mean voltage
+    if (mean_mv) {
+        *mean_mv = x->sum / max_val;
+    }
+
+    // calculate standad deviation voltage
+    if (sdev_mv) {
+        float u = (float)x->sum / max_val;
+        *sdev_mv = sqrtf(((float)x->sum_squares / max_val) - (u * u));
+    }
+
+    // calculate min and max voltages
+    if (min_mv || max_mv) {
+        int16_t min = +32767;
+        int16_t max = -32767;
+        for (i = 0; i < max_val; i++) {
+            if (x->val[i] < min) {
+                min = x->val[i];
+            }
+            if (x->val[i] > max) {
+                max = x->val[i];
+            }
+        }
+        if (min_mv) {
+            *min_mv = min;
+        }
+        if (max_mv) {
+            *max_mv = max;
+        }
+    }
+
+    // return history
+    if (history_mv && max_history_mv) {
+        int32_t max, idx, i;
+        int16_t * buff;
+
+        // preset returns
+        *history_mv = NULL;
+        *max_history_mv = 0;
+
+        // determine number of history values to return based on requested history_secs
+        max = history_secs * scan_hz;
+        if (max >= max_val-10 || max <= 0) {
+            ERROR("history_secs %f invalid, max=%d max_val=%d scan_hz=%d\n",
+                  history_secs, max, max_val, scan_hz);
+            return -1;
+        }
+
+        // allocate history buffer
+        buff = malloc(max*sizeof(int16_t));
+        if (buff == NULL) {
+            FATAL("malloc failed, max=%d\n", max);
+        }
+
+        // copy values to history buff
+        idx = (x->idx-1) - max + 1;
+        if (idx < 0) {
+            idx += max_val;
+        }
+        for (i = 0; i < max; i++) {
+            buff[i] = x->val[idx++];
+            if (idx >= max_val) {
+                idx = 0;
+            }
+        }
+
+        // set returns
+        *history_mv = buff;
+        *max_history_mv = max;
+    }
+
+    // return success
+    return 0;
+}
+
+static void * dataq_simulator_thread(void * cx)
+{
+    int32_t count = 0;
+    int32_t triangle[20] = { -1000, -800, -600, -400, -200, 0, 200, 400, 600, 800, 1000,
+                             800, 600, 400, 200, 0, -200, -400, -600, -800 };
+    int32_t slist_idx;
+    int32_t raw_val;
+
+    while (true) {
+        for (slist_idx = 0; slist_idx < max_slist_idx; slist_idx++) {
+            raw_val = (slist_idx_to_adc_chan[slist_idx] * triangle[count]) / 5;
+            dataq_process_adc_raw(slist_idx, raw_val);
+        }
+
+        if (++count == sizeof(triangle)/sizeof(int32_t)) {
+            count = 0;
+        }
+
+        usleep(1000);
+    }
+
+    return NULL;
+}
+
+static void dataq_process_adc_raw(int32_t slist_idx, int32_t new_val)
+{
+    int32_t new_mv, old_mv;
+    int32_t adc_chan = slist_idx_to_adc_chan[slist_idx];
+    adc_t * x = &adc[adc_chan];
+    
+    // convert new_val from raw to new_mv
+    // note: a raw value of 2048 is equivalent to 10 v or 10000 mv
+    new_mv = new_val * 10000 / 2048;
+
+    // save adc value in circular buffer
+    old_mv = x->val[x->idx];
+    x->val[x->idx] = new_mv;
+    x->idx = (x->idx + 1) % max_val;
+
+    // update the sum of saved values, and
+    // the sum^2 of saved values
+    x->sum += (new_mv - old_mv);
+    x->sum_squares += (new_mv*new_mv - old_mv*old_mv);
 }
 #endif

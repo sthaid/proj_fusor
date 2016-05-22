@@ -101,10 +101,12 @@ SOFTWARE.
 #define ERROR_FIRST                   1000000
 #define ERROR_PRESSURE_SENSOR_FAULTY  1000000
 #define ERROR_OVER_PRESSURE           1000001
-#define ERROR_LAST                    1000001
+#define ERROR_NO_VALUE                1000002
+#define ERROR_LAST                    1000002
 #define ERROR_TEXT(x) \
     ((int32_t)(x) == ERROR_PRESSURE_SENSOR_FAULTY ? "FAULTY" : \
-     (int32_t)(x) == ERROR_OVER_PRESSURE          ? "OVPRES"  \
+     (int32_t)(x) == ERROR_OVER_PRESSURE          ? "OVPRES" : \
+     (int32_t)(x) == ERROR_NO_VALUE               ? "NOVAL"    \
                                                   : "????")
 
 //
@@ -342,7 +344,7 @@ void initialize(int32_t argc, char ** argv)
     } else {
         char    start_time_str[MAX_TIME_STR];
         char    end_time_str[MAX_TIME_STR];
-        int32_t i, max_history=0;
+        int32_t i, max_history=0, first_history=-1;
 
         fd = open(filename, O_RDONLY);
         if (fd < 0) {
@@ -366,14 +368,17 @@ void initialize(int32_t argc, char ** argv)
                       filename, i, history[i].magic);
             }
             if (history[i].magic == MAGIC) {
+                if (first_history == -1) {
+                    first_history = i;
+                }
                 max_history = i + 1;
             }
         }
-        if (max_history == 0) {
+        if (max_history == 0 || first_history == -1) {
             FATAL("file %s contains no history\n", filename);
         }
 
-        history_start_time_sec = history[0].time_us / 1000000;
+        history_start_time_sec = history[first_history].time_us / 1000000 - first_history;
         history_end_time_sec = history_start_time_sec + max_history - 1;
         cursor_time_sec = history_start_time_sec;
 
@@ -896,7 +901,11 @@ static void draw_graph1(rect_t * graph_pane)
         if (idx < 0 || idx >= MAX_HISTORY) {
             FATAL("idx %d out of range\n", idx);
         }
-        value = *(float*)((void*)&history[idx] + gc->field_offset);
+        if (history[idx].data_valid) {
+            value = *(float*)((void*)&history[idx] + gc->field_offset);
+        } else {
+            value = ERROR_NO_VALUE;
+        }
         val2str(str, value, graph1_config[i].name);
 
         sdl_render_text(graph_pane, 
@@ -949,7 +958,7 @@ static void draw_graph2(rect_t * graph_pane, data_t * data)
     // find idx where voltage increases from below to above the median
     //
     // note - start_idx (trigger) is computed for channel 0
-    {
+    if (data->scope[0].valid) {
         int16_t * v;
         int32_t   max_v, idx, min, max, median;
 
@@ -963,7 +972,6 @@ static void draw_graph2(rect_t * graph_pane, data_t * data)
             if (v[idx] < min) min = v[idx];
         }
         median = (min + max) / 2;
-        // XXX printf("median %d\n", median);
 
         for (idx = 0; idx < max_v/2; idx++) {
             if (v[idx] < median && v[idx+1] >= median) {
@@ -971,7 +979,6 @@ static void draw_graph2(rect_t * graph_pane, data_t * data)
                 break;
             }
         }
-        // XXX printf("max_v=%d  start_idx = %d  - %d %d %d\n", max_v, start_idx, v[start_idx+0], v[start_idx+1], v[start_idx+2]);
     }
 
     // for each scope chan create the array of points that are to be plotted
@@ -980,6 +987,10 @@ static void draw_graph2(rect_t * graph_pane, data_t * data)
         float     X, X_delta, Y_scale;
         int32_t   idx, end_idx, max_v, max_v_graph;
         int16_t * v;
+
+        if (!data->scope[i].valid) {
+            continue;
+        }
 
         Y_scale     = (float)Y_pixels / graph2_yscale[graph2_yscale_idx];
         v           = data->scope[i].buff.ptr;
@@ -1123,6 +1134,8 @@ static data_t * get_data(void)
         if (!no_cam) {
             cam_get_buff(&data->jpeg_buff.ptr, &data->jpeg_buff_len);
             data->jpeg_valid = true;
+        } else {
+            usleep(100000);
         }
 
         // get adc data from the dataq device, and 
@@ -1180,7 +1193,7 @@ static data_t * get_data(void)
                                                      NULL, NULL, NULL, NULL, NULL,
                                                      SCOPE_SECS, 
                                                      &data->scope[i].buff.ptr,
-                                                     &max_buff);
+                                                     &max_buff) == 0;
                 data->scope[i].buff_len = max_buff * sizeof(int16_t);
             }
         } while (0);
@@ -1196,6 +1209,13 @@ static data_t * get_data(void)
             FATAL("invalid history idx = %d\n", idx);
         }
         *data = history[idx];
+
+        // if data->magic is 0 then this history record was not written,
+        // the data would be all 0, which is okay except for the time field;
+        // so init the time field
+        if (data->magic == 0) {
+            data->time_us = (uint64_t)cursor_time_sec * 1000000;
+        }
 
         // if jpeg_valid then get the jpeg from the data file
         if (data->jpeg_valid) {
@@ -1310,7 +1330,7 @@ static bool record_data(data_t * data)
     }
 
     for (i = 0; i < MAX_SCOPE; i++) {
-        if (!data->scope[i].valid) {
+        if (!data2.scope[i].valid) {
             continue;
         }
 

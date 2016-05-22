@@ -530,6 +530,7 @@ static void display_handler(void)
         sdl_event_register('s', SDL_EVENT_TYPE_KEY, NULL);
         // - graph1 xscale, graph2 yscale
         sdl_event_register('+', SDL_EVENT_TYPE_KEY, NULL);
+        sdl_event_register('=', SDL_EVENT_TYPE_KEY, NULL);
         sdl_event_register('-', SDL_EVENT_TYPE_KEY, NULL);
         // - graph 1 & 2 cursor time
         if (mode == PLAYBACK_MODE) {
@@ -569,7 +570,7 @@ static void display_handler(void)
                     graph_select = 1;
                 }
                 break;
-            case '-': case '+':
+            case '-': case '+': case '=':
                 ASSERT_IN_ANY_MODE();
                 if (graph_select == 1) {
                     graph1_xscale_select(event->event);
@@ -663,7 +664,7 @@ static void draw_data_values(data_t *data, rect_t * data_pane)
         return;
     }
         
-    val2str(str, data->voltage_rms_kv, "kV rms");
+    val2str(str, data->voltage_mean_kv, "kV mean");
     sdl_render_text(data_pane, 0, 0, 1, str, WHITE, BLACK);
 
     val2str(str, data->voltage_min_kv, "kV min");
@@ -688,8 +689,10 @@ static void draw_data_values(data_t *data, rect_t * data_pane)
     }
     sdl_render_text(data_pane, 4, 0, 1, str, WHITE, BLACK);
 
+#if 0 // XXX not working
     val2str(str, data->rough_pressure_mtorr, "mTorr ROUGH");
     sdl_render_text(data_pane, 5, 0, 1, str, WHITE, BLACK);
+#endif
 }
 
 static char * val2str(char * str, float val, char * trailer_str)
@@ -731,7 +734,7 @@ static void draw_graph1(rect_t * graph_pane)
         int32_t  color;
         off_t    field_offset;
     } graph1_config[] = {
-        { "kV    : 30 MAX", 30.0, RED, offsetof(data_t, voltage_rms_kv) },
+        { "kV    : 30 MAX", 30.0, RED, offsetof(data_t, voltage_mean_kv) },
         { "mA    : 30 MAX", 30.0, GREEN, offsetof(data_t, current_ma) },
         { "mTorr : 30 MAX", 30.0, BLUE, offsetof(data_t, chamber_pressure_mtorr) },
                             };
@@ -916,11 +919,7 @@ static void draw_graph1(rect_t * graph_pane)
 
 static void graph1_xscale_select(int32_t event)
 {
-    if (event != '+' && event != '-') {
-        FATAL("event must be '+' or '-'\n");
-    }
-
-    if (event == '+') {
+    if (event == '+' || event == '=') {
         if (graph1_scale_idx > 0) {
             graph1_scale_idx--;
         }
@@ -1092,11 +1091,7 @@ static void draw_graph2(rect_t * graph_pane, data_t * data)
 
 static void graph2_yscale_select(int32_t event)
 {
-    if (event != '+' && event != '-') {
-        FATAL("event must be '+' or '-'\n");
-    }
-
-    if (event == '+') {
+    if (event == '+' || event == '=') {
         if (graph2_yscale_idx > 0) {
             graph2_yscale_idx--;
         }
@@ -1166,13 +1161,13 @@ static data_t * get_data(void)
             data->current_ma = convert_adc_current(mean_mv/1000.);
 
             // read ADC_CHAN_CHAMBER_PRESSURE and convert to mTorr
-            ret = dataq_get_adc(ADC_CHAN_CHAMBER_PRESSURE, NULL, &mean_mv, NULL, NULL, NULL,
+            ret = dataq_get_adc(ADC_CHAN_CHAMBER_PRESSURE, NULL, NULL, NULL, NULL, &max_mv,
                                 0, NULL, NULL);
             if (ret != 0) {
                 break;
             }
             data->gas_id = gas_get_id();
-            data->chamber_pressure_mtorr = convert_adc_chamber_pressure(mean_mv/1000., data->gas_id);
+            data->chamber_pressure_mtorr = convert_adc_chamber_pressure(max_mv/1000., data->gas_id);
 
             // read ADC_CHAN_ROUGH_PRESSURE and convert to mTorr
             ret = dataq_get_adc(ADC_CHAN_ROUGH_PRESSURE, NULL, &mean_mv, NULL, NULL, NULL,
@@ -1505,7 +1500,7 @@ static float convert_adc_chamber_pressure(float adc_volts, uint32_t gas_id)
     }
 }    
 
-static uint32_t gas_live_mode_id;
+static uint32_t gas_live_mode_id=1;  //XXX later change back to 0 (D2) for defualt
 
 static uint32_t gas_get_id(void)
 {

@@ -1,4 +1,5 @@
 *.o
 *.d
 *.dat
-fusor
+get_data
+display

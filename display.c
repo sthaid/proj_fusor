@@ -60,14 +60,6 @@ SOFTWARE.
 #define DEFAULT_WIN_WIDTH   1920
 #define DEFAULT_WIN_HEIGHT  1080
 
-#define CAM_WIDTH   960
-#define CAM_HEIGHT  720
-
-#define ADC_CHAN_VOLTAGE           1
-#define ADC_CHAN_CURRENT           2
-#define ADC_CHAN_CHAMBER_PRESSURE  3
-#define ADC_CHAN_ROUGH_PRESSURE    4
-
 #define MAX_HISTORY  100000
 #define MAX_SCOPE    4
 

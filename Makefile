@@ -1,28 +1,24 @@
-TARGETS = fusor
+TARGETS = get_data
 
 CC = gcc
 OUTPUT_OPTION=-MMD -MP -o $@
 CFLAGS = -c -g -O2 -pthread -fsigned-char -Wall \
          $(shell sdl2-config --cflags) 
 
-SRC = main.c \
-      util_sdl.c \
-      util_sdl_predefined_displays.c \
-      util_jpeg_decode.c \
-      util_dataq.c \
-      util_cam.c \
-      util_misc.c
-OBJ=$(SRC:.c=.o)
-DEP=$(SRC:.c=.d)
+SRC_GET_DATA = get_data.c \
+               util_dataq.c \
+               util_cam.c \
+               util_misc.c
+OBJ_GET_DATA=$(SRC_GET_DATA:.c=.o)
+
+DEP=$(SRC_GET_DATA:.c=.d)
 
 #
 # build rules
 #
 
-fusor: $(OBJ) 
-	$(CC) -pthread -lrt -ljpeg -lpng -lm -lSDL2 -lSDL2_ttf -lSDL2_mixer -o $@ $(OBJ)
-	sudo chown root:root fusor
-	sudo chmod 4777 fusor
+get_data: $(OBJ_GET_DATA) 
+	$(CC) -pthread -lrt -lm -o $@ $(OBJ_GET_DATA)
 
 -include $(DEP)
 
@@ -31,5 +27,5 @@ fusor: $(OBJ)
 #
 
 clean:
-	rm -f $(TARGETS) $(OBJ) $(DEP)
+	rm -f $(TARGETS) $(OBJ_GET_DATA) $(DEP)
 

@@ -56,9 +56,8 @@ SOFTWARE.
 // defines
 //
 
-#define WC_VIDEO          "/dev/video"   // base name
-#define MAX_BUFMAP        32  
-#define FRAMES_PER_SEC    10
+#define WC_VIDEO   "/dev/video"   // base name
+#define MAX_BUFMAP 32  
 
 //
 // typedefs
@@ -84,7 +83,7 @@ static void cam_exit_handler(void);
 
 // -----------------  API  ---------------------------------------------------------
 
-int32_t cam_init(int32_t width, int32_t height)
+int32_t cam_init(int32_t width, int32_t height, int32_t frames_per_sec)
 {
     struct v4l2_capability     cap;
     struct v4l2_cropcap        cropcap;
@@ -170,7 +169,7 @@ int32_t cam_init(int32_t width, int32_t height)
     bzero(&streamparm, sizeof(streamparm));
     streamparm.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
     streamparm.parm.capture.timeperframe.numerator   = 1;
-    streamparm.parm.capture.timeperframe.denominator = FRAMES_PER_SEC;
+    streamparm.parm.capture.timeperframe.denominator = frames_per_sec;
     if (ioctl(cam_fd, VIDIOC_S_PARM, &streamparm) < 0) {
         ERROR("ioctl VIDIOC_S_PARM, %s\n", strerror(errno));
         goto error;

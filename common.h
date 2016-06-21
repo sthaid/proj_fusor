@@ -1,7 +1,8 @@
 // XXX common.h  header
 
-#define CAM_WIDTH   960
-#define CAM_HEIGHT  720
+#define CAM_WIDTH       640
+#define CAM_HEIGHT      480
+#define FRAMES_PER_SEC  5
 
 #define ADC_CHAN_VOLTAGE           1  // XXX names
 #define ADC_CHAN_CURRENT           2
@@ -30,7 +31,7 @@
 typedef struct {
     uint32_t magic;
     uint32_t length;
-    time_t   time;
+    time_t   time;  // XXX use uint64_t instead?, what is sizeof time_t on rpi
     struct data_part1_s {
         float voltage_mean_kv;
         float voltage_min_kv;

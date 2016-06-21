@@ -1,4 +1,6 @@
 /*
+XXX review this, and write the display pgm
+
 main
 - init dataq
 - init mccdaq
@@ -91,7 +93,7 @@ static void init(void)
 {
     pthread_t thread;
 
-    if (cam_init(CAM_WIDTH, CAM_HEIGHT) == 0) {
+    if (cam_init(CAM_WIDTH, CAM_HEIGHT, FRAMES_PER_SEC) == 0) {
         if (pthread_create(&thread, NULL, server_thread, NULL) != 0) {
             FATAL("pthread_create server_thread, %s\n", strerror(errno));
         }
@@ -305,15 +307,15 @@ static void init_data_struct(data_t * data, time_t time_now)
         data->part1.chamber_pressure_n2_mtorr = convert_adc_chamber_pressure(max_mv/1000., GAS_ID_N2);
     }
 
-    // data part1 average_cpm YYY
-    // data part1 moving_average_cpm YYY
+    // data part1 average_cpm XXX
+    // data part1 moving_average_cpm XXX
 
     //
     // data part2
     //
 
     // data part2: adc_diag
-    // YYY tbd
+    // XXX tbd
 
     // data part2: jpeg_buff
     pthread_mutex_lock(&jpeg_mutex);

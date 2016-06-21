@@ -23,7 +23,7 @@ SOFTWARE.
 #ifndef __UTIL_CAM_H__
 #define __UTIL_CAM_H__
 
-int32_t cam_init(int32_t width, int32_t height);
+int32_t cam_init(int32_t width, int32_t height, int32_t frames_per_sec);
 
 int32_t cam_get_buff(uint8_t **buff, uint32_t *len);
 

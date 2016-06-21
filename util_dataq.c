@@ -69,7 +69,7 @@ typedef struct {
 // variables
 //
 
-static int      fd;
+static int      dataq_fd = -1;
 static adc_t    adc[MAX_ADC_CHAN];
 static int64_t  scan_count;
 static bool     scan_okay;
@@ -84,7 +84,7 @@ static bool     exitting;
 //
 
 static void dataq_exit_handler(void);
-static void dataq_issue_cmd(char * cmd, char * resp);
+static int32_t dataq_issue_cmd(char * cmd, char * resp);
 static void * dataq_recv_data_thread(void * cx);
 static void dataq_process_adc_raw(int32_t slist_idx, int32_t new_val);
 static void * dataq_monitor_thread(void * cx);
@@ -94,11 +94,11 @@ static void * dataq_test_thread(void * cx);
 
 // -----------------  DATAQ API ROUTINES  -----------------------------------------------
 
-void dataq_init(float averaging_duration_sec, int32_t max_adc_chan, ...)
+int32_t dataq_init(float averaging_duration_sec, int32_t scan_hz_arg, int32_t max_adc_chan, ...)
 {
     char      cmd_str[100];
     char      resp[MAX_RESP];
-    int32_t   best_srate_arg, i, cnt, len, total_len, duration, ret;
+    int32_t   i, cnt, len, total_len, duration, ret, best_scan_hz;
     char      adc_channels_str[100];
     char    * p;
     char      stop_buff[10000];
@@ -117,9 +117,18 @@ void dataq_init(float averaging_duration_sec, int32_t max_adc_chan, ...)
     for (i = 0; i < max_slist_idx; i++) {
         int32_t adc_chan = slist_idx_to_adc_chan[i];
         if (adc_chan < 1 || adc_chan >= MAX_ADC_CHAN) {
-            FATAL("adc_chan %d is invalid\n", adc_chan);
+            ERROR("adc_chan %d is invalid\n", adc_chan);
+            goto error;
         }
     }
+
+    // determine the best adc scan rate and 
+    // verify the requested rate is less <= best
+    best_scan_hz = 10000 / max_slist_idx;
+    if (scan_hz_arg > best_scan_hz) {   
+        ERROR("scan_hz_arg %d is too big, max is %d\n", scan_hz_arg, best_scan_hz);
+    }
+    scan_hz = scan_hz_arg;
 
     // debug print args
     p = adc_channels_str;
@@ -127,8 +136,8 @@ void dataq_init(float averaging_duration_sec, int32_t max_adc_chan, ...)
         cnt = sprintf(p, "%d ",  slist_idx_to_adc_chan[i]);
         p += cnt;
     }
-    INFO("averaging_duration_sec=%4.2f channels=%s\n",
-         averaging_duration_sec, adc_channels_str);
+    INFO("averaging_duration_sec=%4.2f channels=%s scan_hz=%d\n",
+         averaging_duration_sec, adc_channels_str, scan_hz_arg);
 
     // setup serial port
     // - LATER perhaps use termios tcsetattr instead
@@ -140,9 +149,10 @@ void dataq_init(float averaging_duration_sec, int32_t max_adc_chan, ...)
     system(cmd_str);
 
     // open the dataq virtual com port
-    fd = open(DATAQ_DEVICE, O_RDWR);
-    if (fd < 0) {
-        FATAL("failed to open %s, %s\n", DATAQ_DEVICE, strerror(errno));
+    dataq_fd = open(DATAQ_DEVICE, O_RDWR);
+    if (dataq_fd < 0) {
+        ERROR("failed to open %s, %s\n", DATAQ_DEVICE, strerror(errno));
+        goto error;
     }
 
     // cleanup from prior run:
@@ -150,21 +160,23 @@ void dataq_init(float averaging_duration_sec, int32_t max_adc_chan, ...)
     // - set non blocking
     // - read until get the response to the stop command
     // - clear non blocking
-    len = write(fd, "stop\r", 5);
+    len = write(dataq_fd, "stop\r", 5);
     if (len != 5) {
-        FATAL("failed to write stop cmd, %s\n", strerror(errno));
+        ERROR("failed to write stop cmd, %s\n", strerror(errno));
+        goto error;
     }
 
-    ret = fcntl(fd, F_SETFL, O_NONBLOCK);
+    ret = fcntl(dataq_fd, F_SETFL, O_NONBLOCK);
     if (ret < 0) {
-        FATAL("failed to set non blocking, %s\n", strerror(errno));
+        ERROR("failed to set non blocking, %s\n", strerror(errno));
+        goto error;
     }
 
     total_len = 0;
     duration = 0;
     while (true) {
         usleep(100000);
-        len = read(fd, stop_buff+total_len, sizeof(stop_buff)-total_len);
+        len = read(dataq_fd, stop_buff+total_len, sizeof(stop_buff)-total_len);
         if (len > 0) {
             total_len += len;
             if (total_len >= 5 && strcmp(&stop_buff[total_len-5], "stop\r") == 0) {
@@ -173,40 +185,44 @@ void dataq_init(float averaging_duration_sec, int32_t max_adc_chan, ...)
         }
         duration += 100000;
         if (duration >= 1000000) {
-            FATAL("did not receive response to stop scanning cmd");
+            ERROR("did not receive response to stop scanning cmd");
+            goto error;
         }
     }        
 
-    ret = fcntl(fd, F_SETFL, 0);
+    ret = fcntl(dataq_fd, F_SETFL, 0);
     if (ret < 0) {
-        FATAL("failed to clear non blocking, %s\n", strerror(errno));
+        ERROR("failed to clear non blocking, %s\n", strerror(errno));
+        goto error;
     }
 
     // issue 'info 0' command, 
     // this is just a dataq communication sanity check
-    dataq_issue_cmd("info 0", resp);
+    if (dataq_issue_cmd("info 0", resp) < 0) {
+        goto error;
+    }
 
     // configure scanning of the desired adc channels
-    dataq_issue_cmd("asc", resp);
+    if (dataq_issue_cmd("asc", resp) < 0) {
+        goto error;
+    }
     for (i = 0; i < max_slist_idx; i++) {
         sprintf(cmd_str, "slist %d x%4.4x", i, slist_idx_to_adc_chan[i]-1);
-        dataq_issue_cmd(cmd_str, resp);
+        if (dataq_issue_cmd(cmd_str, resp) < 0) {
+            goto error;
+        }
     }
 
     // set the scan rate; 
-    // use the max rate supported by the dataq, which is
-    //   - best_srate_arg = 75 * num_enabled_scan_list_elements
-    //   - scan_hz = 750000 / best_srate_cmd_arg
-    best_srate_arg = 75 * max_slist_idx;
-    sprintf(cmd_str, "srate x%4.4x", best_srate_arg);
-    dataq_issue_cmd(cmd_str, resp);
-
-    // determine scan_hz, which is used by the monitor_thread
-    scan_hz = 750000 / best_srate_arg;
+    sprintf(cmd_str, "srate x%4.4x", 750000 / scan_hz);
+    if (dataq_issue_cmd(cmd_str, resp) < 0) {
+        goto error;
+    }
 
     // determine the number of adc values that are needed for the averaging_duration,
     // and allocate zeroed memory for them
     max_val = scan_hz * averaging_duration_sec;
+    INFO("max_val=%d\n", max_val);
     for (i = 0; i < max_slist_idx; i++) {
         int32_t adc_chan = slist_idx_to_adc_chan[i];
         adc[adc_chan].val = calloc(max_val, sizeof(int16_t));
@@ -215,14 +231,13 @@ void dataq_init(float averaging_duration_sec, int32_t max_adc_chan, ...)
         }
     }
     
-    // print
-    INFO("scan_hz=%d max_val=%d\n", scan_hz, max_val);
-
     // configure binary output
-    dataq_issue_cmd("bin", resp);
+    if (dataq_issue_cmd("bin", resp) < 0) {
+        goto error;
+    }
 
     // start scan
-    write(fd, "start\r", 6);
+    write(dataq_fd, "start\r", 6);
 
     // stop scanning atexit
     atexit(dataq_exit_handler);
@@ -240,8 +255,17 @@ void dataq_init(float averaging_duration_sec, int32_t max_adc_chan, ...)
     // delay to allow adc data to be available
     usleep(averaging_duration_sec*1000000 + 250000);
 
-    // print success
+    // return success,
     INFO("success\n");
+    return 0;
+
+error:
+    // return error
+    if (dataq_fd > 0) {
+        close(dataq_fd);
+        dataq_fd = -1;
+    }
+    return -1;
 }
 
 int32_t dataq_get_adc(int32_t adc_chan,
@@ -252,6 +276,11 @@ int32_t dataq_get_adc(int32_t adc_chan,
 {
     int32_t i;
     adc_t * x;
+
+    // if not inititialized then return error
+    if (dataq_fd < 0) {
+        return -1;
+    }
 
     // validate adc_chan
     if (adc_chan < 1 || adc_chan >= MAX_ADC_CHAN || adc[adc_chan].val == NULL) {
@@ -352,23 +381,29 @@ static void dataq_exit_handler()
 {
     int32_t len;
 
+    // if not inititialized then return 
+    if (dataq_fd < 0) {
+        return;
+    }
+
     // let the threads know program is exitting
     exitting = true;
     
     // at program exit, stop the dataq
-    len = write(fd, "stop\r", 5);
+    len = write(dataq_fd, "stop\r", 5);
     if (len != 5) {
         ERROR("issuing stop cmd\n");
     }
 
-    // give some time to allow the stop cmd to be sent
+    // give some time to allow the stop cmd to be sent, and
+    // the threads to exit
     usleep(100000);
 
     // close
-    close(fd);
+    close(dataq_fd);
 }
 
-static void dataq_issue_cmd(char * cmd, char * resp)
+static int32_t dataq_issue_cmd(char * cmd, char * resp)
 {
     char cmd2[100];
     int32_t len, ret, total_len, i;
@@ -380,15 +415,17 @@ static void dataq_issue_cmd(char * cmd, char * resp)
     strcat(cmd2, "\r");
 
     // write command
-    len = write(fd, cmd2, strlen(cmd2));
+    len = write(dataq_fd, cmd2, strlen(cmd2));
     if (len != strlen(cmd2)) {
-        FATAL("failed write cmd '%s', %s\n", cmd, strerror(errno));
+        ERROR("failed write cmd '%s', %s\n", cmd, strerror(errno));
+        return -1;
     }
 
     // set non blocking
-    ret = fcntl(fd, F_SETFL, O_NONBLOCK);
+    ret = fcntl(dataq_fd, F_SETFL, O_NONBLOCK);
     if (ret < 0) {
-        FATAL("failed to set non blocking, %s\n", strerror(errno));
+        ERROR("failed to set non blocking, %s\n", strerror(errno));
+        return -1;
     }
 
     // read response, must terminate with <cr>, with 1 sec tout
@@ -396,7 +433,7 @@ static void dataq_issue_cmd(char * cmd, char * resp)
     total_len = 0;
     resp_recvd = false;
     for (i = 0; i < 200; i++) {
-        len = read(fd, p, MAX_RESP-total_len);
+        len = read(dataq_fd, p, MAX_RESP-total_len);
         if (len > 0) {
             total_len += len;
             p += len;
@@ -411,29 +448,34 @@ static void dataq_issue_cmd(char * cmd, char * resp)
         } else if (len == 0) {
             // nothing to do here
         } else {
-            FATAL("failed read, len=%d, %s\n", len, strerror(errno));
+            ERROR("failed read, len=%d, %s\n", len, strerror(errno));
+            return -1;
         }
         usleep(5000);
     }
 
     // clear non blocking
-    ret = fcntl(fd, F_SETFL, 0);
+    ret = fcntl(dataq_fd, F_SETFL, 0);
     if (ret < 0) {
-        FATAL("failed to clear non blocking, %s\n", strerror(errno));
+        ERROR("failed to clear non blocking, %s\n", strerror(errno));
+        return -1;
     }
 
     // check for failure to read response
     if (!resp_recvd) {
-        FATAL("response to cmd '%s' was not received\n", cmd);
+        ERROR("response to cmd '%s' was not received\n", cmd);
+        return -1;
     }
 
     // check that response received was correct, it should match the cmd
     if (strncmp(cmd, resp, strlen(cmd)) != 0) {
-        FATAL("response to cmd '%s', resp '%s', is incorrect\n", cmd, resp);
+        ERROR("response to cmd '%s', resp '%s', is incorrect\n", cmd, resp);
+        return -1;
     }
 
-    // debug print
+    // return success
     DEBUG("okay: cmd='%s', resp='%s'\n", cmd, resp);
+    return 0;
 }
 
 static void * dataq_recv_data_thread(void * cx)
@@ -447,17 +489,19 @@ static void * dataq_recv_data_thread(void * cx)
     buff_len = 0;
 
     // verify start response received
-    len = read(fd, buff, 6);
+    len = read(dataq_fd, buff, 6);
     if (len != 6 || memcmp(buff, "start\r", 6) != 0) {
-        FATAL("failed receive response to start, len=%d, %s\n", len, strerror(errno));
+        ERROR("failed receive response to start, len=%d, %s\n", len, strerror(errno));
+        return NULL;
     }
 
     // loop, read and process adc data
     while (true) {
         // read adc data from dataq device into buff
-        len = read(fd, buff+buff_len, sizeof(buff)-buff_len);
+        len = read(dataq_fd, buff+buff_len, sizeof(buff)-buff_len);
         if (len < 0) {
-            FATAL("failed to read adc data, %s\n", strerror(errno));
+            ERROR("failed to read adc data, %s\n", strerror(errno));
+            return NULL;
         }
         buff_len += len;
 
@@ -472,7 +516,8 @@ static void * dataq_recv_data_thread(void * cx)
             // if not sychronized then abort for now
             // LATER improve this to resync, if needed
             if (((buff[0] & 1) != 0) || ((buff[max_slist_idx*2] & 1) != 0)) {
-                FATAL("not synced\n");
+                ERROR("not synced\n");
+                return NULL;
             }
 
             // extract adc values from buff
@@ -622,6 +667,7 @@ typedef struct {
     int32_t idx;
 } adc_t;
 
+static bool     initialized;
 static int32_t  max_slist_idx; 
 static int32_t  slist_idx_to_adc_chan[8];
 static adc_t    adc[MAX_ADC_CHAN];
@@ -632,9 +678,9 @@ static int32_t  scan_hz = 1000;
 static void * dataq_simulator_thread(void * cx);
 static void dataq_process_adc_raw(int32_t slist_idx, int32_t new_val);
 
-void dataq_init(float averaging_duration_sec, int32_t max_adc_chan, ...)
+int32_t dataq_init(float averaging_duration_sec, int32_t scan_hz_arg, int32_t max_adc_chan, ...)
 {
-    int32_t   i, cnt;
+    int32_t   i, cnt, best_scan_hz;
     char      adc_channels_str[100];
     char    * p;
     va_list   ap;
@@ -652,9 +698,18 @@ void dataq_init(float averaging_duration_sec, int32_t max_adc_chan, ...)
     for (i = 0; i < max_slist_idx; i++) {
         int32_t adc_chan = slist_idx_to_adc_chan[i];
         if (adc_chan < 1 || adc_chan >= MAX_ADC_CHAN) {
-            FATAL("adc_chan %d is invalid\n", adc_chan);
+            ERROR("adc_chan %d is invalid\n", adc_chan);
+            goto error;
         }
     }
+
+    // determine the best adc scan rate and 
+    // verify the requested rate is less <= best
+    best_scan_hz = 10000 / max_slist_idx;
+    if (scan_hz_arg > best_scan_hz) {   
+        ERROR("scan_hz_arg %d is too big, max is %d\n", scan_hz_arg, best_scan_hz);
+    }
+    scan_hz = scan_hz_arg;
 
     // debug print args
     p = adc_channels_str;
@@ -662,12 +717,13 @@ void dataq_init(float averaging_duration_sec, int32_t max_adc_chan, ...)
         cnt = sprintf(p, "%d ",  slist_idx_to_adc_chan[i]);
         p += cnt;
     }
-    INFO("averaging_duration_sec=%4.2f channels=%s\n",
-         averaging_duration_sec, adc_channels_str);
+    INFO("averaging_duration_sec=%4.2f channels=%s scan_hz=%d\n",
+         averaging_duration_sec, adc_channels_str, scan_hz_arg);
 
     // determine the number of adc values that are needed for the averaging_duration,
     // and allocate zeroed memory for them
     max_val = scan_hz * averaging_duration_sec;
+    INFO("max_val=%d\n", max_val);
     for (i = 0; i < max_slist_idx; i++) {
         int32_t adc_chan = slist_idx_to_adc_chan[i];
         adc[adc_chan].val = calloc(max_val, sizeof(int16_t));
@@ -675,10 +731,17 @@ void dataq_init(float averaging_duration_sec, int32_t max_adc_chan, ...)
             FATAL("alloc adc[%d].val failed, max_val=%d\n", adc_chan, max_val);
         }
     }
-    INFO("scan_hz=%d max_val=%d\n", scan_hz, max_val);
 
     // create the simulator thread
     pthread_create(&thread_id, NULL, dataq_simulator_thread, NULL);
+
+    // return success
+    initialized = true;
+    return 0;
+
+error:
+    // return error
+    return -1;
 }
 
 int32_t dataq_get_adc(int32_t adc_chan,
@@ -689,6 +752,11 @@ int32_t dataq_get_adc(int32_t adc_chan,
 {
     int32_t i;
     adc_t * x;
+
+    // if not initialized then return error
+    if (!initialized) {
+        return -1;
+    }
 
     // validate adc_chan
     if (adc_chan < 1 || adc_chan >= MAX_ADC_CHAN || adc[adc_chan].val == NULL) {

@@ -1,5 +1,3 @@
-// XXX review FATAL, should instead drop the connection
-// XXX make static routines
 /*
 main
 - init dataq
@@ -41,64 +39,17 @@ The data is:
 #include <sys/socket.h>
 #include <netinet/in.h>
 
+#include "common.h"
 #include "util_dataq.h"
 #include "util_cam.h"
 #include "util_misc.h"
 
-// XXX common.h here
-#define CAM_WIDTH   960
-#define CAM_HEIGHT  720
-
-#define ADC_CHAN_VOLTAGE           1  // XXX names
-#define ADC_CHAN_CURRENT           2
-#define ADC_CHAN_CHAMBER_PRESSURE  3
-
-#define PORT 9001
-
-#define MAX_DETECTOR_CHAN    4
-#define MAX_ADC_DIAG_CHAN    4
-#define MAX_ADC_DIAG_VALUE   1000
-
-#define DATA_MAGIC  0xaabbccdd
-
-#define IS_ERROR(x) ((int32_t)(x) >= ERROR_FIRST && (int32_t)(x) <= ERROR_LAST)
-#define ERROR_FIRST                   1000000
-#define ERROR_PRESSURE_SENSOR_FAULTY  1000000
-#define ERROR_OVER_PRESSURE           1000001
-#define ERROR_NO_VALUE                1000002
-#define ERROR_LAST                    1000002
-#define ERROR_TEXT(x) \
-    ((int32_t)(x) == ERROR_PRESSURE_SENSOR_FAULTY ? "FAULTY" : \
-     (int32_t)(x) == ERROR_OVER_PRESSURE          ? "OVPRES" : \
-     (int32_t)(x) == ERROR_NO_VALUE               ? "NOVAL"    \
-                                                  : "????")
-
-
-typedef struct {
-    uint32_t magic;
-    struct data_part1_s {
-        float voltage_mean_kv;
-        float voltage_min_kv;
-        float voltage_max_kv;
-        float current_ma;
-        float chamber_pressure_d2_mtorr;
-        float chamber_pressure_n2_mtorr;
-        float average_cpm[MAX_DETECTOR_CHAN];
-        float moving_average_cpm[MAX_DETECTOR_CHAN];
-    } part1;
-    struct data_part2_s {
-        int16_t adc_diag[MAX_ADC_DIAG_CHAN][MAX_ADC_DIAG_VALUE];
-        uint32_t cam_buff_len;
-        uint8_t cam_buff[0];
-    } part2;
-} data_t;
-
-// XXX
-
-
 //
 // defines
 //
+
+#define GAS_ID_D2 0
+#define GAS_ID_N2 1
 
 //
 // typedefs
@@ -108,19 +59,26 @@ typedef struct {
 // variables
 //
 
+uint8_t       * jpeg_buff;
+int32_t         jpeg_buff_len;
+uint64_t        jpeg_buff_us;
+pthread_mutex_t jpeg_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+
 //
 // prototypes
 //
 
 static void init(void);
 static void server(void);
+void * cam_thread(void * cx);
 static void * server_thread(void * cx);
-static int32_t init_data_struct(data_t * data);
+static void init_data_struct(data_t * data, time_t time_now);
 static float convert_adc_voltage(float adc_volts);
 static float convert_adc_current(float adc_volts);
 static float convert_adc_chamber_pressure(float adc_volts, uint32_t gas_id);
 
-// -----------------  MAIN  ----------------------------------------------------------
+// -----------------  MAIN & TOP LEVEL ROUTINES  -------------------------------------
 
 int32_t main(int32_t argc, char **argv)
 {
@@ -131,10 +89,17 @@ int32_t main(int32_t argc, char **argv)
 
 static void init(void)
 {
-    // XXX
-    return;
-    cam_init(CAM_WIDTH, CAM_HEIGHT);
-    dataq_init(0.5, 4,   // XXX set the rate too?
+    pthread_t thread;
+
+    if (cam_init(CAM_WIDTH, CAM_HEIGHT) == 0) {
+        if (pthread_create(&thread, NULL, server_thread, NULL) != 0) {
+            FATAL("pthread_create server_thread, %s\n", strerror(errno));
+        }
+    }
+
+    dataq_init(0.5,   // averaging duration in secs
+               3,     // number of adc channels
+               1000,  // scan rate  (samples per second)
                ADC_CHAN_VOLTAGE,
                ADC_CHAN_CURRENT,
                ADC_CHAN_CHAMBER_PRESSURE);
@@ -173,12 +138,10 @@ static void server(void)
     }
 
     // init thread attributes to make thread detached
-    ret = pthread_attr_init(&attr);
-    if (ret == -1) {
+    if (pthread_attr_init(&attr) != 0) {
         FATAL("pthread_attr_init, %s\n", strerror(errno));
     }
-    ret = pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
-    if (ret == -1) {
+    if (pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED) != 0) {
         FATAL("pthread_attr_setdetachstate, %s\n", strerror(errno));
     }
 
@@ -197,10 +160,35 @@ static void server(void)
         }
 
         // create thread
-        ret = pthread_create(&thread, &attr, server_thread, (void*)(uintptr_t)sockfd);
-        if (ret == -1) {
+        if (pthread_create(&thread, &attr, server_thread, (void*)(uintptr_t)sockfd) != 0) {
             FATAL("pthread_create server_thread, %s\n", strerror(errno));
         }
+    }
+}
+
+void * cam_thread(void * cx) 
+{
+    int32_t   ret;
+    uint8_t * ptr;
+    uint32_t  len;
+
+    while (true) {
+        // get cam buff
+        ret = cam_get_buff(&ptr, &len);
+        if (ret != 0) {
+            usleep(100000);
+            continue;
+        }
+
+        // copy buff to global
+        pthread_mutex_lock(&jpeg_mutex);
+        memcpy(jpeg_buff, ptr, len);
+        jpeg_buff_len = len;
+        jpeg_buff_us = microsec_timer();
+        pthread_mutex_unlock(&jpeg_mutex);
+
+        // put buff
+        cam_put_buff(ptr);
     }
 }
 
@@ -208,125 +196,134 @@ static void server(void)
 
 static void * server_thread(void * cx)
 {
-    int32_t   sockfd = (uintptr_t)sockfd;   // XXX uintptr
+    int32_t   sockfd = (uintptr_t)sockfd;
     time_t    time_now, time_last;
-    uint8_t * jpeg_buff_ptr;
-    uint32_t  jpeg_buff_len;
     ssize_t   len;
-    data_t    data;
+    data_t  * data;
 
     INFO("accepted connection, sockfd=%d\n", sockfd);
 
     time_last = time(NULL);
+    data = malloc(sizeof(data_t) + 1000000);
 
     while (true) {
-        // get camera image
-        cam_get_buff(&jpeg_buff_ptr, &jpeg_buff_len);
-
-        // if time now is same as time last then discard the image
-        time_now = time(NULL);
-        if (time_now == time_last) {
-            cam_put_buff(jpeg_buff_ptr);
-            continue;
+        // wait for time_now to change (should be an increase by 1 second from time_last)
+        while (true) {
+            time_now = time(NULL);
+            if (time_now != time_last) {
+                break;
+            }
+            usleep(1000);  // 1 ms
         }
 
         // sanity check time_now, should be time_last+1
         if (time_now < time_last) {
-            FATAL("time has gone backwards\n");
+            ERROR("terminating connection - time has gone backwards\n");
+            break;
         }
         if (time_now != time_last+1) {
             WARN("time_now - time_last = %ld\n", time_now-time_last);
         }
 
         // init data struct
-        // XXX check ret
-        init_data_struct(&data);
+        init_data_struct(data, time_now);
 
         // send data struct
-        // XXX does this send all
         len = send(sockfd, &data, sizeof(data), 0);
         if (len != sizeof(data)) {
-            FATAL("send failed, len=%zd, %s\n", len, strerror(errno));
+            if (len == -1 && errno == ECONNRESET) {
+                INFO("terminating connection\n");
+            } else {
+                ERROR("terminating connection - send failed, len=%zd, %s, \n", len, strerror(errno));
+            }
+            break;
         }
+
+        // save time_last
+        time_last = time_now;
     }
 
+    // terminate connection with client, and 
+    // terminate thread
+    close(sockfd);
     return NULL;
 }
 
 // -----------------  INIT_DATA_STRUCT  ----------------------------------------------
 
-static int32_t init_data_struct(data_t * data)
+static void init_data_struct(data_t * data, time_t time_now)
 {
     int16_t mean_mv, min_mv, max_mv;
-    int32_t ret;
+    int32_t ret, i;
 
-    // zero and set magic
+    // 
+    // init data struct 
+    //
+
     bzero(data, sizeof(data_t));
-    data->magic = DATA_MAGIC;
 
-    // data part1 voltage
+    data->magic  = DATA_MAGIC;
+    data->length = sizeof(data_t) + jpeg_buff_len;
+    data->time   = time_now;
+
+    data->part1.voltage_mean_kv = ERROR_NO_VALUE;
+    data->part1.voltage_min_kv = ERROR_NO_VALUE;
+    data->part1.voltage_max_kv = ERROR_NO_VALUE;
+    data->part1.current_ma = ERROR_NO_VALUE;
+    data->part1.chamber_pressure_d2_mtorr = ERROR_NO_VALUE;
+    data->part1.chamber_pressure_n2_mtorr = ERROR_NO_VALUE;
+    for (i = 0; i < MAX_DETECTOR_CHAN; i++) {
+        data->part1.average_cpm[i] = ERROR_NO_VALUE;
+        data->part1.moving_average_cpm[i] = ERROR_NO_VALUE;
+    }
+
+    //
+    // data part1
+    //
+
+    // data part1 voltage_min_kv, voltage_max_kv, and voltage_mean_kv
     ret = dataq_get_adc(ADC_CHAN_VOLTAGE, NULL, &mean_mv, NULL, &min_mv, &max_mv,
                         0, NULL, NULL);
-    if (ret != 0) {
-        return -1;
+    if (ret == 0) {
+        data->part1.voltage_min_kv  = convert_adc_voltage(min_mv/1000.);
+        data->part1.voltage_max_kv  = convert_adc_voltage(max_mv/1000.);
+        data->part1.voltage_mean_kv = convert_adc_voltage(mean_mv/1000.);
     }
-    data->part1.voltage_min_kv  = convert_adc_voltage(min_mv/1000.);
-    data->part1.voltage_max_kv  = convert_adc_voltage(max_mv/1000.);
-    data->part1.voltage_mean_kv = convert_adc_voltage(mean_mv/1000.);
 
-    // data part1 current
+    // data part1 current_ma
     ret = dataq_get_adc(ADC_CHAN_CURRENT, NULL, &mean_mv, NULL, NULL, NULL,
                         0, NULL, NULL);
-    if (ret != 0) {
-        return -1;
+    if (ret == 0) {
+        data->part1.current_ma = convert_adc_current(mean_mv/1000.);
     }
-    data->part1.current_ma = convert_adc_current(mean_mv/1000.);
 
-    // return success
-    return 0;
+    // data part1 chamber_pressure_xx_mtorr
+    ret = dataq_get_adc(ADC_CHAN_CHAMBER_PRESSURE, NULL, NULL, NULL, NULL, &max_mv,
+                        0, NULL, NULL);
+    if (ret == 0) {
+        data->part1.chamber_pressure_d2_mtorr = convert_adc_chamber_pressure(max_mv/1000., GAS_ID_D2);
+        data->part1.chamber_pressure_n2_mtorr = convert_adc_chamber_pressure(max_mv/1000., GAS_ID_N2);
+    }
+
+    // data part1 average_cpm YYY
+    // data part1 moving_average_cpm YYY
+
+    //
+    // data part2
+    //
+
+    // data part2: adc_diag
+    // YYY tbd
+
+    // data part2: jpeg_buff
+    pthread_mutex_lock(&jpeg_mutex);
+    if (microsec_timer() - jpeg_buff_us < 1000000) {
+        memcpy(data->part2.jpeg_buff, jpeg_buff, jpeg_buff_len);
+        data->part2.jpeg_buff_len = jpeg_buff_len;
+        data->part2.jpeg_buff_valid = true;
+    }
+    pthread_mutex_unlock(&jpeg_mutex);
 }
-
-#if 0
-            // read ADC_CHAN_CHAMBER_PRESSURE and convert to mTorr
-            ret = dataq_get_adc(ADC_CHAN_CHAMBER_PRESSURE, NULL, NULL, NULL, NULL, &max_mv,
-                                0, NULL, NULL);
-            if (ret != 0) {
-                break;
-            }
-            data->gas_id = gas_get_id();
-            data->chamber_pressure_mtorr = convert_adc_chamber_pressure(max_mv/1000., data->gas_id);
-
-
-        OK data.part1.voltage_mean_kv;
-        OK data.part1.voltage_min_kv;
-        OK data.part1.voltage_max_kv;
-        OK data.part1.current_ma;
-        data.part1.chamber_pressure_d2_mtorr;
-        data.part1.chamber_pressure_n2_mtorr;
-        data.part1.average_cpm[MAX_DETECTOR_CHAN];
-        data.part1.moving_average_cpm[MAX_DETECTOR_CHAN];
-/*
-typedef struct {
-    uint32_t magic;
-    struct data_part1_s {
-        float voltage_mean_kv;
-        float voltage_min_kv;
-        float voltage_max_kv;
-        float current_ma;
-        float chamber_pressure_d2_mtorr;
-        float chamber_pressure_n2_mtorr;
-        float average_cpm[MAX_DETECTOR_CHAN];
-        float moving_average_cpm[MAX_DETECTOR_CHAN];
-    } part1;
-    struct data_part2_s {
-        int16_t adc_diag[MAX_ADC_DIAG_CHAN][MAX_ADC_DIAG_VALUE];
-        uint32_t cam_buff_len;
-        uint8_t cam_buff[0];
-    } part2;
-} data_t;
-*/
-#endif
-
 
 // -----------------  CONVERT ADC HV VOLTAGE & CURRENT  ------------------------------
 

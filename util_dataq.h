@@ -23,7 +23,7 @@ SOFTWARE.
 #ifndef __UTIL_DATAQ_H__
 #define __UTIL_DATAQ_H__
 
-void dataq_init(float averaging_duration_sec, int32_t max_adc_chan, ...);
+int32_t dataq_init(float averaging_duration_sec, int32_t scan_hz, int32_t max_adc_chan, ...);
 
 int32_t dataq_get_adc(int32_t adc_chan,
                       int16_t * rms_mv,

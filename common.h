@@ -14,7 +14,7 @@
 #define MAX_ADC_DIAG_CHAN    4
 #define MAX_ADC_DIAG_VALUE   1000
 
-#define MAGIC_DATA  0xaabbccdd
+#define MAGIC_DATA  0xaabbccdd55aa55aa
 
 #define IS_ERROR(x) ((int32_t)(x) >= ERROR_FIRST && (int32_t)(x) <= ERROR_LAST)
 #define ERROR_FIRST                   1000000
@@ -31,8 +31,7 @@
 // YYY check size on linux and rpi
 typedef struct {
     struct data_part1_s {
-        uint32_t magic;
-        uint32_t pad1;
+        uint64_t magic;
         uint64_t time; 
 
         float    voltage_mean_kv;
@@ -46,7 +45,7 @@ typedef struct {
 
         uint32_t data_part2_length;
         bool     data_part2_jpeg_buff_valid;
-        uint8_t  pad2[7];
+        uint8_t  pad[7];
         // YYY need valid for diag too
     } part1;
     struct data_part2_s {

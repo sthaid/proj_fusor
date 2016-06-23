@@ -1,4 +1,6 @@
 #if 0
+XXX compile both pgms on linux and rpi
+
 Same general screen layout
 - experiment with smaller camera image, and larger graph area
 
@@ -70,6 +72,22 @@ DONT NEED
 #include <inttypes.h>
 #include <limits.h>
 
+#include <pthread.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <sys/types.h>
+#include <sys/time.h>
+#include <sys/resource.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+
+#include "common.h"
+#include "util_sdl.h"
+#include "util_misc.h"
+
+
 //
 // defines
 //
@@ -86,12 +104,19 @@ DONT NEED
 
 #define MAX_FILE_DATA_PART1 100000
 
+#define VERSION_STR  "1.0"
+
+#define FONT0_HEIGHT (sdl_font_char_height(0))
+#define FONT0_WIDTH  (sdl_font_char_width(0))
+
+
+
 //
 // typedefs
 //
 
 typedef struct {
-    uint64_t magic
+    uint64_t magic;
     uint64_t start_time;
     uint32_t max;
     uint8_t  reserved[4096-20];
@@ -108,28 +133,30 @@ static file_hdr_t          * file_hdr;
 static struct data_part1_s * file_data_part1;
 static int32_t               file_idx_global;
 
-static bool                  connected_to_data_server;
-enum mode                    mode;
+// XXX static bool                  connected_to_data_server;
+static enum mode                    mode;
 
-
-playback
-
+static int32_t win_width, win_height;
+static char servername[100];
 
 //
 // prototypes
 //
 
-static void initialize(int32_t argc, char ** argv);
+static int32_t initialize(int32_t argc, char ** argv);
 static void usage(void);
+static void * client_thread(void * cx);
 static void display_handler();
 static void draw_camera_image(rect_t * cam_pane);
 static void draw_data_values(rect_t * data_pane);
 static char * val2str(char * str, float val, char * trailer_str);
-struct data_part2_s * read_data_part2(int32_t file_idx);
+static struct data_part2_s * read_data_part2(int32_t file_idx);
+static int getsockaddr(char * node, int port, int socktype, int protcol, struct sockaddr_in * ret_addr);
+static char * sock_addr_to_str(char * s, int slen, struct sockaddr * addr);
 
 // -----------------  MAIN  ----------------------------------------------------------
 
-static int32_t main(int32_t argc, char **argv)
+int32_t main(int32_t argc, char **argv)
 {
     if (initialize(argc, argv) < 0) {
         ERROR("initialize failed, program terminating\n");
@@ -143,14 +170,17 @@ static int32_t main(int32_t argc, char **argv)
 
 // -----------------  INITIALIZE  ----------------------------------------------------
 
-static void initialize(int32_t argc, char ** argv)
+static int32_t initialize(int32_t argc, char ** argv)
 {
-    struct rlimit rl;
-    pthread_t     thread;
-    int32_t       ret;
+    struct rlimit      rl;
+    pthread_t          thread;
+    int32_t            ret;
+    char               filename[100];
+    struct sockaddr_in sockaddr;
 
+    // XXX also in get_data
     // init core dumps
-    // note - requires fs.suid_dumpable=1  in /etc/sysctl.conf
+    // note - requires fs.suid_dumpable=1  in /etc/sysctl.conf if this is a suid pgm
     rl.rlim_cur = RLIM_INFINITY;
     rl.rlim_max = RLIM_INFINITY;
     setrlimit(RLIMIT_CORE, &rl);
@@ -158,6 +188,7 @@ static void initialize(int32_t argc, char ** argv)
     // init globals 
     mode = LIVE;
     file_idx_global = -1;
+    strcpy(servername, "rpi_data");
  
     // parse options
     // -h          : help
@@ -221,6 +252,7 @@ static void initialize(int32_t argc, char ** argv)
         }
 
         // verify filename does not exist
+        struct stat stat_buf;
         if (stat(filename, &stat_buf) == 0) {
             ERROR("file %s already exists\n", filename);
             return -1;
@@ -235,9 +267,9 @@ static void initialize(int32_t argc, char ** argv)
             return -1;
         }
         bzero(&hdr, sizeof(hdr));
-        hdr->magic      = MAGIC_FILE;
-        hdr->start_time = 0;
-        hdr->max        = 0;
+        hdr.magic      = MAGIC_FILE;
+        hdr.start_time = 0;
+        hdr.max        = 0;
         if (write(fd, &hdr, sizeof(hdr)) != sizeof(hdr)) {
             ERROR("failed to init %s, %s\n", filename, strerror(errno));
             return -1;
@@ -249,6 +281,7 @@ static void initialize(int32_t argc, char ** argv)
     //   verify filename exists
     // endif
     if (mode == PLAYBACK) {
+        struct stat stat_buf;
         strcpy(filename, argv[optind]);
         if (stat(filename, &stat_buf) == -1) {
             ERROR("file %s does not exist, %s\n", filename, strerror(errno));
@@ -259,7 +292,7 @@ static void initialize(int32_t argc, char ** argv)
     // open and map filename
     // YYY msync to sync
     file_fd = open(filename, O_RDWR);
-    file_if (fd < 0) {
+    if (file_fd < 0) {
         ERROR("failed to open %s, %s\n", filename, strerror(errno));
         return -1;
     }
@@ -289,7 +322,7 @@ static void initialize(int32_t argc, char ** argv)
         file_hdr->max >= MAX_FILE_DATA_PART1)
     {
         ERROR("invalid file %s, magic=0x%lx max=%d\n", 
-              file_hdr->magic, file_hdr->max);
+              filename, file_hdr->magic, file_hdr->max);
         return -1;
     }
 
@@ -298,10 +331,12 @@ static void initialize(int32_t argc, char ** argv)
     //   create thread to acquire data from server
     // endif
     if (mode == LIVE) {
+        int32_t sfd;
+
         // get address of server
-        ret =  getsockaddr(server, PORT, SOCK_STREAM, 0, &addr);
+        ret =  getsockaddr(servername, PORT, SOCK_STREAM, 0, &sockaddr);
         if (ret < 0) {
-            ERROR("failed to get address of %s\n", server);
+            ERROR("failed to get address of %s\n", servername);
             return -1;
         }
 
@@ -313,9 +348,10 @@ static void initialize(int32_t argc, char ** argv)
         }
 
         // connect to the server
-        if (connect(sfd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+        if (connect(sfd, (struct sockaddr *)&sockaddr, sizeof(sockaddr)) < 0) {
+            char s[100];
             ERROR("connect to %s, %s\n", 
-                  sock_addr_to_str(s, sizeof(s), (struct sockaddr *)&addr),
+                  sock_addr_to_str(s, sizeof(s), (struct sockaddr *)&sockaddr),
                   strerror(errno));
             return -1;
         }
@@ -329,8 +365,11 @@ static void initialize(int32_t argc, char ** argv)
 
     // print values
     // XXX others
-    INFO("address of %s is %s\n",
-          server, sock_addr_to_str(s, sizeof(s), (struct sockaddr *)&addr));
+    if (mode == LIVE) {
+        char s[100];
+        INFO("address of %s is %s\n",
+            servername, sock_addr_to_str(s, sizeof(s), (struct sockaddr *)&sockaddr));
+    }
 
     // return success
     return 0;
@@ -343,15 +382,20 @@ static void usage(void)
 
 // -----------------  CLIENT THREAD  -------------------------------------------------
 
-void * client_thread(void * cx)
+static void * client_thread(void * cx)
 {
-    int32_t sfd;
-    int32_t ret;
-    off_t   offset;
+    #define MAX_DATA_PART2_LENGTH 1000000
+
+    int32_t               sfd;
+    int32_t               len;
+    off_t                 offset;
+    struct data_part1_s   data_part1;
+    struct data_part2_s * data_part2;
 
     sfd    = (uintptr_t)cx;
     offset = sizeof(file_hdr_t) +
-             MAX_FILE_DATA_PART1 * sizeof(struct data_part1);
+             MAX_FILE_DATA_PART1 * sizeof(struct data_part1_s);
+    data_part2 = calloc(1, MAX_DATA_PART2_LENGTH);  // YYY check
 
     while (true) {
         // if file is full then terminate thread
@@ -368,14 +412,14 @@ void * client_thread(void * cx)
                   len, sizeof(data_part1), strerror(errno));
             break;
         }
-        if (data_part1.magic != MAGIC_DATA_PART1) {
-            ERROR("recv data_part1 bad magic 0x%x\n", 
+        if (data_part1.magic != MAGIC_DATA) {
+            ERROR("recv data_part1 bad magic 0x%lx\n", 
                   data_part1.magic);
             break;
         }
-        if (data_part1->data_part2_length > MAX_DATA_PART2_LENGTH) {
+        if (data_part1.data_part2_length > MAX_DATA_PART2_LENGTH) {
             ERROR("data_part2_length %d is too big\n", 
-                  data_part1->data_part2_length);
+                  data_part1.data_part2_length);
             break;
         }
 
@@ -390,9 +434,9 @@ void * client_thread(void * cx)
         // write data to file
         file_data_part1[file_idx_global] = data_part1;
         len = pwrite(file_fd, &data_part2, data_part1.data_part2_length, offset);
-        if (len != data_part1.data_part2_length,) {
+        if (len != data_part1.data_part2_length) {
             ERROR("write data_part2 len=%d exp=%d, %s\n",
-                  len, data_part1.data_part2_length,, strerror(errno));
+                  len, data_part1.data_part2_length, strerror(errno));
             break;
         }
         offset += data_part1.data_part2_length;
@@ -401,7 +445,7 @@ void * client_thread(void * cx)
         // if live mode then update file_idx_global
         // YYY mutex ?
         file_hdr->max++;
-        if (mode == LINVE) {
+        if (mode == LIVE) {
             file_idx_global = file_hdr->max - 1;
         }
 
@@ -687,3 +731,59 @@ struct data_part2_s * read_data_part2(int32_t file_idx)
     // return the data_part2
     return &last_read_data_part2;
 }
+
+static int getsockaddr(char * node, int port, int socktype, int protcol, struct sockaddr_in * ret_addr)
+{
+    struct addrinfo   hints;
+    struct addrinfo * result;
+    char              port_str[20];
+    int               ret;
+
+    sprintf(port_str, "%d", port);
+
+    bzero(&hints, sizeof(hints));
+    hints.ai_family   = AF_INET;
+    hints.ai_socktype = SOCK_DGRAM;
+    hints.ai_protocol = IPPROTO_UDP;
+    hints.ai_flags    = AI_NUMERICSERV;
+
+    ret = getaddrinfo(node, port_str, &hints, &result);
+    if (ret != 0) {
+        ERROR("failed to get address of %s, %s\n", node, gai_strerror(ret));
+        return -1;
+    }
+    if (result->ai_addrlen != sizeof(*ret_addr)) {
+        ERROR("getaddrinfo result addrlen=%d, expected=%d\n",
+            (int)result->ai_addrlen, (int)sizeof(*ret_addr));
+        return -1;
+    }
+
+    *ret_addr = *(struct sockaddr_in*)result->ai_addr;
+    freeaddrinfo(result);
+    return 0;
+}
+
+static char * sock_addr_to_str(char * s, int slen, struct sockaddr * addr)
+{
+    char addr_str[100];
+    int port;
+
+    if (addr->sa_family == AF_INET) {
+        inet_ntop(AF_INET,
+                  &((struct sockaddr_in*)addr)->sin_addr,
+                  addr_str, sizeof(addr_str));
+        port = ((struct sockaddr_in*)addr)->sin_port;
+    } else if (addr->sa_family == AF_INET6) {
+        inet_ntop(AF_INET6,
+                  &((struct sockaddr_in6*)addr)->sin6_addr,
+                 addr_str, sizeof(addr_str));
+        port = ((struct sockaddr_in6*)addr)->sin6_port;
+    } else {
+        snprintf(s,slen,"Invalid AddrFamily %d", addr->sa_family);
+        return s;
+    }
+
+    snprintf(s,slen,"%s:%d",addr_str,htons(port));
+    return s;
+}
+

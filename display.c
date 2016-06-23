@@ -1,18 +1,6 @@
-    // this program requires CAM_WIDTH to be >= CAM_HEIGHT; 
-    // the reason being that a square texture is created with dimension
-    // of CAM_HEIGHT x CAM_HEIGHT, and this texture is updated with the
-    // pixels centered around CAM_WIDTH/2
-    if (CAM_WIDTH < CAM_HEIGHT) {
-        FATAL("CAM_WIDTH must be >= CAM_HEIGHT\n");
-    }
-
-
-
 #if 0
 Same general screen layout
 - experiment with smaller camera image, and larger graph area
-
-Connect camera to this computer
 
 when in live mode
 - init: connect to dataq device
@@ -109,12 +97,23 @@ typedef struct {
     uint8_t  reserved[4096-20];
 } file_hdr_t;
 
+enum mode {LIVE, PLAYBACK};
+
 //
 // variables
 //
 
-file_hdr_t          * file_hdr;
-struct data_part1_s * file_data_part1;
+static int32_t               file_fd;
+static file_hdr_t          * file_hdr;
+static struct data_part1_s * file_data_part1;
+static int32_t               file_idx_global;
+
+static bool                  connected_to_data_server;
+enum mode                    mode;
+
+
+playback
+
 
 //
 // prototypes
@@ -123,9 +122,10 @@ struct data_part1_s * file_data_part1;
 static void initialize(int32_t argc, char ** argv);
 static void usage(void);
 static void display_handler();
-static void draw_camera_image(data_t * data, rect_t * cam_pane, texture_t cam_texture);
-static void draw_data_values(data_t *data, rect_t * data_pane);
+static void draw_camera_image(rect_t * cam_pane);
+static void draw_data_values(rect_t * data_pane);
 static char * val2str(char * str, float val, char * trailer_str);
+struct data_part2_s * read_data_part2(int32_t file_idx);
 
 // -----------------  MAIN  ----------------------------------------------------------
 
@@ -146,8 +146,8 @@ static int32_t main(int32_t argc, char **argv)
 static void initialize(int32_t argc, char ** argv)
 {
     struct rlimit rl;
-    bool          connect_to_data_server;
     pthread_t     thread;
+    int32_t       ret;
 
     // init core dumps
     // note - requires fs.suid_dumpable=1  in /etc/sysctl.conf
@@ -155,13 +155,18 @@ static void initialize(int32_t argc, char ** argv)
     rl.rlim_max = RLIM_INFINITY;
     setrlimit(RLIMIT_CORE, &rl);
 
+    // init globals 
+    mode = LIVE;
+    file_idx_global = -1;
+ 
     // parse options
-    // -h       : help
-    // -v       : version
-    // -g WxH   : window width and height, default 1920x1080
-    // -s name  : server name
+    // -h          : help
+    // -v          : version
+    // -g WxH      : window width and height, default 1920x1080
+    // -s name     : server name
+    // -p filename : playback file
     while (true) {
-        char opt_char = getopt(argc, argv, "hvg:s:");
+        char opt_char = getopt(argc, argv, "hvg:s:p:");
         if (opt_char == -1) {
             break;
         }
@@ -181,31 +186,39 @@ static void initialize(int32_t argc, char ** argv)
         case 's':
             strcpy(servername, optarg);
             break;
+        case 'p':
+            mode = PLAYBACK;
+            strcpy(filename, optarg);
+            break;
         default:
             return -1;
         }
     }
 
-    // if a filename is not provided then 
-    //   generate filename
+    // if in live mode then
+    //   if filename was provided then 
+    //     use the provided filename
+    //   else
+    //     generate the filename
+    //   endif
     //   verify filename does not exist
-    //   create and init file
-    //   set flag to connect to data server
-    // else
-    //   verify filename exist
-    //   clear flag to connect to data server
+    //   create and init the file  
     // endif
-    if (argc == optind) {
-        time_t t;
-        struct tm * tm;
-        file_hdr_t hdr;
-
-        // generate filename
-        t = time(NULL);
-        tm = localtime(&t);
-        sprintf(filename, "fusor_%2.2d%2.2d%2.2d_%2.2d%2.2d%2.2d.dat",
-                tm->tm_mon+1, tm->tm_mday, tm->tm_year-100,
-                tm->tm_hour, tm->tm_min, tm->tm_sec);
+    if (mode == LIVE) {
+        // if filename was provided then 
+        //   use the provided filename
+        // else
+        //   generate the filename
+        // endif
+        if (argc > optind) {
+            strcpy(filename, argv[optind]);
+        } else {
+            time_t t = time(NULL);
+            struct tm * tm = localtime(&t);
+            sprintf(filename, "fusor_%2.2d%2.2d%2.2d_%2.2d%2.2d%2.2d.dat",
+                    tm->tm_mon+1, tm->tm_mday, tm->tm_year-100,
+                    tm->tm_hour, tm->tm_min, tm->tm_sec);
+        }
 
         // verify filename does not exist
         if (stat(filename, &stat_buf) == 0) {
@@ -213,7 +226,9 @@ static void initialize(int32_t argc, char ** argv)
             return -1;
         }
 
-        // create and init filename
+        // create and init the file  
+        file_hdr_t hdr;
+        int32_t fd;
         fd = open(filename, O_CREAT|O_EXCL|O_RDWR, 0666);
         if (fd < 0) {
             ERROR("failed to create %s, %s\n", filename, strerror(errno));
@@ -228,25 +243,23 @@ static void initialize(int32_t argc, char ** argv)
             return -1;
         }
         close(fd);
+    }
 
-        // set flag to connect to data server
-        connect_to_data_server = true;
-    } else {
-        // verify filename exists
+    // if in playback mode then
+    //   verify filename exists
+    // endif
+    if (mode == PLAYBACK) {
         strcpy(filename, argv[optind]);
         if (stat(filename, &stat_buf) == -1) {
             ERROR("file %s does not exist, %s\n", filename, strerror(errno));
             return -1;
         }
-
-        // clear flag to connect to data server
-        connect_to_data_server = false;
     }
-
+    
     // open and map filename
     // YYY msync to sync
-    fd = open(filename, O_RDWR);
-    if (fd < 0) {
+    file_fd = open(filename, O_RDWR);
+    file_if (fd < 0) {
         ERROR("failed to open %s, %s\n", filename, strerror(errno));
         return -1;
     }
@@ -254,18 +267,18 @@ static void initialize(int32_t argc, char ** argv)
                    sizeof(file_hdr_t),
                    PROT_READ|PROT_WRITE,
                    MAP_SHARED,
-                   fd,
+                   file_fd,
                    0);   // offset
     if (file_hdr == MAP_FAILED) {
         ERROR("failed to map file_hdr %s, %s\n", filename, strerror(errno));
         return -1;
     }
     file_data_part1 = mmap(NULL,  // addr
-                           sizeof(file_data_part1) * XXX,
+                           sizeof(file_data_part1) * MAX_FILE_DATA_PART1,
                            PROT_READ|PROT_WRITE,
                            MAP_SHARED,
-                           fd,
-                           0);   // offset
+                           file_fd,
+                           sizeof(file_hdr_t));   // offset
     if (file_data_part1 == MAP_FAILED) {
         ERROR("failed to map file_data_part1 %s, %s\n", filename, strerror(errno));
         return -1;
@@ -280,11 +293,11 @@ static void initialize(int32_t argc, char ** argv)
         return -1;
     }
 
-    // if the filename was not provided then
+    // if in live mode then
     //   connect to server
     //   create thread to acquire data from server
     // endif
-    if (connect_to_data_server) {
+    if (mode == LIVE) {
         // get address of server
         ret =  getsockaddr(server, PORT, SOCK_STREAM, 0, &addr);
         if (ret < 0) {
@@ -325,7 +338,80 @@ static void initialize(int32_t argc, char ** argv)
 
 static void usage(void)
 {
-    // XXX tbd
+    // YYY tbd
+}
+
+// -----------------  CLIENT THREAD  -------------------------------------------------
+
+void * client_thread(void * cx)
+{
+    int32_t sfd;
+    int32_t ret;
+    off_t   offset;
+
+    sfd    = (uintptr_t)cx;
+    offset = sizeof(file_hdr_t) +
+             MAX_FILE_DATA_PART1 * sizeof(struct data_part1);
+
+    while (true) {
+        // if file is full then terminate thread
+        if (file_idx_global >= MAX_FILE_DATA_PART1) {
+            ERROR("file is full\n");
+            break;
+        }
+
+        // read data part1 from server, and
+        // verify data part1 magic, and length
+        len = recv(sfd, &data_part1, sizeof(data_part1), MSG_WAITALL);
+        if (len != sizeof(data_part1)) {
+            ERROR("recv data_part1 len=%d exp=%zd, %s\n",
+                  len, sizeof(data_part1), strerror(errno));
+            break;
+        }
+        if (data_part1.magic != MAGIC_DATA_PART1) {
+            ERROR("recv data_part1 bad magic 0x%x\n", 
+                  data_part1.magic);
+            break;
+        }
+        if (data_part1->data_part2_length > MAX_DATA_PART2_LENGTH) {
+            ERROR("data_part2_length %d is too big\n", 
+                  data_part1->data_part2_length);
+            break;
+        }
+
+        // read data part2 from server
+        len = recv(sfd, &data_part2, data_part1.data_part2_length, MSG_WAITALL);
+        if (len != data_part1.data_part2_length) {
+            ERROR("recv data_part2 len=%d exp=%d, %s\n",
+                  len, data_part1.data_part2_length, strerror(errno));
+            break;
+        }
+
+        // write data to file
+        file_data_part1[file_idx_global] = data_part1;
+        len = pwrite(file_fd, &data_part2, data_part1.data_part2_length, offset);
+        if (len != data_part1.data_part2_length,) {
+            ERROR("write data_part2 len=%d exp=%d, %s\n",
+                  len, data_part1.data_part2_length,, strerror(errno));
+            break;
+        }
+        offset += data_part1.data_part2_length;
+
+        // update file header, and
+        // if live mode then update file_idx_global
+        // YYY mutex ?
+        file_hdr->max++;
+        if (mode == LINVE) {
+            file_idx_global = file_hdr->max - 1;
+        }
+
+        // YYY keep cache copy of data part2 
+    }
+
+    // YYY set error indicator here 
+    // YYY how to handle timeouts in receiving data 
+    
+    return NULL;
 }
 
 // -----------------  DISPLAY HANDLER - MAIN  ----------------------------------------
@@ -333,13 +419,11 @@ static void usage(void)
 static void display_handler(void)
 {
     bool          quit;
-    data_t      * data;
     sdl_event_t * event;
     rect_t        title_pane_full, title_pane; 
     rect_t        cam_pane_full, cam_pane;
     rect_t        data_pane_full, data_pane;
     rect_t        graph_pane_full, graph_pane;
-    texture_t     cam_texture;
     char          str[100];
     struct tm   * tm;
     time_t        t;
@@ -350,7 +434,6 @@ static void display_handler(void)
     quit = false;
 
     sdl_init(win_width, win_height);
-    cam_texture = sdl_create_yuy2_texture(CAM_HEIGHT,CAM_HEIGHT);
 
     sdl_init_pane(&title_pane_full, &title_pane, 
                   0, 0, 
@@ -394,7 +477,7 @@ static void display_handler(void)
         draw_data_values(data, &data_pane);
 
         // draw the graph
-        // XXX tbd
+        // YYY tbd
 
         // register for events   
         // - quit and help
@@ -406,7 +489,7 @@ static void display_handler(void)
         }
         // - graph select
         sdl_event_register('s', SDL_EVENT_TYPE_KEY, NULL);
-        // XXX other graph events
+        // YYY other graph events
 
         // present the display
         sdl_display_present();
@@ -429,10 +512,10 @@ static void display_handler(void)
                 sdl_display_text(about);
                 break;
             case 'g':
-                // XXX
+                // YYY
                 break;
             case 's':
-                // XXX
+                // YYY
                 break;
             default:
                 event_processed_count--;
@@ -460,20 +543,39 @@ static void display_handler(void)
 
 // - - - - - - - - -  DISPLAY HANDLER - DRAW CAMERA IMAGE  - - - - - - - - - - - - - - 
 
-static void draw_camera_image(data_t * data, rect_t * cam_pane, texture_t cam_texture)
+static void draw_camera_image(rect_t * cam_pane, int32_t file_idx)
 {
     uint8_t * pixel_buff;
     uint32_t  pixel_buff_width;
     uint32_t  pixel_buff_height;
     int32_t   ret;
 
-    if (!data->jpeg_valid) {
-        return;
+    static texture_tcam_texture = NULL;
+
+    // on first call create the cam_texture
+    if (cam_texture == NULL) {
+        cam_texture = sdl_create_yuy2_texture(CAM_HEIGHT,CAM_HEIGHT);
+        if (cam_texture == NULL) {
+            FATAL("failed to create cam_texture\n");
+        }
     }
 
+    // if no jpeg buff then 
+    //   display 'no image'
+    //   return
+    // endif
+    if (file_data_part1[file_idx].magic != MAGIC_DATA ||
+        !file_data_part1[file_idx].data_part2_jpeg_buff_valid ||
+        (data_part2 = read_data_part2(file_idx)) == NULL)
+    {
+        // XXX  display no image
+        return;
+    }
+    
+    // decode the jpeg buff contained in data_part2
     ret = jpeg_decode(0,  // cxid
                      JPEG_DECODE_MODE_YUY2,      
-                     data->jpeg_buff.ptr, data->jpeg_buff_len,
+                     data_part2->jpeg_buff.ptr, data_part2->jpeg_buff_len,
                      &pixel_buff, &pixel_buff_width, &pixel_buff_height);
     if (ret < 0) {
         FATAL("jpeg_decode failed\n");
@@ -483,21 +585,23 @@ static void draw_camera_image(data_t * data, rect_t * cam_pane, texture_t cam_te
             pixel_buff_width, pixel_buff_height);
     }
 
+    // display the decoded jpeg
     sdl_update_yuy2_texture(cam_texture, 
                              pixel_buff + (CAM_WIDTH - CAM_HEIGHT) / 2,
                              CAM_WIDTH);
     sdl_render_texture(cam_texture, cam_pane);
-
     free(pixel_buff);
 }
 
 // - - - - - - - - -  DISPLAY HANDLER - DRAW DATA VALUES  - - - - - - - - - - - - - - 
 
-static void draw_data_values(data_t *data, rect_t * data_pane)
+static void draw_data_values(rect_t * data_pane)
 {
+#if 0 // YYY later
     char str[100];
     char trailer_str[100];
 
+//YYY call routine to get it
     if (!data->data_valid) {
         return;
     }
@@ -526,7 +630,10 @@ static void draw_data_values(data_t *data, rect_t * data_pane)
         val2str(str, data->chamber_pressure_mtorr/1000, trailer_str);
     }
     sdl_render_text(data_pane, 4, 0, 1, str, WHITE, BLACK);
+#endif
 }
+
+// -----------------  SUPPORT  ------------------------------------------------------ 
 
 static char * val2str(char * str, float val, char * trailer_str)
 {
@@ -538,4 +645,45 @@ static char * val2str(char * str, float val, char * trailer_str)
         sprintf(str, "%-6.0f %s", val, trailer_str);
     }
     return str;
+}
+
+struct data_part2_s * read_data_part2(int32_t file_idx)
+{
+    uint32_t dp2_length;
+    offset_t dp2_offset;
+    ssize_t  len;
+
+    static int32_t           last_read_file_idx = -1;
+    static struct data_part2 last_read_data_part2;
+
+    // XXX also cache the live data
+    // XXX print the reads here to ensure the caching is working
+
+    // verify data_part2 exists for specified file_idx
+    if (file_idx < 0 || 
+        file_idx >= file_hdr->max ||
+        file_data_part1[file_idx].magic != MAGIC_DATA ||
+        (dp2_len = file_data_part1[file_idx].data_part2_length) == 0 ||
+        (dp2_offset = file_data_part1[file_idx].data_part2_offset) == 0)
+    {
+        return NULL;
+    }
+
+    // if file_idx is same as last read then return data_part2 from last read
+    if (file_idx == last_read_file_idx) {
+        return last_read_data_part2;
+    }
+
+    // read data_part2, and
+    // remember the file_idx of this read
+    len = pread(file_fd, &last_read_data_part2, dp2_length, dp2_offset);
+    if (len != data_part1.data_part2_length,) {
+        ERROR("read data_part2 len=%d exp=%d, %s\n",
+              len, data_part1.data_part2_length,, strerror(errno));
+        return NULL;
+    }
+    last_read_file_idx = file_idx;
+
+    // return the data_part2
+    return &last_read_data_part2;
 }

@@ -264,9 +264,8 @@ static void init_data_struct(data_t * data, time_t time_now)
 
     bzero(data, sizeof(data_t));
 
-    data->magic  = DATA_MAGIC;
-    data->length = sizeof(data_t) + jpeg_buff_len;
-    data->time   = time_now;
+    data->part1.magic  = MAGIC_DATA;
+    data->part1.time   = time_now;
 
     data->part1.voltage_mean_kv = ERROR_NO_VALUE;
     data->part1.voltage_min_kv = ERROR_NO_VALUE;
@@ -322,9 +321,15 @@ static void init_data_struct(data_t * data, time_t time_now)
     if (microsec_timer() - jpeg_buff_us < 1000000) {
         memcpy(data->part2.jpeg_buff, jpeg_buff, jpeg_buff_len);
         data->part2.jpeg_buff_len = jpeg_buff_len;
-        data->part2.jpeg_buff_valid = true;
     }
     pthread_mutex_unlock(&jpeg_mutex);
+
+    //
+    // data part1 (continued)
+    //
+
+    data->part1.data_part2_length = sizeof(struct data_part2_s) + data->part2.jpeg_buff_len;
+    data->part1.data_part2_jpeg_buff_valid = (data->part2.jpeg_buff_len != 0);
 }
 
 // -----------------  CONVERT ADC HV VOLTAGE & CURRENT  ------------------------------

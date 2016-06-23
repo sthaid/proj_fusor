@@ -14,7 +14,7 @@
 #define MAX_ADC_DIAG_CHAN    4
 #define MAX_ADC_DIAG_VALUE   1000
 
-#define DATA_MAGIC  0xaabbccdd
+#define MAGIC_DATA  0xaabbccdd
 
 #define IS_ERROR(x) ((int32_t)(x) >= ERROR_FIRST && (int32_t)(x) <= ERROR_LAST)
 #define ERROR_FIRST                   1000000
@@ -28,24 +28,29 @@
      (int32_t)(x) == ERROR_NO_VALUE               ? "NOVAL"    \
                                                   : "????")
 
+// YYY check size on linux and rpi
 typedef struct {
-    uint32_t magic;
-    uint32_t length;
-    time_t   time;  // XXX use uint64_t instead?, what is sizeof time_t on rpi
     struct data_part1_s {
-        float voltage_mean_kv;
-        float voltage_min_kv;
-        float voltage_max_kv;
-        float current_ma;
-        float chamber_pressure_d2_mtorr;
-        float chamber_pressure_n2_mtorr;
-        float average_cpm[MAX_DETECTOR_CHAN];
-        float moving_average_cpm[MAX_DETECTOR_CHAN];
+        uint32_t magic;
+        uint32_t pad1;
+        uint64_t time; 
+
+        float    voltage_mean_kv;
+        float    voltage_min_kv;
+        float    voltage_max_kv;
+        float    current_ma;
+        float    chamber_pressure_d2_mtorr;
+        float    chamber_pressure_n2_mtorr;
+        float    average_cpm[MAX_DETECTOR_CHAN];
+        float    moving_average_cpm[MAX_DETECTOR_CHAN];
+
+        uint32_t data_part2_length;
+        bool     data_part2_jpeg_buff_valid;
+        uint8_t  pad2[7];
+        // YYY need valid for diag too
     } part1;
     struct data_part2_s {
-        // XXX needs a vaid flag for each 
         int16_t  adc_diag[MAX_ADC_DIAG_CHAN][MAX_ADC_DIAG_VALUE];
-        bool     jpeg_buff_valid;
         uint32_t jpeg_buff_len;
         uint8_t  jpeg_buff[0];
     } part2;

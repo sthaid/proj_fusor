@@ -13,6 +13,8 @@ OBJ_GET_DATA=$(SRC_GET_DATA:.c=.o)
 
 SRC_DISPLAY = display.c \
               util_sdl.c \
+              util_sdl_predefined_displays.c \
+              util_jpeg_decode.c \
               util_misc.c
 OBJ_DISPLAY=$(SRC_DISPLAY:.c=.o)
 
@@ -28,7 +30,7 @@ get_data: $(OBJ_GET_DATA)
 	$(CC) -pthread -lrt -lm -o $@ $(OBJ_GET_DATA)
 
 display: $(OBJ_DISPLAY) 
-	$(CC) -pthread -lrt -lm -lpng -lSDL2 -lSDL2_ttf -lSDL2_mixer -o $@ $(OBJ_DISPLAY)
+	$(CC) -pthread -lrt -lm -lpng -ljpeg -lSDL2 -lSDL2_ttf -lSDL2_mixer -o $@ $(OBJ_DISPLAY)
 
 -include $(DEP)
 

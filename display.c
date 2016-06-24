@@ -172,6 +172,7 @@ static int32_t initialize(int32_t argc, char ** argv)
     pthread_t          thread;
     int32_t            ret;
     char               filename[100];
+    char               servername[100];
     struct sockaddr_in sockaddr;
     char               s[100];
     int32_t            wait_ms;
@@ -705,6 +706,7 @@ static void draw_camera_image(rect_t * cam_pane, int32_t file_idx)
     return;
 
     // error
+error:
     sdl_render_text(cam_pane, 1, 0, 0, errstr, WHITE, BLACK); //YYY center
     return;
 }

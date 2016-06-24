@@ -150,7 +150,7 @@ sdl_event_t * sdl_poll_event(void);
 void sdl_render_text(rect_t * pane, int32_t row, int32_t col, int32_t font_id, char * str, 
     int32_t fd_color, int32_t bg_color);
 void sdl_render_text_with_event(rect_t * pane, int32_t row, int32_t col, int32_t font_id, char * str, 
-    int32_t fd_color, int32_t bg_color, int32_t event_id);
+    int32_t fg_color, int32_t bg_color, int32_t event_id);
 
 // render rectangle and lines
 void sdl_render_rect(rect_t * pane, rect_t * rect, int32_t line_width, int32_t color);

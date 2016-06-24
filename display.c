@@ -1,5 +1,7 @@
 #if 0
-XXX compile both pgms on linux and rpi
+YYY compile both pgms on linux and rpi
+YYY check size of data_t and compare
+YYY review and delete the following
 
 Same general screen layout
 - experiment with smaller camera image, and larger graph area
@@ -57,7 +59,6 @@ DONT NEED
 - the current get data routine
 #endif
 
-
 #define _FILE_OFFSET_BITS 64
 
 #include <stdio.h>
@@ -82,34 +83,32 @@ DONT NEED
 #include <sys/stat.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <netdb.h>
+#include <arpa/inet.h>
 
 #include "common.h"
 #include "util_sdl.h"
+#include "util_jpeg_decode.h"
 #include "util_misc.h"
-
+#include "about.h"
 
 //
 // defines
 //
 
-// this program requires CAM_WIDTH to be >= CAM_HEIGHT; 
-// the reason being that a square texture is created with dimension
-// of CAM_HEIGHT x CAM_HEIGHT, and this texture is updated with the
-// pixels centered around CAM_WIDTH/2
-#if CAM_WIDTH < CAM_HEIGHT
-  #error CAM_WIDTH must be >= CAN_HEIGHT
-#endif
+#define VERSION_STR  "1.0"
+
+#define MODE_STR(m) ((m) == LIVE ? "LIVE" : "PLAYBACK")
 
 #define MAGIC_FILE 0x1122334455667788
 
-#define MAX_FILE_DATA_PART1 100000
-
-#define VERSION_STR  "1.0"
+#define MAX_FILE_DATA_PART1   100000
+#define MAX_DATA_PART2_LENGTH 1000000
 
 #define FONT0_HEIGHT (sdl_font_char_height(0))
 #define FONT0_WIDTH  (sdl_font_char_width(0))
-
-
+#define FONT1_HEIGHT (sdl_font_char_height(1))
+#define FONT1_WIDTH  (sdl_font_char_width(1))
 
 //
 // typedefs
@@ -128,16 +127,13 @@ enum mode {LIVE, PLAYBACK};
 // variables
 //
 
+static enum mode             mode;
+static int32_t               win_width, win_height;
+
 static int32_t               file_fd;
 static file_hdr_t          * file_hdr;
 static struct data_part1_s * file_data_part1;
 static int32_t               file_idx_global;
-
-// XXX static bool                  connected_to_data_server;
-static enum mode                    mode;
-
-static int32_t win_width, win_height;
-static char servername[100];
 
 //
 // prototypes
@@ -147,8 +143,8 @@ static int32_t initialize(int32_t argc, char ** argv);
 static void usage(void);
 static void * client_thread(void * cx);
 static void display_handler();
-static void draw_camera_image(rect_t * cam_pane);
-static void draw_data_values(rect_t * data_pane);
+static void draw_camera_image(rect_t * cam_pane, int32_t file_idx);
+static void draw_data_values(rect_t * data_pane, int32_t file_idx);
 static char * val2str(char * str, float val, char * trailer_str);
 static struct data_part2_s * read_data_part2(int32_t file_idx);
 static int getsockaddr(char * node, int port, int socktype, int protcol, struct sockaddr_in * ret_addr);
@@ -177,18 +173,24 @@ static int32_t initialize(int32_t argc, char ** argv)
     int32_t            ret;
     char               filename[100];
     struct sockaddr_in sockaddr;
+    char               s[100];
+    int32_t            wait_ms;
 
-    // XXX also in get_data
     // init core dumps
     // note - requires fs.suid_dumpable=1  in /etc/sysctl.conf if this is a suid pgm
     rl.rlim_cur = RLIM_INFINITY;
     rl.rlim_max = RLIM_INFINITY;
     setrlimit(RLIMIT_CORE, &rl);
 
+    // check size of data struct on 64bit linux and rpi
+    INFO("sizeof data_t=%zd part1=%zd part2=%zd\n",
+         sizeof(data_t), sizeof(struct data_part1_s), sizeof(struct data_part2_s));
+
     // init globals 
     mode = LIVE;
     file_idx_global = -1;
     strcpy(servername, "rpi_data");
+    strcpy(filename, "");
  
     // parse options
     // -h          : help
@@ -232,15 +234,8 @@ static int32_t initialize(int32_t argc, char ** argv)
     //   else
     //     generate the filename
     //   endif
-    //   verify filename does not exist
-    //   create and init the file  
     // endif
     if (mode == LIVE) {
-        // if filename was provided then 
-        //   use the provided filename
-        // else
-        //   generate the filename
-        // endif
         if (argc > optind) {
             strcpy(filename, argv[optind]);
         } else {
@@ -250,7 +245,17 @@ static int32_t initialize(int32_t argc, char ** argv)
                     tm->tm_mon+1, tm->tm_mday, tm->tm_year-100,
                     tm->tm_hour, tm->tm_min, tm->tm_sec);
         }
+    }
 
+    // print mode and filename
+    INFO("mode     = %s\n", MODE_STR(mode));
+    INFO("filename = %s\n", filename);
+
+    // if in live mode then
+    //   verify filename does not exist
+    //   create and init the file  
+    // endif
+    if (mode == LIVE) {
         // verify filename does not exist
         struct stat stat_buf;
         if (stat(filename, &stat_buf) == 0) {
@@ -282,7 +287,6 @@ static int32_t initialize(int32_t argc, char ** argv)
     // endif
     if (mode == PLAYBACK) {
         struct stat stat_buf;
-        strcpy(filename, argv[optind]);
         if (stat(filename, &stat_buf) == -1) {
             ERROR("file %s does not exist, %s\n", filename, strerror(errno));
             return -1;
@@ -297,11 +301,11 @@ static int32_t initialize(int32_t argc, char ** argv)
         return -1;
     }
     file_hdr = mmap(NULL,  // addr
-                   sizeof(file_hdr_t),
-                   PROT_READ|PROT_WRITE,
-                   MAP_SHARED,
-                   file_fd,
-                   0);   // offset
+                    sizeof(file_hdr_t),
+                    PROT_READ|PROT_WRITE,
+                    MAP_SHARED,
+                    file_fd,
+                    0);   // offset
     if (file_hdr == MAP_FAILED) {
         ERROR("failed to map file_hdr %s, %s\n", filename, strerror(errno));
         return -1;
@@ -329,9 +333,13 @@ static int32_t initialize(int32_t argc, char ** argv)
     // if in live mode then
     //   connect to server
     //   create thread to acquire data from server
+    //   wait for first data to be received from server
     // endif
     if (mode == LIVE) {
         int32_t sfd;
+
+        // print servername
+        INFO("servername = %ss\n", servername);
 
         // get address of server
         ret =  getsockaddr(servername, PORT, SOCK_STREAM, 0, &sockaddr);
@@ -339,6 +347,10 @@ static int32_t initialize(int32_t argc, char ** argv)
             ERROR("failed to get address of %s\n", servername);
             return -1;
         }
+ 
+        // print serveraddr
+        INFO("serveraddr = %s\n", 
+             sock_addr_to_str(s, sizeof(s), (struct sockaddr *)&sockaddr));
 
         // create socket
         sfd = socket(AF_INET, SOCK_STREAM, 0);
@@ -361,14 +373,29 @@ static int32_t initialize(int32_t argc, char ** argv)
             ERROR("pthread_create client_thread, %s\n", strerror(errno));
             return -1;
         }
+
+        // wait for client_thread to get first data, tout 5 secs
+        wait_ms = 0;
+        while (file_idx_global == -1) {
+            wait_ms += 10;
+            usleep(10000);
+            if (wait_ms >= 5000) {
+                ERROR("failed to receive data from server\n");
+                return -1;
+            }
+        }
     }
 
-    // print values
-    // XXX others
+    // if in playback mode then
+    //   verify the first entry of the file_data_part1 is valid, and
+    //   set file_idx_global
+    // endif
     if (mode == LIVE) {
-        char s[100];
-        INFO("address of %s is %s\n",
-            servername, sock_addr_to_str(s, sizeof(s), (struct sockaddr *)&sockaddr));
+        if (file_data_part1[0].magic != MAGIC_DATA) {
+            ERROR("first data invalid magic 0x%lx\n", file_data_part1[0].magic);
+            return -1;
+        }
+        file_idx_global = 0;
     }
 
     // return success
@@ -384,18 +411,24 @@ static void usage(void)
 
 static void * client_thread(void * cx)
 {
-    #define MAX_DATA_PART2_LENGTH 1000000
-
     int32_t               sfd;
     int32_t               len;
     off_t                 offset;
+    uint64_t              last_time;
     struct data_part1_s   data_part1;
     struct data_part2_s * data_part2;
 
     sfd    = (uintptr_t)cx;
     offset = sizeof(file_hdr_t) +
              MAX_FILE_DATA_PART1 * sizeof(struct data_part1_s);
-    data_part2 = calloc(1, MAX_DATA_PART2_LENGTH);  // YYY check
+    last_time = -1;
+    data_part2 = calloc(1, MAX_DATA_PART2_LENGTH);
+    if (data_part2 == NULL) {
+        FATAL("calloc\n");
+    }
+
+    // YYY this is assuming that there are no gaps in the data received
+    //     perhaps that is okay, and just print a warning
 
     while (true) {
         // if file is full then terminate thread
@@ -430,6 +463,16 @@ static void * client_thread(void * cx)
                   len, data_part1.data_part2_length, strerror(errno));
             break;
         }
+
+        // check for time increasing by other than 1 second;
+        // if so, print warning
+        if (last_time != -1 && data_part1.time != last_time + 1) {
+            WARN("time increased by %ld\n", data_part1.time - last_time);
+        }
+        last_time = data_part1.time;
+
+        // save offset in data_part1
+        data_part1.data_part2_offset = offset;
 
         // write data to file
         file_data_part1[file_idx_global] = data_part1;
@@ -471,11 +514,18 @@ static void display_handler(void)
     char          str[100];
     struct tm   * tm;
     time_t        t;
-    bool          data_file_full;
-    int32_t       graph_select = 1;
+    // bool          data_file_full;
+    // int32_t       graph_select;
+    int32_t       file_idx;
+    int32_t       event_processed_count;
+    int32_t       file_idx_last;
+    int32_t       file_max_last;
 
     // initializae 
     quit = false;
+    // graph_select = 1;
+    file_idx_last = -1;
+    file_max_last = -1;
 
     sdl_init(win_width, win_height);
 
@@ -494,6 +544,9 @@ static void display_handler(void)
 
     // loop until quit
     while (!quit) {
+        // get the file_idx 
+        file_idx = file_idx_global;
+
         // initialize for display update
         sdl_display_init();
 
@@ -504,10 +557,10 @@ static void display_handler(void)
         sdl_render_pane_border(&graph_pane_full, GREEN);
 
         // draw title line
-        t = data->time_us / 1000000;
+        // YYY print the mode
+        t = file_data_part1[file_idx].time;
         tm = localtime(&t);
-        sprintf(str, "%s MODE - %d/%d/%d %2.2d:%2.2d:%2.2d",
-                MODE_STR(mode),
+        sprintf(str, "%d/%d/%d %2.2d:%2.2d:%2.2d",
                 tm->tm_mon+1, tm->tm_mday, tm->tm_year-100,
                 tm->tm_hour, tm->tm_min, tm->tm_sec);
         sdl_render_text(&title_pane, 0, 0, 0, str, WHITE, BLACK);
@@ -515,10 +568,10 @@ static void display_handler(void)
         sdl_render_text(&title_pane, 0, -11, 0, "(?)", WHITE, BLACK);
         
         // draw the camera image,
-        draw_camera_image(data, &cam_pane, cam_texture);
+        draw_camera_image(&cam_pane, file_idx);
 
         // draw the data values,
-        draw_data_values(data, &data_pane);
+        draw_data_values(&data_pane, file_idx);
 
         // draw the graph
         // YYY tbd
@@ -528,9 +581,7 @@ static void display_handler(void)
         sdl_event_register(SDL_EVENT_KEY_ESC, SDL_EVENT_TYPE_KEY, NULL);
         sdl_event_register('?', SDL_EVENT_TYPE_KEY, NULL);
         // - gas select
-        if (mode == LIVE_MODE) {
-            sdl_event_register('g', SDL_EVENT_TYPE_KEY, NULL);
-        }
+        sdl_event_register('g', SDL_EVENT_TYPE_KEY, NULL);
         // - graph select
         sdl_event_register('s', SDL_EVENT_TYPE_KEY, NULL);
         // YYY other graph events
@@ -548,6 +599,7 @@ static void display_handler(void)
             // get and process event
             event_processed_count++;
             event = sdl_poll_event();
+            // YYY make list of other events
             switch (event->event) {
             case SDL_EVENT_QUIT: case SDL_EVENT_KEY_ESC: 
                 quit = true;
@@ -568,12 +620,12 @@ static void display_handler(void)
 
             // test if should break out of this loop
             if ((event_processed_count > 0 && event->event == SDL_EVENT_NONE) ||
-                (file_index != file_index_last) ||
+                (file_idx != file_idx_last) ||
                 (file_hdr->max != file_max_last) ||
                 (quit))
             {
-                file_index_last = file_index;
-                file_max_last   = file_hdr->max
+                file_idx_last = file_idx;
+                file_max_last = file_hdr->max;
                 break;
             }
 
@@ -589,12 +641,22 @@ static void display_handler(void)
 
 static void draw_camera_image(rect_t * cam_pane, int32_t file_idx)
 {
-    uint8_t * pixel_buff;
-    uint32_t  pixel_buff_width;
-    uint32_t  pixel_buff_height;
-    int32_t   ret;
+    uint8_t             * pixel_buff;
+    uint32_t              pixel_buff_width;
+    uint32_t              pixel_buff_height;
+    int32_t               ret;
+    struct data_part2_s * data_part2;
+    char                * errstr;
 
-    static texture_tcam_texture = NULL;
+    static texture_t cam_texture = NULL;
+
+    // this program requires CAM_WIDTH to be >= CAM_HEIGHT; 
+    // the reason being that a square texture is created with dimension
+    // of CAM_HEIGHT x CAM_HEIGHT, and this texture is updated with the
+    // pixels centered around CAM_WIDTH/2
+    #if CAM_WIDTH < CAM_HEIGHT
+        #error CAM_WIDTH must be >= CAN_HEIGHT
+    #endif
 
     // on first call create the cam_texture
     if (cam_texture == NULL) {
@@ -612,21 +674,24 @@ static void draw_camera_image(rect_t * cam_pane, int32_t file_idx)
         !file_data_part1[file_idx].data_part2_jpeg_buff_valid ||
         (data_part2 = read_data_part2(file_idx)) == NULL)
     {
-        // XXX  display no image
-        return;
+        errstr = "NO IMAGE";
+        goto error;
     }
     
     // decode the jpeg buff contained in data_part2
     ret = jpeg_decode(0,  // cxid
                      JPEG_DECODE_MODE_YUY2,      
-                     data_part2->jpeg_buff.ptr, data_part2->jpeg_buff_len,
+                     data_part2->jpeg_buff, data_part2->jpeg_buff_len,
                      &pixel_buff, &pixel_buff_width, &pixel_buff_height);
     if (ret < 0) {
-        FATAL("jpeg_decode failed\n");
+        ERROR("jpeg_decode ret %d\n", ret);
+        errstr = "DECODE";
+        goto error;
     }
     if (pixel_buff_width != CAM_WIDTH || pixel_buff_height != CAM_HEIGHT) {
-        FATAL("jpeg_decode wrong dimensions w=%d h=%d\n",
-            pixel_buff_width, pixel_buff_height);
+        ERROR("jpeg_decode wrong dimensions w=%d h=%d\n", pixel_buff_width, pixel_buff_height);
+        errstr = "SIZE";
+        goto error;
     }
 
     // display the decoded jpeg
@@ -635,13 +700,20 @@ static void draw_camera_image(rect_t * cam_pane, int32_t file_idx)
                              CAM_WIDTH);
     sdl_render_texture(cam_texture, cam_pane);
     free(pixel_buff);
+
+    // return
+    return;
+
+    // error
+    sdl_render_text(cam_pane, 1, 0, 0, errstr, WHITE, BLACK); //YYY center
+    return;
 }
 
 // - - - - - - - - -  DISPLAY HANDLER - DRAW DATA VALUES  - - - - - - - - - - - - - - 
 
-static void draw_data_values(rect_t * data_pane)
+static void draw_data_values(rect_t * data_pane, int32_t file_idx)
 {
-#if 0 // YYY later
+#if 0 // XXX later
     char str[100];
     char trailer_str[100];
 
@@ -693,43 +765,56 @@ static char * val2str(char * str, float val, char * trailer_str)
 
 struct data_part2_s * read_data_part2(int32_t file_idx)
 {
-    uint32_t dp2_length;
-    offset_t dp2_offset;
-    ssize_t  len;
+    int32_t  dp2_length;
+    off_t    dp2_offset;
+    int32_t  len;
 
-    static int32_t           last_read_file_idx = -1;
-    static struct data_part2 last_read_data_part2;
+    static int32_t               last_read_file_idx = -1;
+    static struct data_part2_s * last_read_data_part2 = NULL;
 
-    // XXX also cache the live data
-    // XXX print the reads here to ensure the caching is working
+    // YYY also cache the live data
+
+    // initial allocate 
+    if (last_read_data_part2 == NULL) {
+        last_read_data_part2 = calloc(1,MAX_DATA_PART2_LENGTH);
+        if (last_read_data_part2 == NULL) {
+            FATAL("calloc");
+        }
+    }
+
+    // if file_idx is same as last read then return data_part2 from last read
+    if (file_idx == last_read_file_idx) {
+        INFO("YYY return cached, file_idx=%d\n", file_idx);
+        return last_read_data_part2;
+    }
 
     // verify data_part2 exists for specified file_idx
     if (file_idx < 0 || 
         file_idx >= file_hdr->max ||
         file_data_part1[file_idx].magic != MAGIC_DATA ||
-        (dp2_len = file_data_part1[file_idx].data_part2_length) == 0 ||
+        (dp2_length = file_data_part1[file_idx].data_part2_length) == 0 ||
         (dp2_offset = file_data_part1[file_idx].data_part2_offset) == 0)
     {
         return NULL;
     }
 
-    // if file_idx is same as last read then return data_part2 from last read
-    if (file_idx == last_read_file_idx) {
-        return last_read_data_part2;
-    }
-
-    // read data_part2, and
-    // remember the file_idx of this read
-    len = pread(file_fd, &last_read_data_part2, dp2_length, dp2_offset);
-    if (len != data_part1.data_part2_length,) {
+    // read data_part2
+    len = pread(file_fd, last_read_data_part2, dp2_length, dp2_offset);
+    if (len != dp2_length) {
         ERROR("read data_part2 len=%d exp=%d, %s\n",
-              len, data_part1.data_part2_length,, strerror(errno));
+              len, dp2_length, strerror(errno));
         return NULL;
     }
-    last_read_file_idx = file_idx;
 
+    // YYY perhaps data_part2 should have a magic too
+
+    // YYY bad magic should cause pgm to terminate
+
+    // remember the file_idx of this read, and
     // return the data_part2
-    return &last_read_data_part2;
+    INFO("YYY return new read data, file_idx=%d\n", file_idx);
+    last_read_file_idx = file_idx;
+    return last_read_data_part2;
 }
 
 static int getsockaddr(char * node, int port, int socktype, int protcol, struct sockaddr_in * ret_addr)

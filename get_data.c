@@ -40,6 +40,7 @@ The data is:
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <sys/resource.h>
 
 #include "common.h"
 #include "util_dataq.h"
@@ -92,6 +93,11 @@ int32_t main(int32_t argc, char **argv)
 static void init(void)
 {
     pthread_t thread;
+    struct rlimit rl;
+
+    rl.rlim_cur = RLIM_INFINITY;
+    rl.rlim_max = RLIM_INFINITY;
+    setrlimit(RLIMIT_CORE, &rl);
 
     if (cam_init(CAM_WIDTH, CAM_HEIGHT, FRAMES_PER_SEC) == 0) {
         if (pthread_create(&thread, NULL, server_thread, NULL) != 0) {

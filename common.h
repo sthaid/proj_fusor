@@ -43,6 +43,7 @@ typedef struct {
         float    average_cpm[MAX_DETECTOR_CHAN];
         float    moving_average_cpm[MAX_DETECTOR_CHAN];
 
+        off_t    data_part2_offset;
         uint32_t data_part2_length;
         bool     data_part2_jpeg_buff_valid;
         uint8_t  pad[7];

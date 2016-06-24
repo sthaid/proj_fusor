@@ -28,7 +28,7 @@ get_data: $(OBJ_GET_DATA)
 	$(CC) -pthread -lrt -lm -o $@ $(OBJ_GET_DATA)
 
 display: $(OBJ_DISPLAY) 
-	$(CC) -pthread -lrt -lm -o $@ $(OBJ_DISPLAY)
+	$(CC) -pthread -lrt -lm -lpng -lSDL2 -lSDL2_ttf -lSDL2_mixer -o $@ $(OBJ_DISPLAY)
 
 -include $(DEP)
 

@@ -105,10 +105,18 @@ DONT NEED
 #define MAX_FILE_DATA_PART1   100000
 #define MAX_DATA_PART2_LENGTH 1000000
 
+#define FILE_DATA_PART2_OFFSET \
+   ((sizeof(file_hdr_t) +  \
+     sizeof(struct data_part1_s) * MAX_FILE_DATA_PART1 + \
+     0x1000) & ~0xfffL)
+
 #define FONT0_HEIGHT (sdl_font_char_height(0))
 #define FONT0_WIDTH  (sdl_font_char_width(0))
 #define FONT1_HEIGHT (sdl_font_char_height(1))
 #define FONT1_WIDTH  (sdl_font_char_width(1))
+
+#define DEFAULT_WIN_WIDTH   1920
+#define DEFAULT_WIN_HEIGHT  1080
 
 //
 // typedefs
@@ -128,7 +136,8 @@ enum mode {LIVE, PLAYBACK};
 //
 
 static enum mode             mode;
-static int32_t               win_width, win_height;
+static uint32_t              win_width = DEFAULT_WIN_WIDTH;
+static uint32_t              win_height = DEFAULT_WIN_HEIGHT;
 
 static int32_t               file_fd;
 static file_hdr_t          * file_hdr;
@@ -190,7 +199,7 @@ static int32_t initialize(int32_t argc, char ** argv)
     // init globals 
     mode = LIVE;
     file_idx_global = -1;
-    strcpy(servername, "rpi_data");
+    strcpy(servername, "localhost");
     strcpy(filename, "");
  
     // parse options
@@ -280,6 +289,10 @@ static int32_t initialize(int32_t argc, char ** argv)
             ERROR("failed to init %s, %s\n", filename, strerror(errno));
             return -1;
         }
+        if (ftruncate(fd,  FILE_DATA_PART2_OFFSET) < 0) {
+            ERROR("ftuncate failed on %s, %s\n", filename, strerror(errno));
+            return -1;
+        }
         close(fd);
     }
 
@@ -312,7 +325,7 @@ static int32_t initialize(int32_t argc, char ** argv)
         return -1;
     }
     file_data_part1 = mmap(NULL,  // addr
-                           sizeof(file_data_part1) * MAX_FILE_DATA_PART1,
+                           sizeof(struct data_part1_s) * MAX_FILE_DATA_PART1,
                            PROT_READ|PROT_WRITE,
                            MAP_SHARED,
                            file_fd,
@@ -340,7 +353,7 @@ static int32_t initialize(int32_t argc, char ** argv)
         int32_t sfd;
 
         // print servername
-        INFO("servername = %ss\n", servername);
+        INFO("servername = %s\n", servername);
 
         // get address of server
         ret =  getsockaddr(servername, PORT, SOCK_STREAM, 0, &sockaddr);
@@ -420,8 +433,7 @@ static void * client_thread(void * cx)
     struct data_part2_s * data_part2;
 
     sfd    = (uintptr_t)cx;
-    offset = sizeof(file_hdr_t) +
-             MAX_FILE_DATA_PART1 * sizeof(struct data_part1_s);
+    offset = FILE_DATA_PART2_OFFSET;
     last_time = -1;
     data_part2 = calloc(1, MAX_DATA_PART2_LENGTH);
     if (data_part2 == NULL) {
@@ -458,7 +470,7 @@ static void * client_thread(void * cx)
         }
 
         // read data part2 from server
-        len = recv(sfd, &data_part2, data_part1.data_part2_length, MSG_WAITALL);
+        len = recv(sfd, data_part2, data_part1.data_part2_length, MSG_WAITALL);
         if (len != data_part1.data_part2_length) {
             ERROR("recv data_part2 len=%d exp=%d, %s\n",
                   len, data_part1.data_part2_length, strerror(errno));
@@ -476,8 +488,8 @@ static void * client_thread(void * cx)
         data_part1.data_part2_offset = offset;
 
         // write data to file
-        file_data_part1[file_idx_global] = data_part1;
-        len = pwrite(file_fd, &data_part2, data_part1.data_part2_length, offset);
+        file_data_part1[file_hdr->max] = data_part1;
+        len = pwrite(file_fd, data_part2, data_part1.data_part2_length, offset);
         if (len != data_part1.data_part2_length) {
             ERROR("write data_part2 len=%d exp=%d, %s\n",
                   len, data_part1.data_part2_length, strerror(errno));

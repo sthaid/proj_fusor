@@ -29,6 +29,8 @@
                                                   : "????")
 
 // YYY check size on linux and rpi
+// YYY need valid for diag too
+// data_part1_s and data_part2_s are each padded to 8 byte boundary
 typedef struct {
     struct data_part1_s {
         uint64_t magic;
@@ -46,12 +48,12 @@ typedef struct {
         off_t    data_part2_offset;
         uint32_t data_part2_length;
         bool     data_part2_jpeg_buff_valid;
-        uint8_t  pad[7];
-        // YYY need valid for diag too
+        uint8_t  pad[3];
     } part1;
     struct data_part2_s {
         int16_t  adc_diag[MAX_ADC_DIAG_CHAN][MAX_ADC_DIAG_VALUE];
         uint32_t jpeg_buff_len;
+        uint8_t  pad[4];
         uint8_t  jpeg_buff[0];
     } part2;
 } data_t;

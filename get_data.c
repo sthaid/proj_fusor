@@ -106,8 +106,8 @@ static void init(void)
     }
 
     dataq_init(0.5,   // averaging duration in secs
-               3,     // number of adc channels
                1000,  // scan rate  (samples per second)
+               3,     // number of adc channels
                ADC_CHAN_VOLTAGE,
                ADC_CHAN_CURRENT,
                ADC_CHAN_CHAMBER_PRESSURE);
@@ -204,7 +204,7 @@ void * cam_thread(void * cx)
 
 static void * server_thread(void * cx)
 {
-    int32_t   sockfd = (uintptr_t)sockfd;
+    int32_t   sockfd = (uintptr_t)cx;
     time_t    time_now, time_last;
     ssize_t   len;
     data_t  * data;
@@ -237,9 +237,9 @@ static void * server_thread(void * cx)
         init_data_struct(data, time_now);
 
         // send data struct
-        len = send(sockfd, &data, sizeof(data), 0);
-        if (len != sizeof(data)) {
-            if (len == -1 && errno == ECONNRESET) {
+        len = send(sockfd, data, sizeof(data_t)+data->part2.jpeg_buff_len, MSG_NOSIGNAL);
+        if (len != sizeof(data_t)+data->part2.jpeg_buff_len) {
+            if (len == -1 && (errno == ECONNRESET || errno == EPIPE)) {
                 INFO("terminating connection\n");
             } else {
                 ERROR("terminating connection - send failed, len=%zd, %s, \n", len, strerror(errno));

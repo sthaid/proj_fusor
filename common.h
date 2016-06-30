@@ -14,7 +14,8 @@
 #define MAX_ADC_DIAG_CHAN    4
 #define MAX_ADC_DIAG_VALUE   1000
 
-#define MAGIC_DATA  0xaabbccdd55aa55aa
+#define MAGIC_DATA_PART1  0xaabbccdd55aa55aa
+#define MAGIC_DATA_PART2  0x77777777aaaaaaaa
 
 #define IS_ERROR(x) ((int32_t)(x) >= ERROR_FIRST && (int32_t)(x) <= ERROR_LAST)
 #define ERROR_FIRST                   1000000
@@ -45,12 +46,13 @@ typedef struct {
         float    average_cpm[MAX_DETECTOR_CHAN];
         float    moving_average_cpm[MAX_DETECTOR_CHAN];
 
-        off_t    data_part2_offset;
+        off_t    data_part2_offset;   // for display pgm
         uint32_t data_part2_length;
         bool     data_part2_jpeg_buff_valid;
         uint8_t  pad[3];
     } part1;
     struct data_part2_s {
+        uint64_t magic;
         int16_t  adc_diag[MAX_ADC_DIAG_CHAN][MAX_ADC_DIAG_VALUE];
         uint32_t jpeg_buff_len;
         uint8_t  pad[4];

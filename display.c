@@ -1,62 +1,20 @@
 #if 0
-YYY compile both pgms on linux and rpi
-YYY check size of data_t and compare
-YYY review and delete the following
-
-Same general screen layout
-- experiment with smaller camera image, and larger graph area
-
-when in live mode
-- init: connect to dataq device
-- thread to read from the device and write to disk
-   last thing this thread does is update file header to commit, and maybe fflush
-- In live mode, when data arrives from data-acq
-    - put it in the file, along with most recent cam
-    - update max cursor time, maybe this is in the file too,
-         I guess the file needs a header
-    - if tracking end of data then
-      . update cursor time
-
-Recording,
-- file hdr
-   - magic
-   - time of first entry
-   - time of last entry
-- recorded data toc entry  (this is memmapped)
-  . time  (used to sanity check program)  OPTIONAL
-  . part1
-  . offset and length of cam data
-  . offset and length of part2
-- additional
-  . cam
-  . part2
-
-Graph Cycling in live mode
-- main graph,  add neutron counts
-- detector moving average
-- detector average
-- diag: the current voltage graph , and add the neutron detector voltage
-
-Display is updated:
-- whenever a key is pressed OR cursor time changes
-- display data is always acquired by:
-   - reading directly from memory mapped recording, to get current
-      and values to plot  OR a routine
-   - calling a routine to get the cam data based on cursortime
-   - calling a routine to get the part2 data based on cursortime
-
-Maybe can have a generic plot routine,
-- this will keep all the plots consistent
-- and make the coding or additon of new plots easier
-
-Some Details:
-- When in Playback display RECORDED-DATA in RED, else LIVE-DATA in GREEN
-- D2 vs N2 select - changes which fields is displayed and which field is shown on the main graph
-
-DONT NEED
-- live mode vs playback mode distinction
-- live mode history buff
-- the current get data routine
+TODO
+- check camera angle
+- compile both pgms on linux and rpi
+- check size of data_t and compare
+- Graph Cycling in live mode
+  - main graph,  add neutron counts
+  - detector moving average
+  - detector average
+  - diag: the current voltage graph , and add the neutron detector voltage
+- Maybe can have a generic plot routine,
+  - this will keep all the plots consistent
+  - and make the coding or additon of new plots easier
+- Some Details:
+  - When in Playback display RECORDED-DATA in RED, else LIVE-DATA in GREEN
+  - D2 vs N2 select - changes which fields is displayed and which field is shown on the main graph
+- msync to sync
 #endif
 
 #define _FILE_OFFSET_BITS 64
@@ -116,7 +74,7 @@ DONT NEED
 #define FONT1_WIDTH  (sdl_font_char_width(1))
 
 #define DEFAULT_WIN_WIDTH   1920
-#define DEFAULT_WIN_HEIGHT  1080
+#define DEFAULT_WIN_HEIGHT  1000
 
 //
 // typedefs
@@ -135,7 +93,8 @@ enum mode {LIVE, PLAYBACK};
 // variables
 //
 
-static enum mode             mode;
+static enum mode             initial_mode;
+static enum mode             current_mode;
 static uint32_t              win_width = DEFAULT_WIN_WIDTH;
 static uint32_t              win_height = DEFAULT_WIN_HEIGHT;
 
@@ -154,7 +113,7 @@ static void * client_thread(void * cx);
 static void display_handler();
 static void draw_camera_image(rect_t * cam_pane, int32_t file_idx);
 static void draw_data_values(rect_t * data_pane, int32_t file_idx);
-static char * val2str(char * str, float val, char * trailer_str);
+static char * val2str(char * str, float val);
 static struct data_part2_s * read_data_part2(int32_t file_idx);
 static int getsockaddr(char * node, int port, int socktype, int protcol, struct sockaddr_in * ret_addr);
 static char * sock_addr_to_str(char * s, int slen, struct sockaddr * addr);
@@ -197,7 +156,7 @@ static int32_t initialize(int32_t argc, char ** argv)
          sizeof(data_t), sizeof(struct data_part1_s), sizeof(struct data_part2_s));
 
     // init globals 
-    mode = LIVE;
+    initial_mode = LIVE;
     file_idx_global = -1;
     strcpy(servername, "localhost");
     strcpy(filename, "");
@@ -230,7 +189,7 @@ static int32_t initialize(int32_t argc, char ** argv)
             strcpy(servername, optarg);
             break;
         case 'p':
-            mode = PLAYBACK;
+            initial_mode = PLAYBACK;
             strcpy(filename, optarg);
             break;
         default:
@@ -245,7 +204,7 @@ static int32_t initialize(int32_t argc, char ** argv)
     //     generate the filename
     //   endif
     // endif
-    if (mode == LIVE) {
+    if (initial_mode == LIVE) {
         if (argc > optind) {
             strcpy(filename, argv[optind]);
         } else {
@@ -258,14 +217,14 @@ static int32_t initialize(int32_t argc, char ** argv)
     }
 
     // print mode and filename
-    INFO("mode     = %s\n", MODE_STR(mode));
-    INFO("filename = %s\n", filename);
+    INFO("mode       = %s\n", MODE_STR(initial_mode));
+    INFO("filename   = %s\n", filename);
 
     // if in live mode then
     //   verify filename does not exist
     //   create and init the file  
     // endif
-    if (mode == LIVE) {
+    if (initial_mode == LIVE) {
         // verify filename does not exist
         struct stat stat_buf;
         if (stat(filename, &stat_buf) == 0) {
@@ -299,7 +258,7 @@ static int32_t initialize(int32_t argc, char ** argv)
     // if in playback mode then
     //   verify filename exists
     // endif
-    if (mode == PLAYBACK) {
+    if (initial_mode == PLAYBACK) {
         struct stat stat_buf;
         if (stat(filename, &stat_buf) == -1) {
             ERROR("file %s does not exist, %s\n", filename, strerror(errno));
@@ -308,7 +267,6 @@ static int32_t initialize(int32_t argc, char ** argv)
     }
     
     // open and map filename
-    // YYY msync to sync
     file_fd = open(filename, O_RDWR);
     if (file_fd < 0) {
         ERROR("failed to open %s, %s\n", filename, strerror(errno));
@@ -349,7 +307,7 @@ static int32_t initialize(int32_t argc, char ** argv)
     //   create thread to acquire data from server
     //   wait for first data to be received from server
     // endif
-    if (mode == LIVE) {
+    if (initial_mode == LIVE) {
         int32_t sfd;
 
         // print servername
@@ -404,13 +362,16 @@ static int32_t initialize(int32_t argc, char ** argv)
     //   verify the first entry of the file_data_part1 is valid, and
     //   set file_idx_global
     // endif
-    if (mode == LIVE) {
-        if (file_data_part1[0].magic != MAGIC_DATA) {
-            ERROR("first data invalid magic 0x%lx\n", file_data_part1[0].magic);
+    if (initial_mode == PLAYBACK) {
+        if (file_data_part1[0].magic != MAGIC_DATA_PART1) {
+            ERROR("no data in file %s (0x%lx\n", filename, file_data_part1[0].magic);
             return -1;
         }
         file_idx_global = 0;
     }
+
+    // set current_mode to initial_mode
+    current_mode = initial_mode;
 
     // return success
     return 0;
@@ -440,9 +401,6 @@ static void * client_thread(void * cx)
         FATAL("calloc\n");
     }
 
-    // YYY this is assuming that there are no gaps in the data received
-    //     perhaps that is okay, and just print a warning
-
     while (true) {
         // if file is full then terminate thread
         if (file_idx_global >= MAX_FILE_DATA_PART1) {
@@ -458,7 +416,7 @@ static void * client_thread(void * cx)
                   len, sizeof(data_part1), strerror(errno));
             break;
         }
-        if (data_part1.magic != MAGIC_DATA) {
+        if (data_part1.magic != MAGIC_DATA_PART1) {
             ERROR("recv data_part1 bad magic 0x%lx\n", 
                   data_part1.magic);
             break;
@@ -484,7 +442,7 @@ static void * client_thread(void * cx)
         }
         last_time = data_part1.time;
 
-        // save offset in data_part1
+        // save file offset in data_part1
         data_part1.data_part2_offset = offset;
 
         // write data to file
@@ -499,9 +457,8 @@ static void * client_thread(void * cx)
 
         // update file header, and
         // if live mode then update file_idx_global
-        // YYY mutex ?
         file_hdr->max++;
-        if (mode == LIVE) {
+        if (current_mode == LIVE) {
             file_idx_global = file_hdr->max - 1;
         }
 
@@ -527,8 +484,6 @@ static void display_handler(void)
     char          str[100];
     struct tm   * tm;
     time_t        t;
-    // bool          data_file_full;
-    // int32_t       graph_select;
     int32_t       file_idx;
     int32_t       event_processed_count;
     int32_t       file_idx_last;
@@ -536,7 +491,6 @@ static void display_handler(void)
 
     // initializae 
     quit = false;
-    // graph_select = 1;
     file_idx_last = -1;
     file_max_last = -1;
 
@@ -557,8 +511,15 @@ static void display_handler(void)
 
     // loop until quit
     while (!quit) {
-        // get the file_idx 
+        // get the file_idx, and verify
         file_idx = file_idx_global;
+        if (file_idx < 0 ||
+            file_idx >= file_hdr->max ||
+            file_data_part1[file_idx].magic != MAGIC_DATA_PART1) 
+        {
+            FATAL("invalid file_idx %d, max =%d\n",
+                  file_idx, file_hdr->max);
+        }
 
         // initialize for display update
         sdl_display_init();
@@ -570,13 +531,19 @@ static void display_handler(void)
         sdl_render_pane_border(&graph_pane_full, GREEN);
 
         // draw title line
-        // YYY print the mode
+        if (current_mode == LIVE) {
+            sdl_render_text(&title_pane, 0, 0, 0, "LIVE", GREEN, BLACK);
+        } else {
+            sdl_render_text(&title_pane, 0, 0, 0, "PLAYBACK", RED, BLACK);
+        }
+            
         t = file_data_part1[file_idx].time;
         tm = localtime(&t);
         sprintf(str, "%d/%d/%d %2.2d:%2.2d:%2.2d",
                 tm->tm_mon+1, tm->tm_mday, tm->tm_year-100,
                 tm->tm_hour, tm->tm_min, tm->tm_sec);
-        sdl_render_text(&title_pane, 0, 0, 0, str, WHITE, BLACK);
+        sdl_render_text(&title_pane, 0, 10, 0, str, WHITE, BLACK);
+
         sdl_render_text(&title_pane, 0, -5, 0, "(ESC)", WHITE, BLACK);
         sdl_render_text(&title_pane, 0, -11, 0, "(?)", WHITE, BLACK);
         
@@ -590,14 +557,18 @@ static void display_handler(void)
         // YYY tbd
 
         // register for events   
-        // - quit and help
-        sdl_event_register(SDL_EVENT_KEY_ESC, SDL_EVENT_TYPE_KEY, NULL);
-        sdl_event_register('?', SDL_EVENT_TYPE_KEY, NULL);
-        // - gas select
-        sdl_event_register('g', SDL_EVENT_TYPE_KEY, NULL);
-        // - graph select
-        sdl_event_register('s', SDL_EVENT_TYPE_KEY, NULL);
         // YYY other graph events
+        sdl_event_register(SDL_EVENT_KEY_ESC, SDL_EVENT_TYPE_KEY, NULL);             // quit (esc)
+        sdl_event_register('?', SDL_EVENT_TYPE_KEY, NULL);                           // help
+        sdl_event_register('s', SDL_EVENT_TYPE_KEY, NULL);                           // graph select
+        sdl_event_register(SDL_EVENT_KEY_LEFT_ARROW, SDL_EVENT_TYPE_KEY, NULL);      // cursor
+        sdl_event_register(SDL_EVENT_KEY_RIGHT_ARROW, SDL_EVENT_TYPE_KEY, NULL);
+        sdl_event_register(SDL_EVENT_KEY_CTRL_LEFT_ARROW, SDL_EVENT_TYPE_KEY, NULL);
+        sdl_event_register(SDL_EVENT_KEY_CTRL_RIGHT_ARROW, SDL_EVENT_TYPE_KEY, NULL); 
+        sdl_event_register(SDL_EVENT_KEY_ALT_LEFT_ARROW, SDL_EVENT_TYPE_KEY, NULL);
+        sdl_event_register(SDL_EVENT_KEY_ALT_RIGHT_ARROW, SDL_EVENT_TYPE_KEY, NULL);
+        sdl_event_register(SDL_EVENT_KEY_HOME, SDL_EVENT_TYPE_KEY, NULL);
+        sdl_event_register(SDL_EVENT_KEY_END, SDL_EVENT_TYPE_KEY, NULL);
 
         // present the display
         sdl_display_present();
@@ -612,7 +583,6 @@ static void display_handler(void)
             // get and process event
             event_processed_count++;
             event = sdl_poll_event();
-            // YYY make list of other events
             switch (event->event) {
             case SDL_EVENT_QUIT: case SDL_EVENT_KEY_ESC: 
                 quit = true;
@@ -620,11 +590,49 @@ static void display_handler(void)
             case '?':  
                 sdl_display_text(about);
                 break;
-            case 'g':
-                // YYY
-                break;
             case 's':
                 // YYY
+                break;
+            case SDL_EVENT_KEY_LEFT_ARROW:
+            case SDL_EVENT_KEY_CTRL_LEFT_ARROW:
+            case SDL_EVENT_KEY_ALT_LEFT_ARROW: {
+                int32_t x = file_idx_global;
+                x -= (event->event == SDL_EVENT_KEY_LEFT_ARROW      ? 1 :
+                      event->event == SDL_EVENT_KEY_CTRL_LEFT_ARROW ? 10
+                                                                    : 60);
+                if (x < 0) {
+                    x = 0;
+                }
+                file_idx_global = x;
+                current_mode = PLAYBACK;
+                break; }
+            case SDL_EVENT_KEY_RIGHT_ARROW:
+            case SDL_EVENT_KEY_CTRL_RIGHT_ARROW:
+            case SDL_EVENT_KEY_ALT_RIGHT_ARROW: {
+                int32_t x = file_idx_global;
+                x += (event->event == SDL_EVENT_KEY_RIGHT_ARROW      ? 1 :
+                      event->event == SDL_EVENT_KEY_CTRL_RIGHT_ARROW ? 10
+                                                                     : 60);
+                if (x >= file_hdr->max) {
+                    x = file_hdr->max - 1;
+                    file_idx_global = x;
+                    if (initial_mode == LIVE) {
+                        current_mode = LIVE;
+                    }
+                } else {
+                    file_idx_global = x;
+                    current_mode = PLAYBACK;
+                }
+                break; }
+            case SDL_EVENT_KEY_HOME:
+                file_idx_global = 0;
+                current_mode = PLAYBACK;
+                break;
+            case SDL_EVENT_KEY_END:
+                file_idx_global = file_hdr->max - 1;
+                if (initial_mode == LIVE) {
+                    current_mode = LIVE;
+                }
                 break;
             default:
                 event_processed_count--;
@@ -683,8 +691,7 @@ static void draw_camera_image(rect_t * cam_pane, int32_t file_idx)
     //   display 'no image'
     //   return
     // endif
-    if (file_data_part1[file_idx].magic != MAGIC_DATA ||
-        !file_data_part1[file_idx].data_part2_jpeg_buff_valid ||
+    if (!file_data_part1[file_idx].data_part2_jpeg_buff_valid ||
         (data_part2 = read_data_part2(file_idx)) == NULL)
     {
         errstr = "NO IMAGE";
@@ -717,9 +724,9 @@ static void draw_camera_image(rect_t * cam_pane, int32_t file_idx)
     // return
     return;
 
-    // error
+    // error  
 error:
-    sdl_render_text(cam_pane, 1, 0, 0, errstr, WHITE, BLACK); //YYY center
+    sdl_render_text(cam_pane, 2, 1, 1, errstr, WHITE, BLACK);
     return;
 }
 
@@ -727,52 +734,40 @@ error:
 
 static void draw_data_values(rect_t * data_pane, int32_t file_idx)
 {
-#if 0 // XXX later
-    char str[100];
-    char trailer_str[100];
+    struct data_part1_s * dp1;
+    char str[100], s1[100], s2[100], s3[100];
 
-//YYY call routine to get it
-    if (!data->data_valid) {
-        return;
-    }
-        
-    val2str(str, data->voltage_mean_kv, "kV mean");
+    dp1 = &file_data_part1[file_idx];
+
+    sprintf(str, "KV    %s %s %s",
+            val2str(s1, dp1->voltage_mean_kv),
+            val2str(s2, dp1->voltage_min_kv),
+            val2str(s3, dp1->voltage_max_kv));
     sdl_render_text(data_pane, 0, 0, 1, str, WHITE, BLACK);
 
-    val2str(str, data->voltage_min_kv, "kV min");
+    sprintf(str, "MA    %s",  // YYY add min and max
+            val2str(s1, dp1->current_ma));
     sdl_render_text(data_pane, 1, 0, 1, str, WHITE, BLACK);
 
-    val2str(str, data->voltage_max_kv, "kV max");
+    sprintf(str, "D2 mT %s",
+            val2str(s1, dp1->chamber_pressure_d2_mtorr));
     sdl_render_text(data_pane, 2, 0, 1, str, WHITE, BLACK);
 
-    val2str(str, data->current_ma, "mA");
+    sprintf(str, "N2 mT %s",
+            val2str(s1, dp1->chamber_pressure_n2_mtorr));
     sdl_render_text(data_pane, 3, 0, 1, str, WHITE, BLACK);
-
-    if (data->chamber_pressure_mtorr < 1000 || IS_ERROR(data->chamber_pressure_mtorr)) {
-        sprintf(trailer_str, "mTorr CHMBR %s%s", 
-                gas_get_name(data->gas_id),
-                mode == LIVE_MODE ? "(g)" : "");
-        val2str(str, data->chamber_pressure_mtorr, trailer_str);
-    } else {
-        sprintf(trailer_str, "Torr CHMBR %s%s", 
-                gas_get_name(data->gas_id),
-                mode == LIVE_MODE ? "(g)" : "");
-        val2str(str, data->chamber_pressure_mtorr/1000, trailer_str);
-    }
-    sdl_render_text(data_pane, 4, 0, 1, str, WHITE, BLACK);
-#endif
 }
 
 // -----------------  SUPPORT  ------------------------------------------------------ 
 
-static char * val2str(char * str, float val, char * trailer_str)
+static char * val2str(char * str, float val)
 {
     if (IS_ERROR(val)) {
-        sprintf(str, "%-6s %s", ERROR_TEXT(val), trailer_str);
+        sprintf(str, "%-6s", ERROR_TEXT(val));
     } else if (val < 1000.0) {
-        sprintf(str, "%-6.2f %s", val, trailer_str);
+        sprintf(str, "%-6.2f", val);
     } else {
-        sprintf(str, "%-6.0f %s", val, trailer_str);
+        sprintf(str, "%-6.0f", val);
     }
     return str;
 }
@@ -803,10 +798,7 @@ struct data_part2_s * read_data_part2(int32_t file_idx)
     }
 
     // verify data_part2 exists for specified file_idx
-    if (file_idx < 0 || 
-        file_idx >= file_hdr->max ||
-        file_data_part1[file_idx].magic != MAGIC_DATA ||
-        (dp2_length = file_data_part1[file_idx].data_part2_length) == 0 ||
+    if ((dp2_length = file_data_part1[file_idx].data_part2_length) == 0 ||
         (dp2_offset = file_data_part1[file_idx].data_part2_offset) == 0)
     {
         return NULL;
@@ -820,9 +812,11 @@ struct data_part2_s * read_data_part2(int32_t file_idx)
         return NULL;
     }
 
-    // YYY perhaps data_part2 should have a magic too
-
-    // YYY bad magic should cause pgm to terminate
+    // verify magic value in data_part2
+    if (last_read_data_part2->magic != MAGIC_DATA_PART2) {
+        FATAL("invalid data_part2 magic 0x%lx at file_idx %d\n", 
+              last_read_data_part2->magic, file_idx);
+    }
 
     // remember the file_idx of this read, and
     // return the data_part2

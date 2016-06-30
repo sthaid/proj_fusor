@@ -1,29 +1,3 @@
-/*
-XXX review this, and write the display pgm
-
-main
-- init dataq
-- init mccdaq
-- listen and accept connections
-
-server thread
-  while true
-    gather data and send
-    wait for next second
-  endwhile
-
-The data is:
-  - magic
-  - part1
-    - hv info
-    - current
-    - pressure for both d2 and n2
-    - scaler counts for each channnel, average and moving average
-  - part2
-    - diagnostic voltage values for a 1000? sample interval that can be plotted
-      ( hv, current, pressure, scaler amp out)
-*/
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -270,8 +244,8 @@ static void init_data_struct(data_t * data, time_t time_now)
 
     bzero(data, sizeof(data_t));
 
-    data->part1.magic  = MAGIC_DATA;
-    data->part1.time   = time_now;
+    data->part1.magic = MAGIC_DATA_PART1;
+    data->part1.time  = time_now;
 
     data->part1.voltage_mean_kv = ERROR_NO_VALUE;
     data->part1.voltage_min_kv = ERROR_NO_VALUE;
@@ -283,6 +257,8 @@ static void init_data_struct(data_t * data, time_t time_now)
         data->part1.average_cpm[i] = ERROR_NO_VALUE;
         data->part1.moving_average_cpm[i] = ERROR_NO_VALUE;
     }
+
+    data->part2.magic = MAGIC_DATA_PART2;
 
     //
     // data part1

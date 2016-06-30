@@ -297,7 +297,7 @@ static int32_t initialize(int32_t argc, char ** argv)
     if (file_hdr->magic != MAGIC_FILE ||
         file_hdr->max >= MAX_FILE_DATA_PART1)
     {
-        ERROR("invalid file %s, magic=0x%lx max=%d\n", 
+        ERROR("invalid file %s, magic=0x%"PRIx64" max=%d\n", 
               filename, file_hdr->magic, file_hdr->max);
         return -1;
     }
@@ -364,7 +364,7 @@ static int32_t initialize(int32_t argc, char ** argv)
     // endif
     if (initial_mode == PLAYBACK) {
         if (file_data_part1[0].magic != MAGIC_DATA_PART1) {
-            ERROR("no data in file %s (0x%lx\n", filename, file_data_part1[0].magic);
+            ERROR("no data in file %s (0x%"PRIx64"\n", filename, file_data_part1[0].magic);
             return -1;
         }
         file_idx_global = 0;
@@ -417,7 +417,7 @@ static void * client_thread(void * cx)
             break;
         }
         if (data_part1.magic != MAGIC_DATA_PART1) {
-            ERROR("recv data_part1 bad magic 0x%lx\n", 
+            ERROR("recv data_part1 bad magic 0x%"PRIx64"\n", 
                   data_part1.magic);
             break;
         }
@@ -438,7 +438,7 @@ static void * client_thread(void * cx)
         // check for time increasing by other than 1 second;
         // if so, print warning
         if (last_time != -1 && data_part1.time != last_time + 1) {
-            WARN("time increased by %ld\n", data_part1.time - last_time);
+            WARN("time increased by %"PRId64"\n", data_part1.time - last_time);
         }
         last_time = data_part1.time;
 
@@ -814,7 +814,7 @@ struct data_part2_s * read_data_part2(int32_t file_idx)
 
     // verify magic value in data_part2
     if (last_read_data_part2->magic != MAGIC_DATA_PART2) {
-        FATAL("invalid data_part2 magic 0x%lx at file_idx %d\n", 
+        FATAL("invalid data_part2 magic 0x%"PRIx64" at file_idx %d\n", 
               last_read_data_part2->magic, file_idx);
     }
 

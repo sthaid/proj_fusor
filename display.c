@@ -80,6 +80,8 @@ TODO
 // typedefs
 //
 
+enum mode {LIVE, PLAYBACK};
+
 typedef struct {
     uint64_t magic;
     uint64_t start_time;
@@ -87,7 +89,12 @@ typedef struct {
     uint8_t  reserved[4096-20];
 } file_hdr_t;
 
-enum mode {LIVE, PLAYBACK};
+typedef struct {
+    char  * title;
+    int32_t color;
+    int32_t max_points;
+    point_t points[100000];
+} graph_t;
 
 //
 // variables
@@ -103,6 +110,12 @@ static file_hdr_t          * file_hdr;
 static struct data_part1_s * file_data_part1;
 static int32_t               file_idx_global;
 
+static int32_t               graph_x_origin;
+static int32_t               graph_x_range;
+static int32_t               graph_y_origin;
+static int32_t               graph_y_range;
+static rect_t                graph_pane_global;
+
 //
 // prototypes
 //
@@ -113,6 +126,9 @@ static void * client_thread(void * cx);
 static void display_handler();
 static void draw_camera_image(rect_t * cam_pane, int32_t file_idx);
 static void draw_data_values(rect_t * data_pane, int32_t file_idx);
+static void draw_graph_init(rect_t * graph_pane);
+static void draw_graph1(void);
+static void draw_graph_common(int32_t max_graph, ...);
 static char * val2str(char * str, float val);
 static struct data_part2_s * read_data_part2(int32_t file_idx);
 static int getsockaddr(char * node, int port, int socktype, int protcol, struct sockaddr_in * ret_addr);
@@ -515,6 +531,8 @@ static void display_handler(void)
                   0, FONT0_HEIGHT+CAM_HEIGHT+4,
                   win_width, win_height-(FONT0_HEIGHT+CAM_HEIGHT+4));
 
+    draw_graph_init(&graph_pane);
+
     // loop until quit
     while (!quit) {
         // get the file_idx, and verify
@@ -561,6 +579,7 @@ static void display_handler(void)
 
         // draw the graph
         // YYY tbd
+        draw_graph1();
 
         // register for events   
         // YYY other graph events
@@ -764,6 +783,263 @@ static void draw_data_values(rect_t * data_pane, int32_t file_idx)
     sdl_render_text(data_pane, 3, 0, 1, str, WHITE, BLACK);
 }
 
+// - - - - - - - - -  DISPLAY HANDLER - DRAW GRAPH  - - - - - - - - - - - - - - - - 
+
+static void draw_graph_init(rect_t * graph_pane)
+{
+    graph_pane_global = *graph_pane;
+
+    graph_x_origin = 10;
+    graph_x_range  = 1200;
+    graph_y_origin = graph_pane->h - FONT0_HEIGHT - 4;
+    graph_y_range  = graph_pane->h - FONT0_HEIGHT - 10;
+}
+
+static void draw_graph1(void)
+{
+    draw_graph_common(0);
+}
+
+// XXX tbd
+// - cursor
+static void draw_graph_common(int32_t max_graph, ...)
+{
+    va_list ap;
+    int32_t str_col, i;
+    rect_t rect;
+
+    va_start(ap, max_graph);
+
+    // init
+    str_col = (graph_x_range + graph_x_origin) / FONT0_WIDTH + 6;
+
+    // fill white
+    rect.x = 0;
+    rect.y = 0;
+    rect.w = graph_pane_global.w;
+    rect.h = graph_pane_global.h;
+    sdl_render_fill_rect(&graph_pane_global, &rect, WHITE);
+
+    // loop over the graphs
+    for (i = 0; i < max_graph; i++) {
+        // draw the graph points
+        graph_t * g          = va_arg(ap, graph_t *);
+        point_t * points     = g->points;
+        int32_t   max_points = g->max_points;
+        int32_t   color      = g->color;
+        char    * title      = g->title;
+        while (max_points > 1) {
+            int32_t points_to_render = (max_points > 1000 ? 1000 : max_points);
+            sdl_render_lines(&graph_pane_global, points, points_to_render, color);
+            max_points -= (points_to_render-1);
+            points     += (points_to_render-1);
+        }
+
+        // draw the graph title
+        sdl_render_text(&graph_pane_global, i, str_col, 0, title, color, WHITE);
+    }
+
+    // draw x axis
+    sdl_render_line(&graph_pane_global, 
+                    graph_x_origin, graph_y_origin+1, 
+                    graph_x_origin+graph_x_range, graph_y_origin+1,
+                    BLACK);
+    sdl_render_line(&graph_pane_global, 
+                    graph_x_origin, graph_y_origin+2, 
+                    graph_x_origin+graph_x_range, graph_y_origin+2,
+                    BLACK);
+    sdl_render_line(&graph_pane_global, 
+                    graph_x_origin, graph_y_origin+3, 
+                    graph_x_origin+graph_x_range, graph_y_origin+3,
+                    BLACK);
+
+    // draw y axis
+    sdl_render_line(&graph_pane_global, 
+                    graph_x_origin-1, graph_y_origin+3, 
+                    graph_x_origin-1, graph_y_origin-graph_y_range,
+                    BLACK);
+    sdl_render_line(&graph_pane_global, 
+                    graph_x_origin-2, graph_y_origin+3, 
+                    graph_x_origin-2, graph_y_origin-graph_y_range,
+                    BLACK);
+    sdl_render_line(&graph_pane_global, 
+                    graph_x_origin-3, graph_y_origin+3, 
+                    graph_x_origin-3, graph_y_origin-graph_y_range,
+                    BLACK);
+
+    // draw graph select control
+    sdl_render_text(&graph_pane_global, 0, -3, 0, "(s)", BLACK, WHITE);
+
+    va_end(ap);
+}
+
+#if 0
+#define MAX_GRAPH1_SCALE (sizeof(graph1_scale)/sizeof(graph1_scale[0]))
+
+typedef struct {
+    int32_t span;   // must be multiple of 60
+    int32_t delta;
+} graph1_scale_t;
+
+static int32_t       graph1_scale_idx;
+static graph1_scale_t graph1_scale[] = {
+                            { 60,      1 },    // 1 minute
+                            { 600,     2 },    // 10 minutes
+                            { 3600,   12 },    // 1 hour
+                            { 36000, 120 },    // 10 hours
+                                                };
+
+
+static void draw_graph1(rect_t * graph_pane)
+{
+    #define MAX_GRAPH1_CONFIG (sizeof(graph1_config)/sizeof(graph1_config[0]))
+    static struct graph1_config {
+        char   * name;
+        float    max_value;
+        int32_t  color;
+        off_t    field_offset;
+    } graph1_config[] = {
+        { "kV    : 30 MAX", 30.0, RED, offsetof(data_t, voltage_mean_kv) },
+        { "mA    : 30 MAX", 30.0, GREEN, offsetof(data_t, current_ma) },
+        { "mTorr : 30 MAX", 30.0, BLUE, offsetof(data_t, chamber_pressure_mtorr) },
+                            };
+
+    time_t  graph1_start_time_sec, graph1_end_time_sec;
+    int32_t X_origin, X_pixels, Y_origin, Y_pixels, T_delta, T_span;
+    float   X_pixels_per_sec;
+    int32_t i;
+
+    // sanitize scale_idx
+    while (graph1_scale_idx < 0) {
+        graph1_scale_idx += MAX_GRAPH1_SCALE;
+    }
+    while (graph1_scale_idx >= MAX_GRAPH1_SCALE) {
+        graph1_scale_idx -= MAX_GRAPH1_SCALE;
+    }
+
+    // init
+
+    // determine graph1_start_sec and graph1_end_sec
+    if (mode == LIVE_MODE) {
+        graph1_end_time_sec = cursor_time_sec;
+        graph1_start_time_sec = graph1_end_time_sec - (T_span - 1);
+    } else {
+        graph1_start_time_sec = cursor_time_sec - T_span / 2;
+        graph1_end_time_sec = graph1_start_time_sec + T_span - 1;
+    }
+
+
+    // draw the graph1s
+    for (i = 0; i < MAX_GRAPH1_CONFIG; i++) {
+        #define MAX_POINTS1 1000
+        struct graph1_config * gc;
+        int32_t max_points, idx;
+        point_t points[MAX_POINTS1];
+        time_t  t;
+        float   X, X_delta, Y_scale;
+
+        gc = &graph1_config[i];
+        X = X_origin + X_pixels - 1;
+        X_delta = X_pixels_per_sec * T_delta;
+        Y_scale  = Y_pixels / gc->max_value;
+        max_points = 0;
+
+        for (t = graph1_end_time_sec; t >= graph1_start_time_sec; t -= T_delta) {
+            float value;
+            idx = t - history_start_time_sec;
+            if (idx >= 0 && 
+                idx < MAX_HISTORY && 
+                history[idx].data_valid &&
+                ((value = *(float*)((void*)&history[idx] + gc->field_offset)), !IS_ERROR(value)))
+            {
+                if (value < 0) {
+                    value = 0;
+                } else if (value > gc->max_value) {
+                    value = gc->max_value;
+                }
+                points[max_points].x = X;
+                points[max_points].y = Y_origin - value * Y_scale;
+                max_points++;
+                if (max_points == MAX_POINTS1) {
+                    sdl_render_lines(graph_pane, points, max_points, gc->color);
+                    points[0].x = X;
+                    points[0].y = Y_origin - value * Y_scale;
+                    max_points = 1;
+                }
+            } else {
+                sdl_render_lines(graph_pane, points, max_points, gc->color);
+                max_points = 0;
+            }
+            X -= X_delta;
+        }
+        sdl_render_lines(graph_pane, points, max_points, gc->color);
+    }
+
+
+    // draw cursor
+    int32_t X_cursor = (X_origin + X_pixels - 1) -
+                       (graph1_end_time_sec - cursor_time_sec) * X_pixels_per_sec;
+    sdl_render_line(graph_pane, 
+                    X_cursor, Y_origin,
+                    X_cursor, Y_origin-Y_pixels,
+                    PURPLE);
+    
+    // draw cursor time
+    int32_t str_col;
+    char    str[100];
+    time2str(str, (uint64_t)cursor_time_sec*1000000, false, false, false);
+    str_col = X_cursor/FONT0_WIDTH - 4;
+    if (str_col < 0) {
+        str_col = 0;
+    }
+    sdl_render_text(graph_pane, 
+                    -1, str_col,
+                    0, str, PURPLE, WHITE);
+
+    // draw x axis span time
+    if (T_span/60 < 60) {
+        sprintf(str, "%d MINUTES (+/-)", T_span/60);
+    } else {
+        sprintf(str, "%d HOURS (+/-)", T_span/3600);
+    }
+    str_col = (X_pixels + X_origin) / FONT0_WIDTH + 6;
+    sdl_render_text(graph_pane, 
+                    -1, str_col,
+                    0, str, BLACK, WHITE);
+
+    // draw playback mode controls
+    if (mode == PLAYBACK_MODE) {
+        sdl_render_text(graph_pane, 
+                        -2, str_col,
+                        0, "CURSOR (</>/CTRL/ALT)", BLACK, WHITE);
+    }
+
+
+    // draw graph1 names, and current values
+    for (i = 0; i < MAX_GRAPH1_CONFIG; i++) {
+        char str[100];
+        float value;
+        int32_t idx;
+        struct graph1_config * gc = &graph1_config[i];
+
+        idx = cursor_time_sec - history_start_time_sec;
+        if (idx < 0 || idx >= MAX_HISTORY) {
+            FATAL("idx %d out of range\n", idx);
+        }
+        if (history[idx].data_valid) {
+            value = *(float*)((void*)&history[idx] + gc->field_offset);
+        } else {
+            value = ERROR_NO_VALUE;
+        }
+        val2str(str, value, graph1_config[i].name);
+
+        sdl_render_text(graph_pane, 
+                        i, str_col,
+                        0, str, graph1_config[i].color, WHITE);
+    }
+}
+#endif
+
 // -----------------  SUPPORT  ------------------------------------------------------ 
 
 static char * val2str(char * str, float val)
@@ -799,7 +1075,7 @@ struct data_part2_s * read_data_part2(int32_t file_idx)
 
     // if file_idx is same as last read then return data_part2 from last read
     if (file_idx == last_read_file_idx) {
-        INFO("YYY return cached, file_idx=%d\n", file_idx);
+        // INFO("YYY return cached, file_idx=%d\n", file_idx);
         return last_read_data_part2;
     }
 
@@ -826,7 +1102,7 @@ struct data_part2_s * read_data_part2(int32_t file_idx)
 
     // remember the file_idx of this read, and
     // return the data_part2
-    INFO("YYY return new read data, file_idx=%d\n", file_idx);
+    // INFO("YYY return new read data, file_idx=%d\n", file_idx);
     last_read_file_idx = file_idx;
     return last_read_data_part2;
 }

@@ -1,3 +1,5 @@
+#define _FILE_OFFSET_BITS 64
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -36,7 +38,7 @@
 // variables
 //
 
-uint8_t       * jpeg_buff;
+uint8_t         jpeg_buff[1000000];
 int32_t         jpeg_buff_len;
 uint64_t        jpeg_buff_us;
 pthread_mutex_t jpeg_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -73,9 +75,12 @@ static void init(void)
     rl.rlim_max = RLIM_INFINITY;
     setrlimit(RLIMIT_CORE, &rl);
 
+    INFO("sizeof data_t=%zd part1=%zd part2=%zd\n",
+         sizeof(data_t), sizeof(struct data_part1_s), sizeof(struct data_part2_s));
+
     if (cam_init(CAM_WIDTH, CAM_HEIGHT, FRAMES_PER_SEC) == 0) {
-        if (pthread_create(&thread, NULL, server_thread, NULL) != 0) {
-            FATAL("pthread_create server_thread, %s\n", strerror(errno));
+        if (pthread_create(&thread, NULL, cam_thread, NULL) != 0) {
+            FATAL("pthread_create cam_thread, %s\n", strerror(errno));
         }
     }
 

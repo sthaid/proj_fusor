@@ -28,6 +28,8 @@ all: $(TARGETS)
 
 get_data: $(OBJ_GET_DATA) 
 	$(CC) -pthread -lrt -lm -o $@ $(OBJ_GET_DATA)
+	sudo chown root:root $@
+	sudo chmod 4777 $@
 
 display: $(OBJ_DISPLAY) 
 	$(CC) -pthread -lrt -lm -lpng -ljpeg -lSDL2 -lSDL2_ttf -lSDL2_mixer -o $@ $(OBJ_DISPLAY)

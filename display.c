@@ -158,7 +158,7 @@ static int32_t initialize(int32_t argc, char ** argv)
     // init globals 
     initial_mode = LIVE;
     file_idx_global = -1;
-    strcpy(servername, "localhost");
+    strcpy(servername, "rpi_data");
     strcpy(filename, "");
  
     // parse options
@@ -427,11 +427,17 @@ static void * client_thread(void * cx)
             break;
         }
 
-        // read data part2 from server
+        // read data part2 from server,
+        // verify magic
         len = recv(sfd, data_part2, data_part1.data_part2_length, MSG_WAITALL);
         if (len != data_part1.data_part2_length) {
             ERROR("recv data_part2 len=%d exp=%d, %s\n",
                   len, data_part1.data_part2_length, strerror(errno));
+            break;
+        }
+        if (data_part2->magic != MAGIC_DATA_PART2) {
+            ERROR("recv data_part2 bad magic 0x%lx\n", 
+                  data_part2->magic);
             break;
         }
 

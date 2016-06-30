@@ -127,8 +127,9 @@ static void display_handler();
 static void draw_camera_image(rect_t * cam_pane, int32_t file_idx);
 static void draw_data_values(rect_t * data_pane, int32_t file_idx);
 static void draw_graph_init(rect_t * graph_pane);
-static void draw_graph1(void);
-static void draw_graph_common(int32_t max_graph, ...);
+static void draw_graph1(int32_t file_idx);
+static void draw_graph_common( char * x_axis_title, int32_t cursor_x, char * cursor_str, 
+    int32_t max_graph, ...);
 static char * val2str(char * str, float val);
 static struct data_part2_s * read_data_part2(int32_t file_idx);
 static int getsockaddr(char * node, int port, int socktype, int protcol, struct sockaddr_in * ret_addr);
@@ -579,7 +580,7 @@ static void display_handler(void)
 
         // draw the graph
         // YYY tbd
-        draw_graph1();
+        draw_graph1(file_idx);
 
         // register for events   
         // YYY other graph events
@@ -795,14 +796,42 @@ static void draw_graph_init(rect_t * graph_pane)
     graph_y_range  = graph_pane->h - FONT0_HEIGHT - 10;
 }
 
-static void draw_graph1(void)
+static void draw_graph1(int32_t file_idx)
 {
-    draw_graph_common(0);
+    uint64_t graph_end_time_sec, graph_start_time_sec;
+    uint64_t cursor_time_sec;
+    int32_t  cursor_x;
+    char     cursor_str[100];
+    int32_t  x_time_span_sec;
+    float    x_pixels_per_sec;
+
+    // init
+    x_time_span_sec = 60;
+    x_pixels_per_sec = (float)graph_x_range / x_time_span_sec;
+    cursor_time_sec = file_data_part1[file_idx].time;
+
+    // init graph1_start_sec and graph1_end_sec
+    if (current_mode == LIVE) {
+        graph_end_time_sec = cursor_time_sec;
+        graph_start_time_sec = graph_end_time_sec - (x_time_span_sec - 1);
+    } else {
+        graph_start_time_sec = cursor_time_sec - x_time_span_sec / 2;
+        graph_end_time_sec = graph_start_time_sec + x_time_span_sec - 1;
+    }
+
+    // init cursor position and string
+    cursor_x = (graph_x_origin + graph_x_range - 1) -
+               (graph_end_time_sec - cursor_time_sec) * x_pixels_per_sec;
+    time2str(cursor_str, cursor_time_sec*1000000, false, false, false);
+
+    // draw the graph
+    draw_graph_common("X AXIS TITLE", cursor_x, cursor_str, 0);
 }
 
 // XXX tbd
 // - cursor
-static void draw_graph_common(int32_t max_graph, ...)
+static void draw_graph_common( char * x_axis_title, int32_t cursor_x, char * cursor_str, 
+    int32_t max_graph, ...)
 {
     va_list ap;
     int32_t str_col, i;
@@ -866,6 +895,23 @@ static void draw_graph_common(int32_t max_graph, ...)
                     graph_x_origin-3, graph_y_origin+3, 
                     graph_x_origin-3, graph_y_origin-graph_y_range,
                     BLACK);
+
+    // draw cursor, and cursor_str
+    if (cursor_x >= 0) {
+        sdl_render_line(&graph_pane_global,
+                        cursor_x, graph_y_origin,
+                        cursor_x, graph_y_origin-graph_y_range,
+                        PURPLE);
+    }
+    if (cursor_str != NULL) {
+        int32_t cursor_str_col = cursor_x/FONT0_WIDTH - strlen(cursor_str)/2;
+        if (cursor_str_col < 0) {
+            cursor_str_col = 0;
+        }
+        sdl_render_text(&graph_pane_global,
+                        -1, cursor_str_col,
+                        0, cursor_str, PURPLE, WHITE);
+    }
 
     // draw graph select control
     sdl_render_text(&graph_pane_global, 0, -3, 0, "(s)", BLACK, WHITE);

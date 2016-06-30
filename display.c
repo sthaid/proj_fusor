@@ -436,7 +436,7 @@ static void * client_thread(void * cx)
             break;
         }
         if (data_part2->magic != MAGIC_DATA_PART2) {
-            ERROR("recv data_part2 bad magic 0x%lx\n", 
+            ERROR("recv data_part2 bad magic 0x%"PRIx64"\n", 
                   data_part2->magic);
             break;
         }

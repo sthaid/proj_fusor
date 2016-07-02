@@ -16,6 +16,7 @@ TODO
   - D2 vs N2 select - changes which fields is displayed and which field is shown on the main graph
 - msync to sync
 - XXX use int for data
+- XXX use name display.dat instead of fusor.dat
 #endif
 
 #define _FILE_OFFSET_BITS 64
@@ -78,6 +79,9 @@ TODO
 
 #define DEFAULT_WIN_WIDTH   1920
 #define DEFAULT_WIN_HEIGHT  1000
+
+// #define JPEG_BUFF_SAMPLE_CREATE_ENABLE
+#define JPEG_BUFF_SAMPLE_FILENAME "jpeg_buff_sample.bin"
 
 //
 // typedefs
@@ -357,7 +361,7 @@ static int32_t initialize(int32_t argc, char ** argv)
 
     // verify file header
     if (file_hdr->magic != MAGIC_FILE ||
-        file_hdr->max >= MAX_FILE_DATA_PART1)
+        file_hdr->max > MAX_FILE_DATA_PART1)
     {
         ERROR("invalid file %s, magic=0x%"PRIx64" max=%d\n", 
               filename, file_hdr->magic, file_hdr->max);
@@ -532,6 +536,25 @@ static void * client_thread(void * cx)
         INFO("XXX max=%d idx_global=%d\n", file_hdr->max, file_idx_global);
 
         // YYY keep cache copy of data part2 
+
+#ifdef JPEG_BUFF_SAMPLE_CREATE_ENABLE
+        // write a sample jpeg buffer to jpeg_buff_sample file
+        static bool sample_written = false;
+        if (!sample_written) {
+            int32_t fd = open(JPEG_BUFF_SAMPLE_FILENAME, O_CREAT|O_TRUNC|O_RDWR, 0666);
+            if (fd < 0) {
+                ERROR("open %s, %s\n", JPEG_BUFF_SAMPLE_FILENAME, strerror(errno));
+            } else {
+                int32_t len = write(fd, data_part2->jpeg_buff, data_part2->jpeg_buff_len);
+                if (len != data_part2->jpeg_buff_len) {
+                    ERROR("write %s len exp=%d act=%d, %s\n",
+                        JPEG_BUFF_SAMPLE_FILENAME, data_part2->jpeg_buff_len, len, strerror(errno));
+                }
+                close(fd);
+            }
+            sample_written = true;
+        }
+#endif
     }
 
     // YYY set error indicator here 
@@ -1206,22 +1229,35 @@ static void draw_graph1(rect_t * graph_pane)
 static int32_t generate_test_file(void) 
 {
     time_t                t;
-    uint8_t             * jpeg_buff;
+    uint8_t               jpeg_buff[200000];
     uint32_t              jpeg_buff_len;
     uint64_t              dp2_offset;
-    int32_t               len, idx, i;
+    int32_t               len, idx, i, fd;
     struct data_part1_s * dp1;
     struct data_part2_s * dp2;
 
     INFO("starting ...\n");
 
+    // init
     t = time(NULL);
-    jpeg_buff = NULL; // XXX
-    jpeg_buff_len = 0;
     dp2_offset = FILE_DATA_PART2_OFFSET;
     dp2 = calloc(1, MAX_DATA_PART2_LENGTH);
     if (dp2 == NULL) {
         FATAL("calloc\n");
+    }
+
+    // init jpeg_buff from jpeg_buff_sample.bin file, if it exists
+    fd = open(JPEG_BUFF_SAMPLE_FILENAME, O_RDONLY);
+    if (fd < 0) {
+        WARN("open %s, %s\n", JPEG_BUFF_SAMPLE_FILENAME, strerror(errno));
+        jpeg_buff_len = 0;
+    } else {
+        jpeg_buff_len = read(fd, jpeg_buff, sizeof(jpeg_buff));
+        if (jpeg_buff_len <= 0) {
+            WARN("read %s len=%d, %s\n", JPEG_BUFF_SAMPLE_FILENAME, jpeg_buff_len, strerror(errno));
+            jpeg_buff_len = 0;
+        }
+        close(fd);
     }
 
     // file data

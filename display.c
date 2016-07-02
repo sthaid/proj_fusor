@@ -15,8 +15,7 @@ TODO
   - When in Playback display RECORDED-DATA in RED, else LIVE-DATA in GREEN
   - D2 vs N2 select - changes which fields is displayed and which field is shown on the main graph
 - msync to sync
-- XXX use int for data
-- XXX use name display.dat instead of fusor.dat
+- YYY use int for data ???
 #endif
 
 #define _FILE_OFFSET_BITS 64
@@ -62,7 +61,7 @@ TODO
 
 #define MAGIC_FILE 0x1122334455667788   // XXX magics could incorporte sizeof data1/2
 
-#define MAX_FILE_DATA_PART1   100000  // XXX maybe make this 1 day
+#define MAX_FILE_DATA_PART1   86400   // 1 day
 #define MAX_DATA_PART2_LENGTH 1000000
 #define MAX_GRAPH             1
 #define MAX_GRAPH_POINTS      100000
@@ -140,7 +139,7 @@ static void draw_camera_image(rect_t * cam_pane, int32_t file_idx);
 static void draw_data_values(rect_t * data_pane, int32_t file_idx);
 static void draw_graph_init(rect_t * graph_pane);
 static void draw_graph0(int32_t file_idx);
-static void draw_graph_common( char * info_str, int32_t cursor_x, char * cursor_str, 
+static void draw_graph_common(char * title_str, char * info_str, int32_t cursor_x, char * cursor_str, 
     int32_t max_graph, ...);
 static int32_t generate_test_file(void);
 static char * val2str(char * str, float val);
@@ -533,7 +532,6 @@ static void * client_thread(void * cx)
         if (current_mode == LIVE) {
             file_idx_global = file_hdr->max - 1;
         }
-        INFO("XXX max=%d idx_global=%d\n", file_hdr->max, file_idx_global);
 
         // YYY keep cache copy of data part2 
 
@@ -584,7 +582,7 @@ static int32_t display_handler(void)
     quit = false;
     file_max_last = -1;
 
-    sdl_init(win_width, win_height);  // XXX check status here
+    sdl_init(win_width, win_height);  // YYY check status here
 
     sdl_init_pane(&title_pane_full, &title_pane, 
                   0, 0, 
@@ -612,7 +610,7 @@ static int32_t display_handler(void)
             FATAL("invalid file_idx %d, max =%d\n",
                   file_idx, file_hdr->max);
         }
-        INFO("XXX file_idx %d\n", file_idx);
+        INFO("YYY file_idx %d\n", file_idx);
 
         // initialize for display update
         sdl_display_init();
@@ -676,10 +674,11 @@ static int32_t display_handler(void)
         sdl_display_present();
 
         // loop until
-        // - at least one event has been processed AND current event is none, OR
-        // - file index that is currently displayed is not file_idx_global
-        // - file max has changed
-        // - quit flag is set
+        // 1- quit flag is set, OR
+        // 2- (there is no current event) AND
+        //    ((at least one event has been processed) OR
+        //     (file index that is currently displayed is not file_idx_global) OR
+        //     (file max has changed))
         event_processed_count = 0;
         while (true) {
             // get and process event
@@ -693,7 +692,7 @@ static int32_t display_handler(void)
                 sdl_display_text(about);
                 break;
             case 's':
-                graph_select = 0; // XXX
+                graph_select = (graph_select + 1) % MAX_GRAPH;  
                 break;
             case SDL_EVENT_KEY_LEFT_ARROW:
             case SDL_EVENT_KEY_CTRL_LEFT_ARROW:
@@ -748,12 +747,11 @@ static int32_t display_handler(void)
             }
 
             // test if should break out of this loop
-            // XXX update comment
-            if ((event->event == SDL_EVENT_NONE) &&
-                ((event_processed_count > 0) ||
-                 (file_idx != file_idx_global) ||
-                 (file_hdr->max != file_max_last) ||
-                 (quit)))
+            if ((quit) ||
+                ((event->event == SDL_EVENT_NONE) &&
+                 ((event_processed_count > 0) ||
+                  (file_idx != file_idx_global) ||
+                  (file_hdr->max != file_max_last))))
             {
                 INFO("epc=%d  file_idx_global/file_idx=%d %d  max/last= %d %d  \n\n",  
                    event_processed_count, file_idx_global, file_idx, file_hdr->max, file_max_last);
@@ -879,26 +877,50 @@ static void draw_graph_init(rect_t * graph_pane)
     graph_x_origin = 10;
     graph_x_range  = 1200;
     graph_y_origin = graph_pane->h - FONT0_HEIGHT - 4;
-    graph_y_range  = graph_pane->h - FONT0_HEIGHT - 10;
+    graph_y_range  = graph_pane->h - FONT0_HEIGHT - 4 - FONT0_HEIGHT;
 }
 
+// XXX check how long it takes to run this routine for 86400 points on rpi
 static void draw_graph0(int32_t file_idx)
 {
-    int32_t  file_idx_start, file_idx_end, idx;
+    int32_t  file_idx_start, file_idx_end;
     uint64_t cursor_time_sec;
     int32_t  cursor_x;
     char     cursor_str[100], info_str[100], str[100];
     int32_t  x_time_span_sec;
     float    x_pixels_per_sec;
-    float    x;
-    float    y_max;
 
-    // XXX check how long it takes to run this routine for 86400 points
     static int32_t x_time_span_sec_tbl[] = {60, 600, 3600, 86400};
-    static graph_t g_kv;
+    static graph_t g_kv, g_ma, g_mtorr;
 
     #define MAX_X_TIME_SPAN_SEC_TBL \
         (sizeof(x_time_span_sec_tbl) / sizeof(x_time_span_sec_tbl[0]))
+
+    #define INIT_GRAPH(_graph, _title_name, _field_name, _color, _val_max) \
+        do { \
+            float   x; \
+            int32_t idx; \
+            sprintf((_graph)->title, "%s %6s : %.0f MAX", \
+                    val2str(str, file_data_part1[file_idx]._field_name), \
+                    _title_name, \
+                    (float)(_val_max)); \
+            (_graph)->color = (_color); \
+            (_graph)->max_points = 0; \
+            x = graph_x_origin + graph_x_range - 1; \
+            for (idx = file_idx_end; idx >= file_idx_start; idx--) { \
+                float tmp = (graph_y_range / (float)(_val_max)); \
+                if (idx >= 0 &&  \
+                    idx < file_hdr->max && \
+                    !IS_ERROR(file_data_part1[idx]._field_name)) \
+                { \
+                    point_t * p = &(_graph)->points[(_graph)->max_points]; \
+                    p->x = x; \
+                    p->y = graph_y_origin - tmp * file_data_part1[idx]._field_name; \
+                    (_graph)->max_points++; \
+                } \
+                x -= x_pixels_per_sec; \
+            } \
+        } while (0)
 
     // sanitize graph_scale_idx[0]
     if (graph_scale_idx[0] < 0) {
@@ -925,29 +947,9 @@ static void draw_graph0(int32_t file_idx)
     // - voltage_mean_kv 
     // - current_ma 
     // - chamber_pressure_d2_mtorr 
-    // YYY check that max_points isn't too big
-    // YYY args   30.0, "kv", voltage_mean_kv, g_kv, RED
-    y_max = 30.0;
-    sprintf(g_kv.title, "%s %6s : %.0f MAX",
-            val2str(str, file_data_part1[file_idx].voltage_mean_kv),
-            "kV",
-            y_max);
-    g_kv.color = RED;
-    g_kv.max_points = 0;
-    x = graph_x_origin + graph_x_range - 1;
-    for (idx = file_idx_end; idx >= file_idx_start; idx--) {
-        if (idx >= 0 && 
-            idx < file_hdr->max &&
-            !IS_ERROR(file_data_part1[idx].voltage_mean_kv))
-        {
-            point_t * p = &g_kv.points[g_kv.max_points];
-            p->x = x;
-            p->y = graph_y_origin - (graph_y_range / y_max) * file_data_part1[idx].voltage_mean_kv;
-            g_kv.max_points++;
-        }
-        x -= x_pixels_per_sec;
-    }
-    INFO("XXX max_points  %d\n", g_kv.max_points);
+    INIT_GRAPH(&g_kv, "kV", voltage_mean_kv, RED, 30);
+    INIT_GRAPH(&g_ma, "mA", current_ma, GREEN, 30);
+    INIT_GRAPH(&g_mtorr, "mTorr", chamber_pressure_d2_mtorr, BLUE, 30);
 
     // init info_str
     sprintf(info_str, "X-SPAN %d SEC  (-/+)", x_time_span_sec);
@@ -960,20 +962,29 @@ static void draw_graph0(int32_t file_idx)
     time2str(cursor_str, cursor_time_sec*1000000, false, false, false);
 
     // draw the graph
-    draw_graph_common(info_str, cursor_x, cursor_str, 1, &g_kv);
+    draw_graph_common("SUMMARY", info_str, cursor_x, cursor_str, 3, &g_kv, &g_ma, &g_mtorr);
 }
 
-static void draw_graph_common( char * info_str, int32_t cursor_x, char * cursor_str, 
+static void draw_graph_common(char * title_str, char * info_str, int32_t cursor_x, char * cursor_str, 
     int32_t max_graph, ...)
 {
     va_list ap;
-    int32_t str_col, i;
+    int32_t title_str_col=0, info_str_col=0, cursor_str_col=0;
+    int32_t i;
     rect_t rect;
 
     va_start(ap, max_graph);
 
-    // init
-    str_col = (graph_x_range + graph_x_origin) / FONT0_WIDTH + 6;
+    // init string column locations
+    if (title_str) {
+        title_str_col = (graph_x_origin + graph_x_range/2) / FONT0_WIDTH - strlen(title_str)/2;
+    }
+    if (info_str) {
+        info_str_col = (graph_x_range + graph_x_origin) / FONT0_WIDTH + 6;
+    }
+    if (cursor_x >= 0) {
+        cursor_str_col = cursor_x/FONT0_WIDTH - strlen(cursor_str)/2;
+    }
 
     // fill white
     rect.x = 0;
@@ -998,7 +1009,7 @@ static void draw_graph_common( char * info_str, int32_t cursor_x, char * cursor_
         }
 
         // draw the graph title
-        sdl_render_text(&graph_pane_global, i, str_col, 0, title, color, WHITE);
+        sdl_render_text(&graph_pane_global, i+1, info_str_col, 0, title, color, WHITE);
     }
 
     // draw x axis
@@ -1037,19 +1048,20 @@ static void draw_graph_common( char * info_str, int32_t cursor_x, char * cursor_
                         PURPLE);
     }
     if (cursor_str != NULL) {
-        int32_t cursor_str_col = cursor_x/FONT0_WIDTH - strlen(cursor_str)/2;
-        if (cursor_str_col < 0) {
-            cursor_str_col = 0;
-        }
         sdl_render_text(&graph_pane_global,
                         -1, cursor_str_col,
                         0, cursor_str, PURPLE, WHITE);
     }
 
-    // draw info_str
+    // draw title_str, and info_str
+    if (title_str != NULL) {
+        sdl_render_text(&graph_pane_global,
+                        0, title_str_col,
+                        0, title_str, BLACK, WHITE);
+    }
     if (info_str != NULL) {
         sdl_render_text(&graph_pane_global,
-                        -1, str_col,
+                        -1, info_str_col,
                         0, info_str, BLACK, WHITE);
     }
 
@@ -1058,173 +1070,6 @@ static void draw_graph_common( char * info_str, int32_t cursor_x, char * cursor_
 
     va_end(ap);
 }
-
-#if 0  //XXX del
-#define MAX_GRAPH1_SCALE (sizeof(graph1_scale)/sizeof(graph1_scale[0]))
-
-typedef struct {
-    int32_t span;   // must be multiple of 60
-    int32_t delta;
-} graph1_scale_t;
-
-static int32_t       graph1_scale_idx;
-static graph1_scale_t graph1_scale[] = {
-                            { 60,      1 },    // 1 minute
-                            { 600,     2 },    // 10 minutes
-                            { 3600,   12 },    // 1 hour
-                            { 36000, 120 },    // 10 hours
-                                                };
-
-
-static void draw_graph1(rect_t * graph_pane)
-{
-    #define MAX_GRAPH1_CONFIG (sizeof(graph1_config)/sizeof(graph1_config[0]))
-    static struct graph1_config {
-        char   * name;
-        float    max_value;
-        int32_t  color;
-        off_t    field_offset;
-    } graph1_config[] = {
-        { "kV    : 30 MAX", 30.0, RED, offsetof(data_t, voltage_mean_kv) },
-        { "mA    : 30 MAX", 30.0, GREEN, offsetof(data_t, current_ma) },
-        { "mTorr : 30 MAX", 30.0, BLUE, offsetof(data_t, chamber_pressure_mtorr) },
-                            };
-
-    time_t  graph1_start_time_sec, graph1_end_time_sec;
-    int32_t X_origin, X_pixels, Y_origin, Y_pixels, T_delta, T_span;
-    float   X_pixels_per_sec;
-    int32_t i;
-
-    // sanitize scale_idx
-    while (graph1_scale_idx < 0) {
-        graph1_scale_idx += MAX_GRAPH1_SCALE;
-    }
-    while (graph1_scale_idx >= MAX_GRAPH1_SCALE) {
-        graph1_scale_idx -= MAX_GRAPH1_SCALE;
-    }
-
-    // init
-
-    // determine graph1_start_sec and graph1_end_sec
-    if (mode == LIVE_MODE) {
-        graph1_end_time_sec = cursor_time_sec;
-        graph1_start_time_sec = graph1_end_time_sec - (T_span - 1);
-    } else {
-        graph1_start_time_sec = cursor_time_sec - T_span / 2;
-        graph1_end_time_sec = graph1_start_time_sec + T_span - 1;
-    }
-
-
-    // draw the graph1s
-    for (i = 0; i < MAX_GRAPH1_CONFIG; i++) {
-        #define MAX_POINTS1 1000
-        struct graph1_config * gc;
-        int32_t max_points, idx;
-        point_t points[MAX_POINTS1];
-        time_t  t;
-        float   X, X_delta, Y_scale;
-
-        gc = &graph1_config[i];
-        X = X_origin + X_pixels - 1;
-        X_delta = X_pixels_per_sec * T_delta;
-        Y_scale  = Y_pixels / gc->max_value;
-        max_points = 0;
-
-        for (t = graph1_end_time_sec; t >= graph1_start_time_sec; t -= T_delta) {
-            float value;
-            idx = t - history_start_time_sec;
-            if (idx >= 0 && 
-                idx < MAX_HISTORY && 
-                history[idx].data_valid &&
-                ((value = *(float*)((void*)&history[idx] + gc->field_offset)), !IS_ERROR(value)))
-            {
-                if (value < 0) {
-                    value = 0;
-                } else if (value > gc->max_value) {
-                    value = gc->max_value;
-                }
-                points[max_points].x = X;
-                points[max_points].y = Y_origin - value * Y_scale;
-                max_points++;
-                if (max_points == MAX_POINTS1) {
-                    sdl_render_lines(graph_pane, points, max_points, gc->color);
-                    points[0].x = X;
-                    points[0].y = Y_origin - value * Y_scale;
-                    max_points = 1;
-                }
-            } else {
-                sdl_render_lines(graph_pane, points, max_points, gc->color);
-                max_points = 0;
-            }
-            X -= X_delta;
-        }
-        sdl_render_lines(graph_pane, points, max_points, gc->color);
-    }
-
-
-    // draw cursor
-    int32_t X_cursor = (X_origin + X_pixels - 1) -
-                       (graph1_end_time_sec - cursor_time_sec) * X_pixels_per_sec;
-    sdl_render_line(graph_pane, 
-                    X_cursor, Y_origin,
-                    X_cursor, Y_origin-Y_pixels,
-                    PURPLE);
-    
-    // draw cursor time
-    int32_t str_col;
-    char    str[100];
-    time2str(str, (uint64_t)cursor_time_sec*1000000, false, false, false);
-    str_col = X_cursor/FONT0_WIDTH - 4;
-    if (str_col < 0) {
-        str_col = 0;
-    }
-    sdl_render_text(graph_pane, 
-                    -1, str_col,
-                    0, str, PURPLE, WHITE);
-
-    // draw x axis span time
-    if (T_span/60 < 60) {
-        sprintf(str, "%d MINUTES (+/-)", T_span/60);
-    } else {
-        sprintf(str, "%d HOURS (+/-)", T_span/3600);
-    }
-    str_col = (X_pixels + X_origin) / FONT0_WIDTH + 6;
-    sdl_render_text(graph_pane, 
-                    -1, str_col,
-                    0, str, BLACK, WHITE);
-
-    // draw playback mode controls
-    if (mode == PLAYBACK_MODE) {
-        sdl_render_text(graph_pane, 
-                        -2, str_col,
-                        0, "CURSOR (</>/CTRL/ALT)", BLACK, WHITE);
-    }
-
-
-    // draw graph1 names, and current values
-    for (i = 0; i < MAX_GRAPH1_CONFIG; i++) {
-        char str[100];
-        float value;
-        int32_t idx;
-        struct graph1_config * gc = &graph1_config[i];
-
-        idx = cursor_time_sec - history_start_time_sec;
-        if (idx < 0 || idx >= MAX_HISTORY) {
-            FATAL("idx %d out of range\n", idx);
-        }
-        if (history[idx].data_valid) {
-            value = *(float*)((void*)&history[idx] + gc->field_offset);
-        } else {
-            value = ERROR_NO_VALUE;
-        }
-        val2str(str, value, graph1_config[i].name);
-
-        sdl_render_text(graph_pane, 
-                        i, str_col,
-                        0, str, graph1_config[i].color, WHITE);
-    }
-}
-#endif
 
 // -----------------  GENERATE TEST FILE----------------------------------------------
 
@@ -1286,7 +1131,7 @@ static int32_t generate_test_file(void)
         dp2->magic = MAGIC_DATA_PART2;
         memcpy(dp2->jpeg_buff, jpeg_buff, jpeg_buff_len);
         dp2->jpeg_buff_len = jpeg_buff_len;
-        // XXX more dp2 fields
+        // YYY more dp2 fields
 
         len = pwrite(file_fd, dp2, dp1->data_part2_length, dp2_offset);
         if (len != dp1->data_part2_length) {

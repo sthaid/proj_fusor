@@ -111,7 +111,7 @@ static void sdl_set_color(int32_t color);
 
 // -----------------  SDL INIT & CLOSE  --------------------------------- 
 
-void sdl_init(uint32_t w, uint32_t h)
+int32_t sdl_init(uint32_t w, uint32_t h)
 {
     #define SDL_FLAGS SDL_WINDOW_RESIZABLE
 
@@ -120,12 +120,14 @@ void sdl_init(uint32_t w, uint32_t h)
 
     // initialize Simple DirectMedia Layer  (SDL)
     if (SDL_Init(SDL_INIT_VIDEO|SDL_INIT_AUDIO) < 0) {
-        FATAL("SDL_Init failed\n");
+        ERROR("SDL_Init failed\n");
+        return -1;
     }
 
     // create SDL Window and Renderer
     if (SDL_CreateWindowAndRenderer(w, h, SDL_FLAGS, &sdl_window, &sdl_renderer) != 0) {
-        FATAL("SDL_CreateWindowAndRenderer failed\n");
+        ERROR("SDL_CreateWindowAndRenderer failed\n");
+        return -1;
     }
     SDL_GetWindowSize(sdl_window, &sdl_win_width, &sdl_win_height);
     INFO("sdl_win_width=%d sdl_win_height=%d\n", sdl_win_width, sdl_win_height);
@@ -137,7 +139,8 @@ void sdl_init(uint32_t w, uint32_t h)
     } else {
         sdl_button_sound = Mix_QuickLoad_WAV(button_sound_wav);
         if (sdl_button_sound == NULL) {
-            FATAL("Mix_QuickLoadWAV failed\n");
+            ERROR("Mix_QuickLoadWAV failed\n");
+            return -1;
         }
         Mix_VolumeChunk(sdl_button_sound,MIX_MAX_VOLUME/2);
     }
@@ -145,7 +148,8 @@ void sdl_init(uint32_t w, uint32_t h)
 
     // initialize True Type Font
     if (TTF_Init() < 0) {
-        FATAL("TTF_Init failed\n");
+        ERROR("TTF_Init failed\n");
+        return -1;
     }
 
     font0_path = "fonts/FreeMonoBold.ttf";         // normal 
@@ -155,11 +159,13 @@ void sdl_init(uint32_t w, uint32_t h)
 
     sdl_font[0].font = TTF_OpenFont(font0_path, font0_ptsize);
     if (sdl_font[0].font == NULL) {
-        FATAL("failed TTF_OpenFont %s\n", font0_path);
+        ERROR("failed TTF_OpenFont %s\n", font0_path);
+        return -1;
     }
     sdl_font[0].font_underline = TTF_OpenFont(font0_path, font0_ptsize);
     if (sdl_font[0].font == NULL) {
-        FATAL("failed TTF_OpenFont %s\n", font0_path);
+        ERROR("failed TTF_OpenFont %s\n", font0_path);
+        return -1;
     }
     TTF_SizeText(sdl_font[0].font, "X", &sdl_font[0].char_width, &sdl_font[0].char_height);
     TTF_SetFontStyle(sdl_font[0].font_underline, TTF_STYLE_UNDERLINE|TTF_STYLE_BOLD);
@@ -168,11 +174,13 @@ void sdl_init(uint32_t w, uint32_t h)
 
     sdl_font[1].font = TTF_OpenFont(font1_path, font1_ptsize);
     if (sdl_font[1].font == NULL) {
-        FATAL("failed TTF_OpenFont %s\n", font1_path);
+        ERROR("failed TTF_OpenFont %s\n", font1_path);
+        return -1;
     }
     sdl_font[1].font_underline = TTF_OpenFont(font1_path, font1_ptsize);
     if (sdl_font[1].font == NULL) {
-        FATAL("failed TTF_OpenFont %s\n", font1_path);
+        ERROR("failed TTF_OpenFont %s\n", font1_path);
+        return -1;
     }
     TTF_SizeText(sdl_font[1].font, "X", &sdl_font[1].char_width, &sdl_font[1].char_height);
     TTF_SetFontStyle(sdl_font[1].font_underline, TTF_STYLE_UNDERLINE|TTF_STYLE_BOLD);
@@ -182,8 +190,9 @@ void sdl_init(uint32_t w, uint32_t h)
     // register exit handler
     atexit(sdl_exit_handler);
 
-    // print success
+    // return success
     INFO("success\n");
+    return 0;
 }
 
 static void sdl_exit_handler(void)
@@ -779,7 +788,8 @@ void sdl_render_text_with_event(rect_t * pane, int32_t row, int32_t col, int32_t
         surface = TTF_RenderText_Shaded(sdl_font[font_id].font_underline, str, fg_sdl_color, bg_sdl_color);
     }
     if (surface == NULL) { 
-        FATAL("TTF_RenderText_Shaded returned NULL\n");
+        ERROR("TTF_RenderText_Shaded returned NULL\n");
+        return;
     }
 
     // determine the display location

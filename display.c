@@ -15,7 +15,6 @@ TODO
   - When in Playback display RECORDED-DATA in RED, else LIVE-DATA in GREEN
   - D2 vs N2 select - changes which fields is displayed and which field is shown on the main graph
 - msync to sync
-- YYY use int for data ???
 #endif
 
 #define _FILE_OFFSET_BITS 64
@@ -444,7 +443,7 @@ static int32_t initialize(int32_t argc, char ** argv)
 
 static void usage(void)
 {
-    // YYY tbd
+    // XXX tbd
 }
 
 // -----------------  CLIENT THREAD  -------------------------------------------------
@@ -533,8 +532,6 @@ static void * client_thread(void * cx)
             file_idx_global = file_hdr->max - 1;
         }
 
-        // YYY keep cache copy of data part2 
-
 #ifdef JPEG_BUFF_SAMPLE_CREATE_ENABLE
         // write a sample jpeg buffer to jpeg_buff_sample file
         static bool sample_written = false;
@@ -555,8 +552,8 @@ static void * client_thread(void * cx)
 #endif
     }
 
-    // YYY set error indicator here 
-    // YYY how to handle timeouts in receiving data 
+    // XXX set error indicator here 
+    // XXX how to handle timeouts in receiving data 
     
     return NULL;
 }
@@ -582,7 +579,10 @@ static int32_t display_handler(void)
     quit = false;
     file_max_last = -1;
 
-    sdl_init(win_width, win_height);  // YYY check status here
+    if (sdl_init(win_width, win_height) < 0) {
+        ERROR("sdl_init %dx%d failed\n", win_width, win_height);
+        return -1;
+    }
 
     sdl_init_pane(&title_pane_full, &title_pane, 
                   0, 0, 
@@ -610,7 +610,7 @@ static int32_t display_handler(void)
             FATAL("invalid file_idx %d, max =%d\n",
                   file_idx, file_hdr->max);
         }
-        INFO("YYY file_idx %d\n", file_idx);
+        INFO("ZZZ file_idx %d\n", file_idx);
 
         // initialize for display update
         sdl_display_init();
@@ -654,7 +654,6 @@ static int32_t display_handler(void)
         }
 
         // register for events   
-        // YYY other graph events
         sdl_event_register(SDL_EVENT_KEY_ESC, SDL_EVENT_TYPE_KEY, NULL);             // quit (esc)
         sdl_event_register('?', SDL_EVENT_TYPE_KEY, NULL);                           // help
         sdl_event_register('s', SDL_EVENT_TYPE_KEY, NULL);                           // graph select
@@ -1180,8 +1179,6 @@ struct data_part2_s * read_data_part2(int32_t file_idx)
     static int32_t               last_read_file_idx = -1;
     static struct data_part2_s * last_read_data_part2 = NULL;
 
-    // YYY also cache the live data
-
     // initial allocate 
     if (last_read_data_part2 == NULL) {
         last_read_data_part2 = calloc(1,MAX_DATA_PART2_LENGTH);
@@ -1192,7 +1189,7 @@ struct data_part2_s * read_data_part2(int32_t file_idx)
 
     // if file_idx is same as last read then return data_part2 from last read
     if (file_idx == last_read_file_idx) {
-        // INFO("YYY return cached, file_idx=%d\n", file_idx);
+        INFO("ZZZ return cached, file_idx=%d\n", file_idx);
         return last_read_data_part2;
     }
 
@@ -1219,7 +1216,7 @@ struct data_part2_s * read_data_part2(int32_t file_idx)
 
     // remember the file_idx of this read, and
     // return the data_part2
-    // INFO("YYY return new read data, file_idx=%d\n", file_idx);
+    INFO("ZZZ return new read data, file_idx=%d\n", file_idx);
     last_read_file_idx = file_idx;
     return last_read_data_part2;
 }

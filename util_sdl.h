@@ -125,7 +125,7 @@ typedef struct {
 //
 
 // window initialize, and get_state
-void sdl_init(uint32_t w, uint32_t h);
+int32_t sdl_init(uint32_t w, uint32_t h);
 void sdl_get_state(int32_t * win_width, int32_t * win_height, bool * win_minimized);
 
 // display init and present

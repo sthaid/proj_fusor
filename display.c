@@ -15,6 +15,7 @@ TODO
   - When in Playback display RECORDED-DATA in RED, else LIVE-DATA in GREEN
   - D2 vs N2 select - changes which fields is displayed and which field is shown on the main graph
 - msync to sync
+- XXX use int for data
 #endif
 
 #define _FILE_OFFSET_BITS 64
@@ -56,13 +57,14 @@ TODO
 
 #define VERSION_STR  "1.0"
 
-#define MODE_STR(m) ((m) == LIVE ? "LIVE" : "PLAYBACK")
+#define MODE_STR(m) ((m) == LIVE ? "LIVE" : (m) == PLAYBACK ? "PLAYBACK" : "TEST")
 
-#define MAGIC_FILE 0x1122334455667788
+#define MAGIC_FILE 0x1122334455667788   // XXX magics could incorporte sizeof data1/2
 
-#define MAX_FILE_DATA_PART1   100000
+#define MAX_FILE_DATA_PART1   100000  // XXX maybe make this 1 day
 #define MAX_DATA_PART2_LENGTH 1000000
 #define MAX_GRAPH             1
+#define MAX_GRAPH_POINTS      100000
 
 #define FILE_DATA_PART2_OFFSET \
    ((sizeof(file_hdr_t) +  \
@@ -81,7 +83,7 @@ TODO
 // typedefs
 //
 
-enum mode {LIVE, PLAYBACK};
+enum mode {LIVE, PLAYBACK, TEST};
 
 typedef struct {
     uint64_t magic;
@@ -94,7 +96,7 @@ typedef struct {
     char    title[100];
     int32_t color;
     int32_t max_points;
-    point_t points[100000];
+    point_t points[MAX_GRAPH_POINTS];
 } graph_t;
 
 //
@@ -103,8 +105,9 @@ typedef struct {
 
 static enum mode             initial_mode;
 static enum mode             current_mode;
-static uint32_t              win_width = DEFAULT_WIN_WIDTH;
-static uint32_t              win_height = DEFAULT_WIN_HEIGHT;
+
+static uint32_t              win_width;
+static uint32_t              win_height;
 
 static int32_t               file_fd;
 static file_hdr_t          * file_hdr;
@@ -119,6 +122,8 @@ static rect_t                graph_pane_global;
 static int32_t               graph_select;
 static int32_t               graph_scale_idx[MAX_GRAPH];
 
+static int32_t               test_file_secs;
+
 //
 // prototypes
 //
@@ -126,13 +131,14 @@ static int32_t               graph_scale_idx[MAX_GRAPH];
 static int32_t initialize(int32_t argc, char ** argv);
 static void usage(void);
 static void * client_thread(void * cx);
-static void display_handler();
+static int32_t display_handler();
 static void draw_camera_image(rect_t * cam_pane, int32_t file_idx);
 static void draw_data_values(rect_t * data_pane, int32_t file_idx);
 static void draw_graph_init(rect_t * graph_pane);
 static void draw_graph0(int32_t file_idx);
 static void draw_graph_common( char * info_str, int32_t cursor_x, char * cursor_str, 
     int32_t max_graph, ...);
+static int32_t generate_test_file(void);
 static char * val2str(char * str, float val);
 static struct data_part2_s * read_data_part2(int32_t file_idx);
 static int getsockaddr(char * node, int port, int socktype, int protcol, struct sockaddr_in * ret_addr);
@@ -147,9 +153,26 @@ int32_t main(int32_t argc, char **argv)
         return 1;
     }
 
-    display_handler();
+    switch (current_mode) {
+    case TEST:
+        if (generate_test_file() < 0) {
+            ERROR("generate_test_file failed, program terminating\n");
+            return 1;
+        }
+        break;
+    case LIVE: case PLAYBACK:
+        if (display_handler() < 0) {
+            ERROR("display_handler failed, program terminating\n");
+            return 1;
+        }
+        break;
+    default:
+        FATAL("mode %d not valid\n", current_mode);
+        break;
+    }
 
-    return 0;
+    INFO("terminating normally\n");
+    return 0; 
 }
 
 // -----------------  INITIALIZE  ----------------------------------------------------
@@ -175,10 +198,14 @@ static int32_t initialize(int32_t argc, char ** argv)
     INFO("sizeof data_t=%zd part1=%zd part2=%zd\n",
          sizeof(data_t), sizeof(struct data_part1_s), sizeof(struct data_part2_s));
 
-    // init globals 
+    // init globals that are not 0
     initial_mode = LIVE;
     file_idx_global = -1;
     strcpy(servername, "rpi_data");
+    win_width = DEFAULT_WIN_WIDTH;
+    win_height = DEFAULT_WIN_HEIGHT;
+
+    // init locals
     strcpy(filename, "");
  
     // parse options
@@ -187,8 +214,9 @@ static int32_t initialize(int32_t argc, char ** argv)
     // -g WxH      : window width and height, default 1920x1080
     // -s name     : server name
     // -p filename : playback file
+    // -t secs     : generate test data file, secs long
     while (true) {
-        char opt_char = getopt(argc, argv, "hvg:s:p:");
+        char opt_char = getopt(argc, argv, "hvg:s:p:t:");
         if (opt_char == -1) {
             break;
         }
@@ -197,11 +225,11 @@ static int32_t initialize(int32_t argc, char ** argv)
             usage();
             exit(0);
         case 'v':
-            printf("Version %s\n", VERSION_STR);
+            INFO("Version %s\n", VERSION_STR);
             exit(0);
         case 'g':
             if (sscanf(optarg, "%dx%d", &win_width, &win_height) != 2) {
-                printf("invalid '-g %s'\n", optarg);
+                ERROR("invalid '-g %s'\n", optarg);
                 exit(1);
             }
             break;
@@ -212,39 +240,53 @@ static int32_t initialize(int32_t argc, char ** argv)
             initial_mode = PLAYBACK;
             strcpy(filename, optarg);
             break;
+        case 't':
+            initial_mode = TEST;
+            if (sscanf(optarg, "%d", &test_file_secs) != 1 || test_file_secs < 1 || test_file_secs > MAX_FILE_DATA_PART1) {
+                ERROR("test_file_secs '%s' is invalid\n",optarg);
+                return -1;
+            }
+            break;
         default:
             return -1;
         }
     }
 
-    // if in live mode then
+    // if mode is live or test then 
     //   if filename was provided then 
     //     use the provided filename
+    //   else if live mode then
+    //     generate live mode filename
     //   else
-    //     generate the filename
+    //     generate test mode filename
     //   endif
     // endif
-    if (initial_mode == LIVE) {
+    if (initial_mode == LIVE || initial_mode == TEST) {
         if (argc > optind) {
             strcpy(filename, argv[optind]);
-        } else {
+        } else if (initial_mode == LIVE) {
             time_t t = time(NULL);
             struct tm * tm = localtime(&t);
             sprintf(filename, "fusor_%2.2d%2.2d%2.2d_%2.2d%2.2d%2.2d.dat",
                     tm->tm_mon+1, tm->tm_mday, tm->tm_year-100,
                     tm->tm_hour, tm->tm_min, tm->tm_sec);
+        } else {  // initial_mode is TEST
+            sprintf(filename, "fusor_test_%d_secs.dat", test_file_secs);
         }
     }
 
     // print mode and filename
-    INFO("mode       = %s\n", MODE_STR(initial_mode));
-    INFO("filename   = %s\n", filename);
+    INFO("mode            = %s\n", MODE_STR(initial_mode));
+    INFO("filename        = %s\n", filename);
+    if (initial_mode == TEST) {
+        INFO("test_file_secs  = %d\n", test_file_secs);
+    }
 
-    // if in live mode then
+    // if mode is live or test then 
     //   verify filename does not exist
     //   create and init the file  
     // endif
-    if (initial_mode == LIVE) {
+    if (initial_mode == LIVE || initial_mode == TEST) {
         // verify filename does not exist
         struct stat stat_buf;
         if (stat(filename, &stat_buf) == 0) {
@@ -331,7 +373,7 @@ static int32_t initialize(int32_t argc, char ** argv)
         int32_t sfd;
 
         // print servername
-        INFO("servername = %s\n", servername);
+        INFO("servername      = %s\n", servername);
 
         // get address of server
         ret =  getsockaddr(servername, PORT, SOCK_STREAM, 0, &sockaddr);
@@ -341,7 +383,7 @@ static int32_t initialize(int32_t argc, char ** argv)
         }
  
         // print serveraddr
-        INFO("serveraddr = %s\n", 
+        INFO("serveraddr      = %s\n", 
              sock_addr_to_str(s, sizeof(s), (struct sockaddr *)&sockaddr));
 
         // create socket
@@ -487,6 +529,7 @@ static void * client_thread(void * cx)
         if (current_mode == LIVE) {
             file_idx_global = file_hdr->max - 1;
         }
+        INFO("XXX max=%d idx_global=%d\n", file_hdr->max, file_idx_global);
 
         // YYY keep cache copy of data part2 
     }
@@ -499,7 +542,7 @@ static void * client_thread(void * cx)
 
 // -----------------  DISPLAY HANDLER - MAIN  ----------------------------------------
 
-static void display_handler(void)
+static int32_t display_handler(void)
 {
     bool          quit;
     sdl_event_t * event;
@@ -512,15 +555,13 @@ static void display_handler(void)
     time_t        t;
     int32_t       file_idx;
     int32_t       event_processed_count;
-    int32_t       file_idx_last;
     int32_t       file_max_last;
 
     // initializae 
     quit = false;
-    file_idx_last = -1;
     file_max_last = -1;
 
-    sdl_init(win_width, win_height);
+    sdl_init(win_width, win_height);  // XXX check status here
 
     sdl_init_pane(&title_pane_full, &title_pane, 
                   0, 0, 
@@ -548,6 +589,7 @@ static void display_handler(void)
             FATAL("invalid file_idx %d, max =%d\n",
                   file_idx, file_hdr->max);
         }
+        INFO("XXX file_idx %d\n", file_idx);
 
         // initialize for display update
         sdl_display_init();
@@ -612,7 +654,7 @@ static void display_handler(void)
 
         // loop until
         // - at least one event has been processed AND current event is none, OR
-        // - file index has changed
+        // - file index that is currently displayed is not file_idx_global
         // - file max has changed
         // - quit flag is set
         event_processed_count = 0;
@@ -684,21 +726,23 @@ static void display_handler(void)
 
             // test if should break out of this loop
             if ((event_processed_count > 0 && event->event == SDL_EVENT_NONE) ||
-                (file_idx != file_idx_last) ||
+                (file_idx != file_idx_global) ||
                 (file_hdr->max != file_max_last) ||
                 (quit))
             {
-                file_idx_last = file_idx;
+                INFO("epc=%d  file_idx_global/file_idx=%d %d  max/last= %d %d  \n\n",  
+                   event_processed_count, file_idx_global, file_idx, file_hdr->max, file_max_last);
                 file_max_last = file_hdr->max;
                 break;
             }
 
-            // delay 10 ms
-            usleep(10000);
+            // delay 1 ms
+            usleep(1000);
         }
     }
 
-    INFO("terminating\n");
+    // return success
+    return 0;
 }
 
 // - - - - - - - - -  DISPLAY HANDLER - DRAW CAMERA IMAGE  - - - - - - - - - - - - - - 
@@ -822,7 +866,9 @@ static void draw_graph0(int32_t file_idx)
     int32_t  x_time_span_sec;
     float    x_pixels_per_sec;
     float    x;
+    float    y_max;
 
+    // XXX check how long it takes to run this routine for 86400 points
     static int32_t x_time_span_sec_tbl[] = {60, 600, 3600, 86400};
     static graph_t g_kv;
 
@@ -854,23 +900,34 @@ static void draw_graph0(int32_t file_idx)
     // - voltage_mean_kv 
     // - current_ma 
     // - chamber_pressure_d2_mtorr 
-    sprintf(g_kv.title, "%s kV    : 30 MAX",
-            val2str(str, file_data_part1[file_idx].voltage_mean_kv));
+    // YYY check that max_points isn't too big
+    // YYY args   30.0, "kv", voltage_mean_kv, g_kv, RED
+    y_max = 30.0;
+    sprintf(g_kv.title, "%s %6s : %.0f MAX",
+            val2str(str, file_data_part1[file_idx].voltage_mean_kv),
+            "kV",
+            y_max);
     g_kv.color = RED;
     g_kv.max_points = 0;
     x = graph_x_origin + graph_x_range - 1;
     for (idx = file_idx_end; idx >= file_idx_start; idx--) {
-        if (idx >= 0 && idx < file_hdr->max) {
+        if (idx >= 0 && 
+            idx < file_hdr->max &&
+            !IS_ERROR(file_data_part1[idx].voltage_mean_kv))
+        {
             point_t * p = &g_kv.points[g_kv.max_points];
             p->x = x;
-            p->y = graph_y_origin - graph_y_range/2;  // XXX
+            p->y = graph_y_origin - (graph_y_range / y_max) * file_data_part1[idx].voltage_mean_kv;
             g_kv.max_points++;
         }
         x -= x_pixels_per_sec;
     }
+    INFO("XXX max_points  %d\n", g_kv.max_points);
 
     // init info_str
     sprintf(info_str, "X-SPAN %d SEC  (-/+)", x_time_span_sec);
+
+    // XXX also need title_str
 
     // init cursor position and string
     cursor_x = (graph_x_origin + graph_x_range - 1) -
@@ -977,7 +1034,7 @@ static void draw_graph_common( char * info_str, int32_t cursor_x, char * cursor_
     va_end(ap);
 }
 
-#if 0
+#if 0  //XXX del
 #define MAX_GRAPH1_SCALE (sizeof(graph1_scale)/sizeof(graph1_scale[0]))
 
 typedef struct {
@@ -1143,6 +1200,79 @@ static void draw_graph1(rect_t * graph_pane)
     }
 }
 #endif
+
+// -----------------  GENERATE TEST FILE----------------------------------------------
+
+static int32_t generate_test_file(void) 
+{
+    time_t                t;
+    uint8_t             * jpeg_buff;
+    uint32_t              jpeg_buff_len;
+    uint64_t              dp2_offset;
+    int32_t               len, idx, i;
+    struct data_part1_s * dp1;
+    struct data_part2_s * dp2;
+
+    INFO("starting ...\n");
+
+    t = time(NULL);
+    jpeg_buff = NULL; // XXX
+    jpeg_buff_len = 0;
+    dp2_offset = FILE_DATA_PART2_OFFSET;
+    dp2 = calloc(1, MAX_DATA_PART2_LENGTH);
+    if (dp2 == NULL) {
+        FATAL("calloc\n");
+    }
+
+    // file data
+    for (idx = 0; idx < test_file_secs; idx++) {
+        // data part1
+        dp1 = &file_data_part1[idx];
+        dp1->magic = MAGIC_DATA_PART1;
+        dp1->time  = t + idx;
+        dp1->voltage_mean_kv = ERROR_NO_VALUE;
+        dp1->voltage_min_kv = ERROR_NO_VALUE;
+        dp1->voltage_max_kv = ERROR_NO_VALUE;
+        dp1->current_ma = ERROR_NO_VALUE;
+        dp1->chamber_pressure_d2_mtorr = ERROR_NO_VALUE;
+        dp1->chamber_pressure_n2_mtorr = ERROR_NO_VALUE;
+        for (i = 0; i < MAX_DETECTOR_CHAN; i++) {
+            dp1->average_cpm[i] = ERROR_NO_VALUE;
+            dp1->moving_average_cpm[i] = ERROR_NO_VALUE;
+        }
+        dp1->data_part2_length = sizeof(struct data_part2_s) + jpeg_buff_len;
+        dp1->data_part2_jpeg_buff_valid = (jpeg_buff_len != 0);
+        dp1->data_part2_offset = dp2_offset;
+
+        // data part2
+        dp2->magic = MAGIC_DATA_PART2;
+        memcpy(dp2->jpeg_buff, jpeg_buff, jpeg_buff_len);
+        dp2->jpeg_buff_len = jpeg_buff_len;
+        // XXX more dp2 fields
+
+        len = pwrite(file_fd, dp2, dp1->data_part2_length, dp2_offset);
+        if (len != dp1->data_part2_length) {
+            ERROR("write data_part2 len=%d exp=%d, %s\n",
+                  len, dp1->data_part2_length, strerror(errno));
+            return -1;
+        }
+
+        // update dp2_offset
+        dp2_offset += dp1->data_part2_length;
+
+        // print progress
+        if (idx && (idx % 1000) == 0) {
+            INFO("  completed %d\n", idx);
+        }
+    }
+
+    // file hdr
+    file_hdr->max = test_file_secs;
+
+    // return success
+    INFO("done\n");
+    return 0;
+}
 
 // -----------------  SUPPORT  ------------------------------------------------------ 
 

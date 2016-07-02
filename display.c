@@ -748,10 +748,12 @@ static int32_t display_handler(void)
             }
 
             // test if should break out of this loop
-            if ((event_processed_count > 0 && event->event == SDL_EVENT_NONE) ||
-                (file_idx != file_idx_global) ||
-                (file_hdr->max != file_max_last) ||
-                (quit))
+            // XXX update comment
+            if ((event->event == SDL_EVENT_NONE) &&
+                ((event_processed_count > 0) ||
+                 (file_idx != file_idx_global) ||
+                 (file_hdr->max != file_max_last) ||
+                 (quit)))
             {
                 INFO("epc=%d  file_idx_global/file_idx=%d %d  max/last= %d %d  \n\n",  
                    event_processed_count, file_idx_global, file_idx, file_hdr->max, file_max_last);
@@ -1266,12 +1268,12 @@ static int32_t generate_test_file(void)
         dp1 = &file_data_part1[idx];
         dp1->magic = MAGIC_DATA_PART1;
         dp1->time  = t + idx;
-        dp1->voltage_mean_kv = ERROR_NO_VALUE;
-        dp1->voltage_min_kv = ERROR_NO_VALUE;
-        dp1->voltage_max_kv = ERROR_NO_VALUE;
-        dp1->current_ma = ERROR_NO_VALUE;
-        dp1->chamber_pressure_d2_mtorr = ERROR_NO_VALUE;
-        dp1->chamber_pressure_n2_mtorr = ERROR_NO_VALUE;
+        dp1->voltage_mean_kv = 30.0 * idx / test_file_secs;
+        dp1->voltage_min_kv = 0;
+        dp1->voltage_max_kv = 15.0 * idx / test_file_secs;
+        dp1->current_ma = 0;
+        dp1->chamber_pressure_d2_mtorr = 10;
+        dp1->chamber_pressure_n2_mtorr = 20;
         for (i = 0; i < MAX_DETECTOR_CHAN; i++) {
             dp1->average_cpm[i] = ERROR_NO_VALUE;
             dp1->moving_average_cpm[i] = ERROR_NO_VALUE;

@@ -1,13 +1,24 @@
-#if 0
-TODO
-- copyrights
-- Graph Cycling in live mode
-  - main graph,  add neutron counts
-  - diag: the current voltage graph , and add the neutron detector voltage
-  - detector moving average
-  - detector average
-- YYY msync to sync
-#endif
+/*
+Copyright (c) 2016 Steven Haid
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+*/
 
 #define _FILE_OFFSET_BITS 64
 
@@ -603,7 +614,7 @@ static int32_t display_handler(void)
             FATAL("invalid file_idx %d, max =%d\n",
                   file_idx, file_hdr->max);
         }
-        INFO("ZZZ file_idx %d\n", file_idx);
+        DEBUG("file_idx %d\n", file_idx);
 
         // initialize for display update
         sdl_display_init();
@@ -1261,7 +1272,7 @@ struct data_part2_s * read_data_part2(int32_t file_idx)
 
     // if file_idx is same as last read then return data_part2 from last read
     if (file_idx == last_read_file_idx) {
-        INFO("ZZZ return cached, file_idx=%d\n", file_idx);
+        DEBUG("return cached, file_idx=%d\n", file_idx);
         return last_read_data_part2;
     }
 
@@ -1288,7 +1299,7 @@ struct data_part2_s * read_data_part2(int32_t file_idx)
 
     // remember the file_idx of this read, and
     // return the data_part2
-    INFO("ZZZ return new read data, file_idx=%d\n", file_idx);
+    DEBUG("return new read data, file_idx=%d\n", file_idx);
     last_read_file_idx = file_idx;
     return last_read_data_part2;
 }

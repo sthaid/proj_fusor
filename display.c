@@ -904,6 +904,7 @@ static void draw_graph0(int32_t file_idx)
             x = graph_x_origin + graph_x_range - 1; \
             for (idx = file_idx_end; idx >= file_idx_start; idx--) { \
                 float tmp = (graph_y_range / (float)(_val_max)); \
+                int32_t y_limit = graph_y_origin - graph_y_range; \
                 if (idx >= 0 &&  \
                     idx < file_hdr->max && \
                     !IS_ERROR(file_data_part1[idx]._field_name)) \
@@ -911,6 +912,9 @@ static void draw_graph0(int32_t file_idx)
                     point_t * p = &(_graph)->points[(_graph)->max_points]; \
                     p->x = x; \
                     p->y = graph_y_origin - tmp * file_data_part1[idx]._field_name; \
+                    if (p->y < y_limit) { \
+                        p->y = y_limit; \
+                    } \
                     (_graph)->max_points++; \
                 } \
                 x -= x_pixels_per_sec; \
@@ -966,6 +970,8 @@ static void draw_graph1(int32_t file_idx)
     char                  info_str[100];
 
     static graph_t g_voltage_samples;
+    static graph_t g_current_samples;
+    static graph_t g_pressure_samples;
     static int32_t y_max_mv_tbl[] = {100, 1000, 2000, 5000, 10000};
 
     #define MAX_Y_MAX_MV_TBL (sizeof(y_max_mv_tbl)/sizeof(y_max_mv_tbl[0]))
@@ -978,10 +984,15 @@ static void draw_graph1(int32_t file_idx)
             (_graph)->color = (_color);; \
             (_graph)->max_points = 0; \
             if (_valid && dp2 != NULL) { \
+                float tmp = (graph_y_range / (float)(y_max_mv)); \
+                int32_t y_limit = graph_y_origin - graph_y_range; \
                 for (i = 0; i < MAX_ADC_SAMPLES; i++) { \
                     point_t * p = &(_graph)->points[i]; \
                     p->x = graph_x_origin + i; \
-                    p->y = graph_y_origin; /*XXX*/\
+                    p->y = graph_y_origin - tmp * dp2->_field_name[i]; \
+                    if (p->y < y_limit) { \
+                        p->y = y_limit; \
+                    } \
                     (_graph)->max_points++; \
                 } \
             } \
@@ -1005,10 +1016,15 @@ static void draw_graph1(int32_t file_idx)
     // init graph_t
     INIT_GRAPH(&g_voltage_samples, "VOLTAGE", voltage_adc_samples_mv, \
                RED, dp1->data_part2_voltage_adc_samples_mv_valid);
+    INIT_GRAPH(&g_current_samples, "CURRENT", current_adc_samples_mv, \
+               GREEN, dp1->data_part2_current_adc_samples_mv_valid);
+    INIT_GRAPH(&g_pressure_samples, "PRESSURE", pressure_adc_samples_mv, \
+               BLUE, dp1->data_part2_pressure_adc_samples_mv_valid);
 
     // draw the graph
     sprintf(info_str, "Y_MAX %d mV  (-/+)", y_max_mv);
-    draw_graph_common("ADC SAMPLES - 1 SECOND", info_str, -1, NULL, 1, &g_voltage_samples);           
+    draw_graph_common("ADC SAMPLES - 1 SECOND", info_str, -1, NULL, 
+                      3, &g_voltage_samples, &g_current_samples, &g_pressure_samples);
 }
 
 static void draw_graph_common(char * title_str, char * info_str, int32_t cursor_x, char * cursor_str, 
@@ -1159,6 +1175,7 @@ static int32_t generate_test_file(void)
         dp1 = &file_data_part1[idx];
         dp1->magic = MAGIC_DATA_PART1;
         dp1->time  = t + idx;
+
         dp1->voltage_mean_kv = 30.0 * idx / test_file_secs;
         dp1->voltage_min_kv = 0;
         dp1->voltage_max_kv = 15.0 * idx / test_file_secs;
@@ -1169,15 +1186,23 @@ static int32_t generate_test_file(void)
             dp1->average_cpm[i] = ERROR_NO_VALUE;
             dp1->moving_average_cpm[i] = ERROR_NO_VALUE;
         }
+
+        dp1->data_part2_offset = dp2_offset;
         dp1->data_part2_length = sizeof(struct data_part2_s) + jpeg_buff_len;
         dp1->data_part2_jpeg_buff_valid = (jpeg_buff_len != 0);
-        dp1->data_part2_offset = dp2_offset;
+        dp1->data_part2_voltage_adc_samples_mv_valid = true;
+        dp1->data_part2_current_adc_samples_mv_valid = true;
+        dp1->data_part2_pressure_adc_samples_mv_valid = true;
 
         // data part2
         dp2->magic = MAGIC_DATA_PART2;
-        memcpy(dp2->jpeg_buff, jpeg_buff, jpeg_buff_len);
+        for (i = 0; i < MAX_ADC_SAMPLES; i++) {
+            dp2->voltage_adc_samples_mv[i]  = 10000 * i / MAX_ADC_SAMPLES;
+            dp2->current_adc_samples_mv[i]  =  5000 * i / MAX_ADC_SAMPLES;
+            dp2->pressure_adc_samples_mv[i] =  1000 * i / MAX_ADC_SAMPLES;
+        }
         dp2->jpeg_buff_len = jpeg_buff_len;
-        // YYY more dp2 fields
+        memcpy(dp2->jpeg_buff, jpeg_buff, jpeg_buff_len);
 
         len = pwrite(file_fd, dp2, dp1->data_part2_length, dp2_offset);
         if (len != dp1->data_part2_length) {

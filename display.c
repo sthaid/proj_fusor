@@ -1,20 +1,12 @@
 #if 0
 TODO
-- check camera angle
-- compile both pgms on linux and rpi
-- check size of data_t and compare
+- copyrights
 - Graph Cycling in live mode
   - main graph,  add neutron counts
+  - diag: the current voltage graph , and add the neutron detector voltage
   - detector moving average
   - detector average
-  - diag: the current voltage graph , and add the neutron detector voltage
-- Maybe can have a generic plot routine,
-  - this will keep all the plots consistent
-  - and make the coding or additon of new plots easier
-- Some Details:
-  - When in Playback display RECORDED-DATA in RED, else LIVE-DATA in GREEN
-  - D2 vs N2 select - changes which fields is displayed and which field is shown on the main graph
-- msync to sync
+- YYY msync to sync
 #endif
 
 #define _FILE_OFFSET_BITS 64
@@ -58,11 +50,11 @@ TODO
 
 #define MODE_STR(m) ((m) == LIVE ? "LIVE" : (m) == PLAYBACK ? "PLAYBACK" : "TEST")
 
-#define MAGIC_FILE 0x1122334455667788   // XXX magics could incorporte sizeof data1/2
+#define MAGIC_FILE 0x1122334455667788   // YYY magics could incorporte sizeof data1/2
 
 #define MAX_FILE_DATA_PART1   86400   // 1 day
 #define MAX_DATA_PART2_LENGTH 1000000
-#define MAX_GRAPH             1
+#define MAX_GRAPH             2
 #define MAX_GRAPH_POINTS      100000
 
 #define FILE_DATA_PART2_OFFSET \
@@ -138,6 +130,7 @@ static void draw_camera_image(rect_t * cam_pane, int32_t file_idx);
 static void draw_data_values(rect_t * data_pane, int32_t file_idx);
 static void draw_graph_init(rect_t * graph_pane);
 static void draw_graph0(int32_t file_idx);
+static void draw_graph1(int32_t file_idx);
 static void draw_graph_common(char * title_str, char * info_str, int32_t cursor_x, char * cursor_str, 
     int32_t max_graph, ...);
 static int32_t generate_test_file(void);
@@ -649,6 +642,9 @@ static int32_t display_handler(void)
         case 0:
             draw_graph0(file_idx);
             break;
+        case 1:
+            draw_graph1(file_idx);
+            break;
         default:
             FATAL("graph_select %d out of range\n", graph_select);
         }
@@ -859,16 +855,17 @@ static void draw_data_values(rect_t * data_pane, int32_t file_idx)
     sdl_render_text(data_pane, 1, 0, 1, str, WHITE, BLACK);
 
     sprintf(str, "D2 mT %s",
-            val2str(s1, dp1->chamber_pressure_d2_mtorr));
+            val2str(s1, dp1->pressure_d2_mtorr));
     sdl_render_text(data_pane, 2, 0, 1, str, WHITE, BLACK);
 
     sprintf(str, "N2 mT %s",
-            val2str(s1, dp1->chamber_pressure_n2_mtorr));
+            val2str(s1, dp1->pressure_n2_mtorr));
     sdl_render_text(data_pane, 3, 0, 1, str, WHITE, BLACK);
 }
 
 // - - - - - - - - -  DISPLAY HANDLER - DRAW GRAPH  - - - - - - - - - - - - - - - - 
 
+//XXX 1200 
 static void draw_graph_init(rect_t * graph_pane)
 {
     graph_pane_global = *graph_pane;
@@ -879,7 +876,6 @@ static void draw_graph_init(rect_t * graph_pane)
     graph_y_range  = graph_pane->h - FONT0_HEIGHT - 4 - FONT0_HEIGHT;
 }
 
-// XXX check how long it takes to run this routine for 86400 points on rpi
 static void draw_graph0(int32_t file_idx)
 {
     int32_t  file_idx_start, file_idx_end;
@@ -890,18 +886,18 @@ static void draw_graph0(int32_t file_idx)
     float    x_pixels_per_sec;
 
     static int32_t x_time_span_sec_tbl[] = {60, 600, 3600, 86400};
-    static graph_t g_kv, g_ma, g_mtorr;
+    static graph_t g_kv, g_ma, g_mtorr;  // XXX malloc and free
 
     #define MAX_X_TIME_SPAN_SEC_TBL \
         (sizeof(x_time_span_sec_tbl) / sizeof(x_time_span_sec_tbl[0]))
 
-    #define INIT_GRAPH(_graph, _title_name, _field_name, _color, _val_max) \
+    #define INIT_GRAPH(_graph, _title, _field_name, _color, _val_max) \
         do { \
             float   x; \
             int32_t idx; \
             sprintf((_graph)->title, "%s %6s : %.0f MAX", \
                     val2str(str, file_data_part1[file_idx]._field_name), \
-                    _title_name, \
+                    _title, \
                     (float)(_val_max)); \
             (_graph)->color = (_color); \
             (_graph)->max_points = 0; \
@@ -945,15 +941,13 @@ static void draw_graph0(int32_t file_idx)
     // init graph_t for:
     // - voltage_mean_kv 
     // - current_ma 
-    // - chamber_pressure_d2_mtorr 
+    // - pressure_d2_mtorr 
     INIT_GRAPH(&g_kv, "kV", voltage_mean_kv, RED, 30);
     INIT_GRAPH(&g_ma, "mA", current_ma, GREEN, 30);
-    INIT_GRAPH(&g_mtorr, "mTorr", chamber_pressure_d2_mtorr, BLUE, 30);
+    INIT_GRAPH(&g_mtorr, "mTorr", pressure_d2_mtorr, BLUE, 30);
 
     // init info_str
     sprintf(info_str, "X-SPAN %d SEC  (-/+)", x_time_span_sec);
-
-    // XXX also need title_str
 
     // init cursor position and string
     cursor_x = (graph_x_origin + graph_x_range - 1) -
@@ -962,6 +956,59 @@ static void draw_graph0(int32_t file_idx)
 
     // draw the graph
     draw_graph_common("SUMMARY", info_str, cursor_x, cursor_str, 3, &g_kv, &g_ma, &g_mtorr);
+}
+
+static void draw_graph1(int32_t file_idx)
+{
+    struct data_part1_s * dp1;
+    struct data_part2_s * dp2;
+    int32_t               y_max_mv;
+    char                  info_str[100];
+
+    static graph_t g_voltage_samples;
+    static int32_t y_max_mv_tbl[] = {100, 1000, 2000, 5000, 10000};
+
+    #define MAX_Y_MAX_MV_TBL (sizeof(y_max_mv_tbl)/sizeof(y_max_mv_tbl[0]))
+
+    #undef INIT_GRAPH
+    #define INIT_GRAPH(_graph, _title, _field_name, _color, _valid) \
+        do { \
+            int32_t i; \
+            strcpy((_graph)->title, (_title)); \
+            (_graph)->color = (_color);; \
+            (_graph)->max_points = 0; \
+            if (_valid && dp2 != NULL) { \
+                for (i = 0; i < MAX_ADC_SAMPLES; i++) { \
+                    point_t * p = &(_graph)->points[i]; \
+                    p->x = graph_x_origin + i; \
+                    p->y = graph_y_origin; /*XXX*/\
+                    (_graph)->max_points++; \
+                } \
+            } \
+        } while(0)
+
+    // sanitize graph_scale_idx
+    if (graph_scale_idx[1] < 0) {
+        graph_scale_idx[1] = 0;
+    } else if (graph_scale_idx[1] >= MAX_Y_MAX_MV_TBL) {
+        graph_scale_idx[1] = MAX_Y_MAX_MV_TBL - 1;
+    }
+
+    // init
+    y_max_mv = y_max_mv_tbl[graph_scale_idx[1]];
+    dp1 = &file_data_part1[file_idx];
+    dp2 = read_data_part2(file_idx);
+    if (dp2 == NULL) {
+        //ERROR
+    }
+
+    // init graph_t
+    INIT_GRAPH(&g_voltage_samples, "VOLTAGE", voltage_adc_samples_mv, \
+               RED, dp1->data_part2_voltage_adc_samples_mv_valid);
+
+    // draw the graph
+    sprintf(info_str, "Y_MAX %d mV  (-/+)", y_max_mv);
+    draw_graph_common("ADC SAMPLES - 1 SECOND", info_str, -1, NULL, 1, &g_voltage_samples);           
 }
 
 static void draw_graph_common(char * title_str, char * info_str, int32_t cursor_x, char * cursor_str, 
@@ -1116,8 +1163,8 @@ static int32_t generate_test_file(void)
         dp1->voltage_min_kv = 0;
         dp1->voltage_max_kv = 15.0 * idx / test_file_secs;
         dp1->current_ma = 0;
-        dp1->chamber_pressure_d2_mtorr = 10;
-        dp1->chamber_pressure_n2_mtorr = 20;
+        dp1->pressure_d2_mtorr = 10;
+        dp1->pressure_n2_mtorr = 20;
         for (i = 0; i < MAX_DETECTOR_CHAN; i++) {
             dp1->average_cpm[i] = ERROR_NO_VALUE;
             dp1->moving_average_cpm[i] = ERROR_NO_VALUE;

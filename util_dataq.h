@@ -28,7 +28,8 @@ int32_t dataq_init(float averaging_duration_sec, int32_t scan_hz, int32_t max_ad
 int32_t dataq_get_adc(int32_t adc_chan,
                       int16_t * rms_mv,
                       int16_t * mean_mv, int16_t * sdev_mv,
-                      int16_t * min_mv, int16_t * max_mv,
-                      float history_secs, int16_t ** history_mv, int32_t * max_history_mv);
+                      int16_t * min_mv, int16_t * max_mv);
+
+int32_t dataq_get_adc_samples(int32_t adc_chan, int16_t * samples_mv, int32_t count);
 
 #endif

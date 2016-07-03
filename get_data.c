@@ -55,7 +55,7 @@ static void * server_thread(void * cx);
 static void init_data_struct(data_t * data, time_t time_now);
 static float convert_adc_voltage(float adc_volts);
 static float convert_adc_current(float adc_volts);
-static float convert_adc_chamber_pressure(float adc_volts, uint32_t gas_id);
+static float convert_adc_pressure(float adc_volts, uint32_t gas_id);
 
 // -----------------  MAIN & TOP LEVEL ROUTINES  -------------------------------------
 
@@ -85,11 +85,11 @@ static void init(void)
     }
 
     dataq_init(0.5,   // averaging duration in secs
-               1000,  // scan rate  (samples per second)
+               1200,  // scan rate  (samples per second)
                3,     // number of adc channels
                ADC_CHAN_VOLTAGE,
                ADC_CHAN_CURRENT,
-               ADC_CHAN_CHAMBER_PRESSURE);
+               ADC_CHAN_PRESSURE);
 }
 
 static void server(void)
@@ -241,56 +241,51 @@ static void * server_thread(void * cx)
 static void init_data_struct(data_t * data, time_t time_now)
 {
     int16_t mean_mv, min_mv, max_mv;
-    int32_t ret, i;
+    int32_t ret;
+    bool    valid1, valid2, valid3;
 
     // 
-    // init data struct 
+    // zero data struct 
     //
 
     bzero(data, sizeof(data_t));
-
-    data->part1.magic = MAGIC_DATA_PART1;
-    data->part1.time  = time_now;
-
-    data->part1.voltage_mean_kv = ERROR_NO_VALUE;
-    data->part1.voltage_min_kv = ERROR_NO_VALUE;
-    data->part1.voltage_max_kv = ERROR_NO_VALUE;
-    data->part1.current_ma = ERROR_NO_VALUE;
-    data->part1.chamber_pressure_d2_mtorr = ERROR_NO_VALUE;
-    data->part1.chamber_pressure_n2_mtorr = ERROR_NO_VALUE;
-    for (i = 0; i < MAX_DETECTOR_CHAN; i++) {
-        data->part1.average_cpm[i] = ERROR_NO_VALUE;
-        data->part1.moving_average_cpm[i] = ERROR_NO_VALUE;
-    }
-
-    data->part2.magic = MAGIC_DATA_PART2;
 
     //
     // data part1
     //
 
+    // data part1 magic & time
+    data->part1.magic = MAGIC_DATA_PART1;
+    data->part1.time  = time_now;
+
     // data part1 voltage_min_kv, voltage_max_kv, and voltage_mean_kv
-    ret = dataq_get_adc(ADC_CHAN_VOLTAGE, NULL, &mean_mv, NULL, &min_mv, &max_mv,
-                        0, NULL, NULL);
+    ret = dataq_get_adc(ADC_CHAN_VOLTAGE, NULL, &mean_mv, NULL, &min_mv, &max_mv);
     if (ret == 0) {
         data->part1.voltage_min_kv  = convert_adc_voltage(min_mv/1000.);
         data->part1.voltage_max_kv  = convert_adc_voltage(max_mv/1000.);
         data->part1.voltage_mean_kv = convert_adc_voltage(mean_mv/1000.);
+    } else {
+        data->part1.voltage_min_kv  = ERROR_NO_VALUE;
+        data->part1.voltage_max_kv  = ERROR_NO_VALUE;
+        data->part1.voltage_mean_kv = ERROR_NO_VALUE;
     }
 
     // data part1 current_ma
-    ret = dataq_get_adc(ADC_CHAN_CURRENT, NULL, &mean_mv, NULL, NULL, NULL,
-                        0, NULL, NULL);
+    ret = dataq_get_adc(ADC_CHAN_CURRENT, NULL, &mean_mv, NULL, NULL, NULL);
     if (ret == 0) {
         data->part1.current_ma = convert_adc_current(mean_mv/1000.);
+    } else {
+        data->part1.current_ma = ERROR_NO_VALUE;
     }
 
-    // data part1 chamber_pressure_xx_mtorr
-    ret = dataq_get_adc(ADC_CHAN_CHAMBER_PRESSURE, NULL, NULL, NULL, NULL, &max_mv,
-                        0, NULL, NULL);
+    // data part1 pressure_xx_mtorr
+    ret = dataq_get_adc(ADC_CHAN_PRESSURE, NULL, NULL, NULL, NULL, &max_mv);
     if (ret == 0) {
-        data->part1.chamber_pressure_d2_mtorr = convert_adc_chamber_pressure(max_mv/1000., GAS_ID_D2);
-        data->part1.chamber_pressure_n2_mtorr = convert_adc_chamber_pressure(max_mv/1000., GAS_ID_N2);
+        data->part1.pressure_d2_mtorr = convert_adc_pressure(max_mv/1000., GAS_ID_D2);
+        data->part1.pressure_n2_mtorr = convert_adc_pressure(max_mv/1000., GAS_ID_N2);
+    } else {
+        data->part1.pressure_d2_mtorr = ERROR_NO_VALUE;
+        data->part1.pressure_n2_mtorr = ERROR_NO_VALUE;
     }
 
     // data part1 average_cpm XXX
@@ -300,8 +295,19 @@ static void init_data_struct(data_t * data, time_t time_now)
     // data part2
     //
 
-    // data part2: adc_diag
-    // XXX tbd
+    // data part2: magic
+    data->part2.magic = MAGIC_DATA_PART2;
+
+    // data part2: adc_samples
+    valid1 = dataq_get_adc_samples(ADC_CHAN_VOLTAGE, 
+                                   data->part2.voltage_adc_samples_mv,
+                                   MAX_ADC_SAMPLES);
+    valid2 = dataq_get_adc_samples(ADC_CHAN_CURRENT, 
+                                   data->part2.current_adc_samples_mv,
+                                   MAX_ADC_SAMPLES);
+    valid3 = dataq_get_adc_samples(ADC_CHAN_PRESSURE, 
+                                   data->part2.pressure_adc_samples_mv,
+                                   MAX_ADC_SAMPLES);
 
     // data part2: jpeg_buff
     pthread_mutex_lock(&jpeg_mutex);
@@ -315,8 +321,12 @@ static void init_data_struct(data_t * data, time_t time_now)
     // data part1 (continued)
     //
 
-    data->part1.data_part2_length = sizeof(struct data_part2_s) + data->part2.jpeg_buff_len;
-    data->part1.data_part2_jpeg_buff_valid = (data->part2.jpeg_buff_len != 0);
+    data->part1.data_part2_offset                        = 0;   // for display pgm
+    data->part1.data_part2_length                        = sizeof(struct data_part2_s) + data->part2.jpeg_buff_len;
+    data->part1.data_part2_jpeg_buff_valid               = (data->part2.jpeg_buff_len != 0);
+    data->part1.data_part2_voltage_adc_samples_mv_valid  = valid1;
+    data->part1.data_part2_current_adc_samples_mv_valid  = valid2;
+    data->part1.data_part2_pressure_adc_samples_mv_valid = valid3;
 }
 
 // -----------------  CONVERT ADC HV VOLTAGE & CURRENT  ------------------------------
@@ -360,7 +370,7 @@ static float convert_adc_current(float adc_volts)
     return adc_volts * 10.;    // mA
 }
 
-// -----------------  CONVERT ADC CHAMBER PRESSURE GAUGE  ----------------------------
+// -----------------  CONVERT ADC PRESSURE GAUGE  ----------------------------
 
 // Notes:
 // - Refer to http://www.lesker.com/newweb/gauges/pdf/manuals/275iusermanual.pdf
@@ -442,7 +452,7 @@ gas_t gas_tbl[] = {
 
 // --- code ---
 
-static float convert_adc_chamber_pressure(float adc_volts, uint32_t gas_id)
+static float convert_adc_pressure(float adc_volts, uint32_t gas_id)
 {
     gas_t * gas = &gas_tbl[gas_id];
     int32_t i = 0;

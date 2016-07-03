@@ -4,15 +4,14 @@
 #define CAM_HEIGHT      480
 #define FRAMES_PER_SEC  5
 
-#define ADC_CHAN_VOLTAGE           1  // XXX names
-#define ADC_CHAN_CURRENT           2
-#define ADC_CHAN_CHAMBER_PRESSURE  3
+#define ADC_CHAN_VOLTAGE   1  // XXX names
+#define ADC_CHAN_CURRENT   2
+#define ADC_CHAN_PRESSURE  3
 
 #define PORT 9001
 
 #define MAX_DETECTOR_CHAN    4
-#define MAX_ADC_DIAG_CHAN    4
-#define MAX_ADC_DIAG_VALUE   1000
+#define MAX_ADC_SAMPLES      1200
 
 #define MAGIC_DATA_PART1  0xaabbccdd55aa55aa
 #define MAGIC_DATA_PART2  0x77777777aaaaaaaa
@@ -41,19 +40,23 @@ typedef struct {
         float    voltage_min_kv;
         float    voltage_max_kv;
         float    current_ma;
-        float    chamber_pressure_d2_mtorr;
-        float    chamber_pressure_n2_mtorr;
+        float    pressure_d2_mtorr;
+        float    pressure_n2_mtorr;
         float    average_cpm[MAX_DETECTOR_CHAN];
         float    moving_average_cpm[MAX_DETECTOR_CHAN];
 
         off_t    data_part2_offset;   // for display pgm
         uint32_t data_part2_length;
         bool     data_part2_jpeg_buff_valid;
-        uint8_t  pad[3];
+        bool     data_part2_voltage_adc_samples_mv_valid;
+        bool     data_part2_current_adc_samples_mv_valid;
+        bool     data_part2_pressure_adc_samples_mv_valid;
     } part1;
     struct data_part2_s {
         uint64_t magic;
-        int16_t  adc_diag[MAX_ADC_DIAG_CHAN][MAX_ADC_DIAG_VALUE];
+        int16_t  voltage_adc_samples_mv[MAX_ADC_SAMPLES];
+        int16_t  current_adc_samples_mv[MAX_ADC_SAMPLES];
+        int16_t  pressure_adc_samples_mv[MAX_ADC_SAMPLES];
         uint32_t jpeg_buff_len;
         uint8_t  pad[4];
         uint8_t  jpeg_buff[0];

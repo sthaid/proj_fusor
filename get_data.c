@@ -242,7 +242,7 @@ static void init_data_struct(data_t * data, time_t time_now)
 {
     int16_t mean_mv, min_mv, max_mv;
     int32_t ret;
-    bool    valid1, valid2, valid3;
+    bool    ret1, ret2, ret3;
 
     // 
     // zero data struct 
@@ -299,15 +299,15 @@ static void init_data_struct(data_t * data, time_t time_now)
     data->part2.magic = MAGIC_DATA_PART2;
 
     // data part2: adc_samples
-    valid1 = dataq_get_adc_samples(ADC_CHAN_VOLTAGE, 
-                                   data->part2.voltage_adc_samples_mv,
-                                   MAX_ADC_SAMPLES);
-    valid2 = dataq_get_adc_samples(ADC_CHAN_CURRENT, 
-                                   data->part2.current_adc_samples_mv,
-                                   MAX_ADC_SAMPLES);
-    valid3 = dataq_get_adc_samples(ADC_CHAN_PRESSURE, 
-                                   data->part2.pressure_adc_samples_mv,
-                                   MAX_ADC_SAMPLES);
+    ret1 = dataq_get_adc_samples(ADC_CHAN_VOLTAGE, 
+                                 data->part2.voltage_adc_samples_mv,
+                                 MAX_ADC_SAMPLES);
+    ret2 = dataq_get_adc_samples(ADC_CHAN_CURRENT, 
+                                 data->part2.current_adc_samples_mv,
+                                 MAX_ADC_SAMPLES);
+    ret3 = dataq_get_adc_samples(ADC_CHAN_PRESSURE, 
+                                 data->part2.pressure_adc_samples_mv,
+                                 MAX_ADC_SAMPLES);
 
     // data part2: jpeg_buff
     pthread_mutex_lock(&jpeg_mutex);
@@ -324,9 +324,9 @@ static void init_data_struct(data_t * data, time_t time_now)
     data->part1.data_part2_offset                        = 0;   // for display pgm
     data->part1.data_part2_length                        = sizeof(struct data_part2_s) + data->part2.jpeg_buff_len;
     data->part1.data_part2_jpeg_buff_valid               = (data->part2.jpeg_buff_len != 0);
-    data->part1.data_part2_voltage_adc_samples_mv_valid  = valid1;
-    data->part1.data_part2_current_adc_samples_mv_valid  = valid2;
-    data->part1.data_part2_pressure_adc_samples_mv_valid = valid3;
+    data->part1.data_part2_voltage_adc_samples_mv_valid  = (ret1 == 0);
+    data->part1.data_part2_current_adc_samples_mv_valid  = (ret2 == 0);
+    data->part1.data_part2_pressure_adc_samples_mv_valid = (ret3 == 0);
 }
 
 // -----------------  CONVERT ADC HV VOLTAGE & CURRENT  ------------------------------

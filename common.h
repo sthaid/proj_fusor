@@ -27,17 +27,12 @@ SOFTWARE.
 #define CAM_HEIGHT      480
 #define FRAMES_PER_SEC  5
 
-#define ADC_CHAN_VOLTAGE   1  // XXX names
-#define ADC_CHAN_CURRENT   2
-#define ADC_CHAN_PRESSURE  3
-
-#define PORT 9001
+#define DATAQ_ADC_CHAN_VOLTAGE   1
+#define DATAQ_ADC_CHAN_CURRENT   2
+#define DATAQ_ADC_CHAN_PRESSURE  3
+#define DATAQ_MAX_ADC_SAMPLES    1200
 
 #define MAX_DETECTOR_CHAN    4
-#define MAX_ADC_SAMPLES      1200
-
-#define MAGIC_DATA_PART1  0xaabbccdd55aa55aa
-#define MAGIC_DATA_PART2  0x77777777aaaaaaaa
 
 #define IS_ERROR(x) ((int32_t)(x) >= ERROR_FIRST && (int32_t)(x) <= ERROR_LAST)
 #define ERROR_FIRST                   1000000
@@ -50,6 +45,11 @@ SOFTWARE.
      (int32_t)(x) == ERROR_OVER_PRESSURE          ? "OVPRES" : \
      (int32_t)(x) == ERROR_NO_VALUE               ? "NOVAL"    \
                                                   : "????")
+
+#define PORT 9001
+
+#define MAGIC_DATA_PART1  0xaabbccdd55aa55aa
+#define MAGIC_DATA_PART2  0x77777777aaaaaaaa
 
 // data_part1_s and data_part2_s are each padded to 8 byte boundary
 typedef struct {
@@ -75,9 +75,9 @@ typedef struct {
     } part1;
     struct data_part2_s {
         uint64_t magic;
-        int16_t  voltage_adc_samples_mv[MAX_ADC_SAMPLES];
-        int16_t  current_adc_samples_mv[MAX_ADC_SAMPLES];
-        int16_t  pressure_adc_samples_mv[MAX_ADC_SAMPLES];
+        int16_t  voltage_adc_samples_mv[DATAQ_MAX_ADC_SAMPLES];
+        int16_t  current_adc_samples_mv[DATAQ_MAX_ADC_SAMPLES];
+        int16_t  pressure_adc_samples_mv[DATAQ_MAX_ADC_SAMPLES];
         uint32_t jpeg_buff_len;
         uint8_t  pad[4];
         uint8_t  jpeg_buff[0];

@@ -1013,7 +1013,7 @@ static void draw_graph1(int32_t file_idx)
             if (_valid && dp2 != NULL) { \
                 float tmp = (graph_y_range / (float)(y_max_mv)); \
                 int32_t y_limit = graph_y_origin - graph_y_range; \
-                for (i = 0; i < MAX_ADC_SAMPLES; i++) { \
+                for (i = 0; i < DATAQ_MAX_ADC_SAMPLES; i++) { \
                     point_t * p = &(_graph)->points[i]; \
                     p->x = graph_x_origin + i; \
                     p->y = graph_y_origin - tmp * dp2->_field_name[i]; \
@@ -1223,10 +1223,10 @@ static int32_t generate_test_file(void)
 
         // data part2
         dp2->magic = MAGIC_DATA_PART2;
-        for (i = 0; i < MAX_ADC_SAMPLES; i++) {
-            dp2->voltage_adc_samples_mv[i]  = 10000 * i / MAX_ADC_SAMPLES;
-            dp2->current_adc_samples_mv[i]  =  5000 * i / MAX_ADC_SAMPLES;
-            dp2->pressure_adc_samples_mv[i] =  1000 * i / MAX_ADC_SAMPLES;
+        for (i = 0; i < DATAQ_MAX_ADC_SAMPLES; i++) {
+            dp2->voltage_adc_samples_mv[i]  = 10000 * i / DATAQ_MAX_ADC_SAMPLES;
+            dp2->current_adc_samples_mv[i]  =  5000 * i / DATAQ_MAX_ADC_SAMPLES;
+            dp2->pressure_adc_samples_mv[i] =  1000 * i / DATAQ_MAX_ADC_SAMPLES;
         }
         dp2->jpeg_buff_len = jpeg_buff_len;
         memcpy(dp2->jpeg_buff, jpeg_buff, jpeg_buff_len);

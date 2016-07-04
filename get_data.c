@@ -109,9 +109,9 @@ static void init(void)
     dataq_init(0.5,   // averaging duration in secs
                1200,  // scan rate  (samples per second)
                3,     // number of adc channels
-               ADC_CHAN_VOLTAGE,
-               ADC_CHAN_CURRENT,
-               ADC_CHAN_PRESSURE);
+               DATAQ_ADC_CHAN_VOLTAGE,
+               DATAQ_ADC_CHAN_CURRENT,
+               DATAQ_ADC_CHAN_PRESSURE);
 }
 
 static void server(void)
@@ -281,7 +281,7 @@ static void init_data_struct(data_t * data, time_t time_now)
     data->part1.time  = time_now;
 
     // data part1 voltage_min_kv, voltage_max_kv, and voltage_mean_kv
-    ret = dataq_get_adc(ADC_CHAN_VOLTAGE, NULL, &mean_mv, NULL, &min_mv, &max_mv);
+    ret = dataq_get_adc(DATAQ_ADC_CHAN_VOLTAGE, NULL, &mean_mv, NULL, &min_mv, &max_mv);
     if (ret == 0) {
         data->part1.voltage_min_kv  = convert_adc_voltage(min_mv/1000.);
         data->part1.voltage_max_kv  = convert_adc_voltage(max_mv/1000.);
@@ -293,7 +293,7 @@ static void init_data_struct(data_t * data, time_t time_now)
     }
 
     // data part1 current_ma
-    ret = dataq_get_adc(ADC_CHAN_CURRENT, NULL, &mean_mv, NULL, NULL, NULL);
+    ret = dataq_get_adc(DATAQ_ADC_CHAN_CURRENT, NULL, &mean_mv, NULL, NULL, NULL);
     if (ret == 0) {
         data->part1.current_ma = convert_adc_current(mean_mv/1000.);
     } else {
@@ -301,7 +301,7 @@ static void init_data_struct(data_t * data, time_t time_now)
     }
 
     // data part1 pressure_xx_mtorr
-    ret = dataq_get_adc(ADC_CHAN_PRESSURE, NULL, NULL, NULL, NULL, &max_mv);
+    ret = dataq_get_adc(DATAQ_ADC_CHAN_PRESSURE, NULL, NULL, NULL, NULL, &max_mv);
     if (ret == 0) {
         data->part1.pressure_d2_mtorr = convert_adc_pressure(max_mv/1000., GAS_ID_D2);
         data->part1.pressure_n2_mtorr = convert_adc_pressure(max_mv/1000., GAS_ID_N2);
@@ -321,15 +321,15 @@ static void init_data_struct(data_t * data, time_t time_now)
     data->part2.magic = MAGIC_DATA_PART2;
 
     // data part2: adc_samples
-    ret1 = dataq_get_adc_samples(ADC_CHAN_VOLTAGE, 
+    ret1 = dataq_get_adc_samples(DATAQ_ADC_CHAN_VOLTAGE, 
                                  data->part2.voltage_adc_samples_mv,
-                                 MAX_ADC_SAMPLES);
-    ret2 = dataq_get_adc_samples(ADC_CHAN_CURRENT, 
+                                 DATAQ_MAX_ADC_SAMPLES);
+    ret2 = dataq_get_adc_samples(DATAQ_ADC_CHAN_CURRENT, 
                                  data->part2.current_adc_samples_mv,
-                                 MAX_ADC_SAMPLES);
-    ret3 = dataq_get_adc_samples(ADC_CHAN_PRESSURE, 
+                                 DATAQ_MAX_ADC_SAMPLES);
+    ret3 = dataq_get_adc_samples(DATAQ_ADC_CHAN_PRESSURE, 
                                  data->part2.pressure_adc_samples_mv,
-                                 MAX_ADC_SAMPLES);
+                                 DATAQ_MAX_ADC_SAMPLES);
 
     // data part2: jpeg_buff
     pthread_mutex_lock(&jpeg_mutex);

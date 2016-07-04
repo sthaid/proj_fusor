@@ -59,19 +59,53 @@ Enable core dumps for suid processes
 - add te following to /etc/sysctl.conf, and reboot
       fs.suid_dumpable=1
 
-=================================
-TITLE: GRAPHICS ACCELERATOR
-=================================
- 
-Not needed to run the fusor instrumentation program.
-
-To test graphics accelerator:
-- need to configure advanced gpu driver using raspi-config
-- sudo apt-get install mesa-utils
-- glxgears
-- should see about 60 FPS and no graphics glitches
-- note: I did see a hang with graphics accel enabled, when resising terminal
-        window;  so suggest don't use X windows
+Install support software for the Measurement Computing USB 204 ADC
+- The procedure outlined below is from http://www.mccdaq.com/TechTips/TechTip-9.aspx
+- Procedure ...
+    # make a director
+    mkdir mccdaq
+    cd mccdaq/
+  
+    # Download MCC Drivers and test apps are contained in the MCCLIBHID.1.61.tgz 
+    sudo apt-get install ftp
+    ftp lx10.tx.ncsu.edu   (anonymous  <your-email-address>)
+      cd pub/Linux/drivers
+      get 61-mcc.rules
+      cd USB
+      get MCCLIBUSB.tgz
+      exit
+  
+    # Install libusb, a C library that provides generic access to USB devices:
+    sudo apt-get install libusb-1.0-0 libusb-1.0-0-dev
+  
+    # Copy the mcc USB rules file to the /etc/udev/rules.d directory, renaming it to 99-mcc.rules 
+    # (preventing an issue with the standard naming on the Raspberry Pi): 
+    sudo cp 61-mcc.rules /etc/udev/rules.d/99-mcc.rules
+  
+    # Clone the hidapi GIT repository to the home/pi directory, and
+    # build & install
+    sudo apt-get install libudev-dev libfox-1.6-dev autotools-dev autoconf automake libtool
+    git clone git://github.com/signal11/hidapi.git
+    cd hidapi
+    ./bootstrap
+    ./configure 
+    make
+    sudo make install
+  
+    # reboot
+    sudo reboot
+  
+    # install MCC Linux software
+    cd mccdaq/
+    tar zxvf MCCLIBUSB.tgz
+    cd mcc-libusb
+    make
+    sudo make install
+    sudo ldconfig
+  
+    # run the test app
+    cd mcc-libusb
+    ./test-usb20X
 
 ================================
 TITLE: BUILD AND INSTALL SDL2 ON RASPBERRY PI
@@ -192,3 +226,16 @@ colors default
 syntax on
 set hlsearch
 
+=================================
+TITLE: GRAPHICS ACCELERATOR
+=================================
+ 
+** Not needed to run the fusor instrumentation program. **
+
+To test graphics accelerator:
+- need to configure advanced gpu driver using raspi-config
+- sudo apt-get install mesa-utils
+- glxgears
+- should see about 60 FPS and no graphics glitches
+- note: I did see a hang with graphics accel enabled, when resising terminal
+        window;  so suggest don't use X windows

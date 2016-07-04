@@ -1,13 +1,24 @@
-#if 0
-TODO
-- copyrights
-- Graph Cycling in live mode
-  - main graph,  add neutron counts
-  - diag: the current voltage graph , and add the neutron detector voltage
-  - detector moving average
-  - detector average
-- YYY msync to sync
-#endif
+/*
+Copyright (c) 2016 Steven Haid
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+*/
 
 #define _FILE_OFFSET_BITS 64
 
@@ -50,7 +61,7 @@ TODO
 
 #define MODE_STR(m) ((m) == LIVE ? "LIVE" : (m) == PLAYBACK ? "PLAYBACK" : "TEST")
 
-#define MAGIC_FILE 0x1122334455667788   // YYY magics could incorporte sizeof data1/2
+#define MAGIC_FILE 0x1122334455667788
 
 #define MAX_FILE_DATA_PART1   86400   // 1 day
 #define MAX_DATA_PART2_LENGTH 1000000
@@ -79,6 +90,8 @@ TODO
 
 enum mode {LIVE, PLAYBACK, TEST};
 
+enum get_live_data_state {STATE_INACTIVE, STATE_ACTIVE, STATE_ERROR};
+
 typedef struct {
     uint64_t magic;
     uint64_t start_time;
@@ -97,26 +110,26 @@ typedef struct {
 // variables
 //
 
-static enum mode             initial_mode;
-static enum mode             current_mode;
+static enum mode                mode;
+static enum get_live_data_state get_live_data_state;
 
-static uint32_t              win_width;
-static uint32_t              win_height;
+static uint32_t                 win_width;
+static uint32_t                 win_height;
 
-static int32_t               file_fd;
-static file_hdr_t          * file_hdr;
-static struct data_part1_s * file_data_part1;
-static int32_t               file_idx_global;
+static int32_t                  file_fd;
+static file_hdr_t             * file_hdr;
+static struct data_part1_s    * file_data_part1;
+static int32_t                  file_idx_global;
 
-static int32_t               graph_x_origin;
-static int32_t               graph_x_range;
-static int32_t               graph_y_origin;
-static int32_t               graph_y_range;
-static rect_t                graph_pane_global;
-static int32_t               graph_select;
-static int32_t               graph_scale_idx[MAX_GRAPH];
+static int32_t                  graph_x_origin;
+static int32_t                  graph_x_range;
+static int32_t                  graph_y_origin;
+static int32_t                  graph_y_range;
+static rect_t                   graph_pane_global;
+static int32_t                  graph_select;
+static int32_t                  graph_scale_idx[MAX_GRAPH];
 
-static int32_t               test_file_secs;
+static int32_t                  test_file_secs;
 
 //
 // prototypes
@@ -124,7 +137,7 @@ static int32_t               test_file_secs;
 
 static int32_t initialize(int32_t argc, char ** argv);
 static void usage(void);
-static void * client_thread(void * cx);
+static void * get_live_data_thread(void * cx);
 static int32_t display_handler();
 static void draw_camera_image(rect_t * cam_pane, int32_t file_idx);
 static void draw_data_values(rect_t * data_pane, int32_t file_idx);
@@ -148,7 +161,7 @@ int32_t main(int32_t argc, char **argv)
         return 1;
     }
 
-    switch (current_mode) {
+    switch (mode) {
     case TEST:
         if (generate_test_file() < 0) {
             ERROR("generate_test_file failed, program terminating\n");
@@ -162,7 +175,7 @@ int32_t main(int32_t argc, char **argv)
         }
         break;
     default:
-        FATAL("mode %d not valid\n", current_mode);
+        FATAL("mode %d not valid\n", mode);
         break;
     }
 
@@ -194,7 +207,7 @@ static int32_t initialize(int32_t argc, char ** argv)
          sizeof(data_t), sizeof(struct data_part1_s), sizeof(struct data_part2_s));
 
     // init globals that are not 0
-    initial_mode = LIVE;
+    mode = LIVE;
     file_idx_global = -1;
     strcpy(servername, "rpi_data");
     win_width = DEFAULT_WIN_WIDTH;
@@ -232,11 +245,11 @@ static int32_t initialize(int32_t argc, char ** argv)
             strcpy(servername, optarg);
             break;
         case 'p':
-            initial_mode = PLAYBACK;
+            mode = PLAYBACK;
             strcpy(filename, optarg);
             break;
         case 't':
-            initial_mode = TEST;
+            mode = TEST;
             if (sscanf(optarg, "%d", &test_file_secs) != 1 || test_file_secs < 1 || test_file_secs > MAX_FILE_DATA_PART1) {
                 ERROR("test_file_secs '%s' is invalid\n",optarg);
                 return -1;
@@ -256,24 +269,24 @@ static int32_t initialize(int32_t argc, char ** argv)
     //     generate test mode filename
     //   endif
     // endif
-    if (initial_mode == LIVE || initial_mode == TEST) {
+    if (mode == LIVE || mode == TEST) {
         if (argc > optind) {
             strcpy(filename, argv[optind]);
-        } else if (initial_mode == LIVE) {
+        } else if (mode == LIVE) {
             time_t t = time(NULL);
             struct tm * tm = localtime(&t);
             sprintf(filename, "fusor_%2.2d%2.2d%2.2d_%2.2d%2.2d%2.2d.dat",
                     tm->tm_mon+1, tm->tm_mday, tm->tm_year-100,
                     tm->tm_hour, tm->tm_min, tm->tm_sec);
-        } else {  // initial_mode is TEST
+        } else {  // mode is TEST
             sprintf(filename, "fusor_test_%d_secs.dat", test_file_secs);
         }
     }
 
     // print mode and filename
-    INFO("mode            = %s\n", MODE_STR(initial_mode));
+    INFO("mode            = %s\n", MODE_STR(mode));
     INFO("filename        = %s\n", filename);
-    if (initial_mode == TEST) {
+    if (mode == TEST) {
         INFO("test_file_secs  = %d\n", test_file_secs);
     }
 
@@ -281,7 +294,7 @@ static int32_t initialize(int32_t argc, char ** argv)
     //   verify filename does not exist
     //   create and init the file  
     // endif
-    if (initial_mode == LIVE || initial_mode == TEST) {
+    if (mode == LIVE || mode == TEST) {
         // verify filename does not exist
         struct stat stat_buf;
         if (stat(filename, &stat_buf) == 0) {
@@ -315,7 +328,7 @@ static int32_t initialize(int32_t argc, char ** argv)
     // if in playback mode then
     //   verify filename exists
     // endif
-    if (initial_mode == PLAYBACK) {
+    if (mode == PLAYBACK) {
         struct stat stat_buf;
         if (stat(filename, &stat_buf) == -1) {
             ERROR("file %s does not exist, %s\n", filename, strerror(errno));
@@ -364,7 +377,7 @@ static int32_t initialize(int32_t argc, char ** argv)
     //   create thread to acquire data from server
     //   wait for first data to be received from server
     // endif
-    if (initial_mode == LIVE) {
+    if (mode == LIVE) {
         int32_t sfd;
 
         // print servername
@@ -397,13 +410,13 @@ static int32_t initialize(int32_t argc, char ** argv)
             return -1;
         }
 
-        // create client_thread        
-        if (pthread_create(&thread, NULL, client_thread, (void*)(uintptr_t)sfd) != 0) {
-            ERROR("pthread_create client_thread, %s\n", strerror(errno));
+        // create get_live_data_thread        
+        if (pthread_create(&thread, NULL, get_live_data_thread, (void*)(uintptr_t)sfd) != 0) {
+            ERROR("pthread_create get_live_data_thread, %s\n", strerror(errno));
             return -1;
         }
 
-        // wait for client_thread to get first data, tout 5 secs
+        // wait for get_live_data_thread to get first data, tout 5 secs
         wait_ms = 0;
         while (file_idx_global == -1) {
             wait_ms += 10;
@@ -419,16 +432,13 @@ static int32_t initialize(int32_t argc, char ** argv)
     //   verify the first entry of the file_data_part1 is valid, and
     //   set file_idx_global
     // endif
-    if (initial_mode == PLAYBACK) {
+    if (mode == PLAYBACK) {
         if (file_data_part1[0].magic != MAGIC_DATA_PART1) {
             ERROR("no data in file %s (0x%"PRIx64"\n", filename, file_data_part1[0].magic);
             return -1;
         }
         file_idx_global = 0;
     }
-
-    // set current_mode to initial_mode
-    current_mode = initial_mode;
 
     // return success
     return 0;
@@ -441,15 +451,17 @@ static void usage(void)
 
 // -----------------  CLIENT THREAD  -------------------------------------------------
 
-static void * client_thread(void * cx)
+static void * get_live_data_thread(void * cx)
 {
     int32_t               sfd;
     int32_t               len;
     off_t                 offset;
     uint64_t              last_time;
+    struct timeval        rcvto;
     struct data_part1_s   data_part1;
     struct data_part2_s * data_part2;
 
+    // init
     sfd    = (uintptr_t)cx;
     offset = FILE_DATA_PART2_OFFSET;
     last_time = -1;
@@ -458,6 +470,17 @@ static void * client_thread(void * cx)
         FATAL("calloc\n");
     }
 
+    // set recv timeout to 2 seconds
+    rcvto.tv_sec  = 2;
+    rcvto.tv_usec = 0;
+    if (setsockopt(sfd, SOL_SOCKET, SO_RCVTIMEO, (char *)&rcvto, sizeof(rcvto)) < 0) {
+        FATAL("setsockopt SO_RCVTIMEO, %s\n",strerror(errno));
+    }
+
+    // set state
+    get_live_data_state = STATE_ACTIVE;
+
+    // loop getting data
     while (true) {
         // if file is full then terminate thread
         if (file_idx_global >= MAX_FILE_DATA_PART1) {
@@ -521,7 +544,7 @@ static void * client_thread(void * cx)
         // update file header, and
         // if live mode then update file_idx_global
         file_hdr->max++;
-        if (current_mode == LIVE) {
+        if (mode == LIVE) {
             file_idx_global = file_hdr->max - 1;
         }
 
@@ -545,9 +568,12 @@ static void * client_thread(void * cx)
 #endif
     }
 
-    // XXX set error indicator here 
-    // XXX how to handle timeouts in receiving data 
-    
+    // an error has occurred
+    // - set state
+    // - set mode
+    get_live_data_state = STATE_ERROR;  
+    mode = PLAYBACK;
+    ERROR("thread terminating\n");
     return NULL;
 }
 
@@ -567,10 +593,12 @@ static int32_t display_handler(void)
     int32_t       file_idx;
     int32_t       event_processed_count;
     int32_t       file_max_last;
+    bool          lost_conn_msg_displayed;
 
     // initializae 
     quit = false;
     file_max_last = -1;
+    lost_conn_msg_displayed = false;
 
     if (sdl_init(win_width, win_height) < 0) {
         ERROR("sdl_init %dx%d failed\n", win_width, win_height);
@@ -603,7 +631,7 @@ static int32_t display_handler(void)
             FATAL("invalid file_idx %d, max =%d\n",
                   file_idx, file_hdr->max);
         }
-        INFO("ZZZ file_idx %d\n", file_idx);
+        DEBUG("file_idx %d\n", file_idx);
 
         // initialize for display update
         sdl_display_init();
@@ -615,7 +643,7 @@ static int32_t display_handler(void)
         sdl_render_pane_border(&graph_pane_full, GREEN);
 
         // draw title line
-        if (current_mode == LIVE) {
+        if (mode == LIVE) {
             sdl_render_text(&title_pane, 0, 0, 0, "LIVE", GREEN, BLACK);
         } else {
             sdl_render_text(&title_pane, 0, 0, 0, "PLAYBACK", RED, BLACK);
@@ -627,6 +655,11 @@ static int32_t display_handler(void)
                 tm->tm_mon+1, tm->tm_mday, tm->tm_year-100,
                 tm->tm_hour, tm->tm_min, tm->tm_sec);
         sdl_render_text(&title_pane, 0, 10, 0, str, WHITE, BLACK);
+
+        if (get_live_data_state == STATE_ERROR) {
+            sdl_render_text(&title_pane, 0, 35, 0, "LOST CONNECTION", RED, BLACK);
+            lost_conn_msg_displayed = true;
+        }
 
         sdl_render_text(&title_pane, 0, -5, 0, "(ESC)", WHITE, BLACK);
         sdl_render_text(&title_pane, 0, -11, 0, "(?)", WHITE, BLACK);
@@ -700,7 +733,7 @@ static int32_t display_handler(void)
                     x = 0;
                 }
                 file_idx_global = x;
-                current_mode = PLAYBACK;
+                mode = PLAYBACK;
                 break; }
             case SDL_EVENT_KEY_RIGHT_ARROW:
             case SDL_EVENT_KEY_CTRL_RIGHT_ARROW:
@@ -712,23 +745,19 @@ static int32_t display_handler(void)
                 if (x >= file_hdr->max) {
                     x = file_hdr->max - 1;
                     file_idx_global = x;
-                    if (initial_mode == LIVE) {
-                        current_mode = LIVE;
-                    }
+                    mode = (get_live_data_state == STATE_ACTIVE ? LIVE : PLAYBACK);
                 } else {
                     file_idx_global = x;
-                    current_mode = PLAYBACK;
+                    mode = PLAYBACK;
                 }
                 break; }
             case SDL_EVENT_KEY_HOME:
                 file_idx_global = 0;
-                current_mode = PLAYBACK;
+                mode = PLAYBACK;
                 break;
             case SDL_EVENT_KEY_END:
                 file_idx_global = file_hdr->max - 1;
-                if (initial_mode == LIVE) {
-                    current_mode = LIVE;
-                }
+                mode = (get_live_data_state == STATE_ACTIVE ? LIVE : PLAYBACK);
                 break;
             case '-': 
                 graph_scale_idx[graph_select]--;
@@ -743,13 +772,12 @@ static int32_t display_handler(void)
 
             // test if should break out of this loop
             if ((quit) ||
+                (get_live_data_state == STATE_ERROR && !lost_conn_msg_displayed) ||
                 ((event->event == SDL_EVENT_NONE) &&
                  ((event_processed_count > 0) ||
                   (file_idx != file_idx_global) ||
                   (file_hdr->max != file_max_last))))
             {
-                INFO("epc=%d  file_idx_global/file_idx=%d %d  max/last= %d %d  \n\n",  
-                   event_processed_count, file_idx_global, file_idx, file_hdr->max, file_max_last);
                 file_max_last = file_hdr->max;
                 break;
             }
@@ -850,7 +878,7 @@ static void draw_data_values(rect_t * data_pane, int32_t file_idx)
             val2str(s3, dp1->voltage_max_kv));
     sdl_render_text(data_pane, 0, 0, 1, str, WHITE, BLACK);
 
-    sprintf(str, "MA    %s",  // YYY add min and max
+    sprintf(str, "MA    %s",  // XXX add min and max
             val2str(s1, dp1->current_ma));
     sdl_render_text(data_pane, 1, 0, 1, str, WHITE, BLACK);
 
@@ -865,7 +893,6 @@ static void draw_data_values(rect_t * data_pane, int32_t file_idx)
 
 // - - - - - - - - -  DISPLAY HANDLER - DRAW GRAPH  - - - - - - - - - - - - - - - - 
 
-//XXX 1200 
 static void draw_graph_init(rect_t * graph_pane)
 {
     graph_pane_global = *graph_pane;
@@ -886,7 +913,7 @@ static void draw_graph0(int32_t file_idx)
     float    x_pixels_per_sec;
 
     static int32_t x_time_span_sec_tbl[] = {60, 600, 3600, 86400};
-    static graph_t g_kv, g_ma, g_mtorr;  // XXX malloc and free
+    static graph_t g_kv, g_ma, g_mtorr;
 
     #define MAX_X_TIME_SPAN_SEC_TBL \
         (sizeof(x_time_span_sec_tbl) / sizeof(x_time_span_sec_tbl[0]))
@@ -904,6 +931,7 @@ static void draw_graph0(int32_t file_idx)
             x = graph_x_origin + graph_x_range - 1; \
             for (idx = file_idx_end; idx >= file_idx_start; idx--) { \
                 float tmp = (graph_y_range / (float)(_val_max)); \
+                int32_t y_limit = graph_y_origin - graph_y_range; \
                 if (idx >= 0 &&  \
                     idx < file_hdr->max && \
                     !IS_ERROR(file_data_part1[idx]._field_name)) \
@@ -911,6 +939,9 @@ static void draw_graph0(int32_t file_idx)
                     point_t * p = &(_graph)->points[(_graph)->max_points]; \
                     p->x = x; \
                     p->y = graph_y_origin - tmp * file_data_part1[idx]._field_name; \
+                    if (p->y < y_limit) { \
+                        p->y = y_limit; \
+                    } \
                     (_graph)->max_points++; \
                 } \
                 x -= x_pixels_per_sec; \
@@ -930,7 +961,7 @@ static void draw_graph0(int32_t file_idx)
     cursor_time_sec = file_data_part1[file_idx].time;
 
     // init file_idx_start & file_idx_end
-    if (current_mode == LIVE) {
+    if (mode == LIVE) {
         file_idx_end   = file_idx;
         file_idx_start = file_idx_end - (x_time_span_sec - 1);
     } else {
@@ -966,6 +997,8 @@ static void draw_graph1(int32_t file_idx)
     char                  info_str[100];
 
     static graph_t g_voltage_samples;
+    static graph_t g_current_samples;
+    static graph_t g_pressure_samples;
     static int32_t y_max_mv_tbl[] = {100, 1000, 2000, 5000, 10000};
 
     #define MAX_Y_MAX_MV_TBL (sizeof(y_max_mv_tbl)/sizeof(y_max_mv_tbl[0]))
@@ -978,10 +1011,15 @@ static void draw_graph1(int32_t file_idx)
             (_graph)->color = (_color);; \
             (_graph)->max_points = 0; \
             if (_valid && dp2 != NULL) { \
-                for (i = 0; i < MAX_ADC_SAMPLES; i++) { \
+                float tmp = (graph_y_range / (float)(y_max_mv)); \
+                int32_t y_limit = graph_y_origin - graph_y_range; \
+                for (i = 0; i < DATAQ_MAX_ADC_SAMPLES; i++) { \
                     point_t * p = &(_graph)->points[i]; \
                     p->x = graph_x_origin + i; \
-                    p->y = graph_y_origin; /*XXX*/\
+                    p->y = graph_y_origin - tmp * dp2->_field_name[i]; \
+                    if (p->y < y_limit) { \
+                        p->y = y_limit; \
+                    } \
                     (_graph)->max_points++; \
                 } \
             } \
@@ -1005,10 +1043,15 @@ static void draw_graph1(int32_t file_idx)
     // init graph_t
     INIT_GRAPH(&g_voltage_samples, "VOLTAGE", voltage_adc_samples_mv, \
                RED, dp1->data_part2_voltage_adc_samples_mv_valid);
+    INIT_GRAPH(&g_current_samples, "CURRENT", current_adc_samples_mv, \
+               GREEN, dp1->data_part2_current_adc_samples_mv_valid);
+    INIT_GRAPH(&g_pressure_samples, "PRESSURE", pressure_adc_samples_mv, \
+               BLUE, dp1->data_part2_pressure_adc_samples_mv_valid);
 
     // draw the graph
     sprintf(info_str, "Y_MAX %d mV  (-/+)", y_max_mv);
-    draw_graph_common("ADC SAMPLES - 1 SECOND", info_str, -1, NULL, 1, &g_voltage_samples);           
+    draw_graph_common("ADC SAMPLES - 1 SECOND", info_str, -1, NULL, 
+                      3, &g_voltage_samples, &g_current_samples, &g_pressure_samples);
 }
 
 static void draw_graph_common(char * title_str, char * info_str, int32_t cursor_x, char * cursor_str, 
@@ -1159,6 +1202,7 @@ static int32_t generate_test_file(void)
         dp1 = &file_data_part1[idx];
         dp1->magic = MAGIC_DATA_PART1;
         dp1->time  = t + idx;
+
         dp1->voltage_mean_kv = 30.0 * idx / test_file_secs;
         dp1->voltage_min_kv = 0;
         dp1->voltage_max_kv = 15.0 * idx / test_file_secs;
@@ -1169,15 +1213,23 @@ static int32_t generate_test_file(void)
             dp1->average_cpm[i] = ERROR_NO_VALUE;
             dp1->moving_average_cpm[i] = ERROR_NO_VALUE;
         }
+
+        dp1->data_part2_offset = dp2_offset;
         dp1->data_part2_length = sizeof(struct data_part2_s) + jpeg_buff_len;
         dp1->data_part2_jpeg_buff_valid = (jpeg_buff_len != 0);
-        dp1->data_part2_offset = dp2_offset;
+        dp1->data_part2_voltage_adc_samples_mv_valid = true;
+        dp1->data_part2_current_adc_samples_mv_valid = true;
+        dp1->data_part2_pressure_adc_samples_mv_valid = true;
 
         // data part2
         dp2->magic = MAGIC_DATA_PART2;
-        memcpy(dp2->jpeg_buff, jpeg_buff, jpeg_buff_len);
+        for (i = 0; i < DATAQ_MAX_ADC_SAMPLES; i++) {
+            dp2->voltage_adc_samples_mv[i]  = 10000 * i / DATAQ_MAX_ADC_SAMPLES;
+            dp2->current_adc_samples_mv[i]  =  5000 * i / DATAQ_MAX_ADC_SAMPLES;
+            dp2->pressure_adc_samples_mv[i] =  1000 * i / DATAQ_MAX_ADC_SAMPLES;
+        }
         dp2->jpeg_buff_len = jpeg_buff_len;
-        // YYY more dp2 fields
+        memcpy(dp2->jpeg_buff, jpeg_buff, jpeg_buff_len);
 
         len = pwrite(file_fd, dp2, dp1->data_part2_length, dp2_offset);
         if (len != dp1->data_part2_length) {
@@ -1236,7 +1288,7 @@ struct data_part2_s * read_data_part2(int32_t file_idx)
 
     // if file_idx is same as last read then return data_part2 from last read
     if (file_idx == last_read_file_idx) {
-        INFO("ZZZ return cached, file_idx=%d\n", file_idx);
+        DEBUG("return cached, file_idx=%d\n", file_idx);
         return last_read_data_part2;
     }
 
@@ -1263,7 +1315,7 @@ struct data_part2_s * read_data_part2(int32_t file_idx)
 
     // remember the file_idx of this read, and
     // return the data_part2
-    INFO("ZZZ return new read data, file_idx=%d\n", file_idx);
+    DEBUG("return new read data, file_idx=%d\n", file_idx);
     last_read_file_idx = file_idx;
     return last_read_data_part2;
 }

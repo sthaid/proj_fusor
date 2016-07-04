@@ -1,20 +1,38 @@
-// XXX common.h  header
+/*
+Copyright (c) 2016 Steven Haid
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+*/
+
+#ifndef __COMMON_H__
+#define __COMMON_H__
 
 #define CAM_WIDTH       640
 #define CAM_HEIGHT      480
 #define FRAMES_PER_SEC  5
 
-#define ADC_CHAN_VOLTAGE   1  // XXX names
-#define ADC_CHAN_CURRENT   2
-#define ADC_CHAN_PRESSURE  3
-
-#define PORT 9001
+#define DATAQ_ADC_CHAN_VOLTAGE   1
+#define DATAQ_ADC_CHAN_CURRENT   2
+#define DATAQ_ADC_CHAN_PRESSURE  3
+#define DATAQ_MAX_ADC_SAMPLES    1200
 
 #define MAX_DETECTOR_CHAN    4
-#define MAX_ADC_SAMPLES      1200
-
-#define MAGIC_DATA_PART1  0xaabbccdd55aa55aa
-#define MAGIC_DATA_PART2  0x77777777aaaaaaaa
 
 #define IS_ERROR(x) ((int32_t)(x) >= ERROR_FIRST && (int32_t)(x) <= ERROR_LAST)
 #define ERROR_FIRST                   1000000
@@ -28,8 +46,11 @@
      (int32_t)(x) == ERROR_NO_VALUE               ? "NOVAL"    \
                                                   : "????")
 
-// YYY check size on linux and rpi
-// YYY need valid for diag too
+#define PORT 9001
+
+#define MAGIC_DATA_PART1  0xaabbccdd55aa55aa
+#define MAGIC_DATA_PART2  0x77777777aaaaaaaa
+
 // data_part1_s and data_part2_s are each padded to 8 byte boundary
 typedef struct {
     struct data_part1_s {
@@ -54,12 +75,13 @@ typedef struct {
     } part1;
     struct data_part2_s {
         uint64_t magic;
-        int16_t  voltage_adc_samples_mv[MAX_ADC_SAMPLES];
-        int16_t  current_adc_samples_mv[MAX_ADC_SAMPLES];
-        int16_t  pressure_adc_samples_mv[MAX_ADC_SAMPLES];
+        int16_t  voltage_adc_samples_mv[DATAQ_MAX_ADC_SAMPLES];
+        int16_t  current_adc_samples_mv[DATAQ_MAX_ADC_SAMPLES];
+        int16_t  pressure_adc_samples_mv[DATAQ_MAX_ADC_SAMPLES];
         uint32_t jpeg_buff_len;
         uint8_t  pad[4];
         uint8_t  jpeg_buff[0];
     } part2;
 } data_t;
 
+#endif

@@ -23,6 +23,9 @@
 #include "util_cam.h"
 #include "util_misc.h"
 
+#include <libusb/pmd.h>
+#include <libusb/usb-20X.h>
+
 //
 // defines
 //
@@ -70,6 +73,7 @@ static void init(void)
 {
     pthread_t thread;
     struct rlimit rl;
+    int32_t ret;
 
     rl.rlim_cur = RLIM_INFINITY;
     rl.rlim_max = RLIM_INFINITY;
@@ -90,6 +94,21 @@ static void init(void)
                ADC_CHAN_VOLTAGE,
                ADC_CHAN_CURRENT,
                ADC_CHAN_PRESSURE);
+
+    libusb_device_handle *mcc_udev_204 = NULL;  // XXX global
+    ret = libusb_init(NULL);
+    if (ret != LIBUSB_SUCCESS) {
+        FATAL("libusb_init ret %d\n", ret);
+    }
+    mcc_udev_204 = usb_device_find_USB_MCC(USB204_PID, NULL);
+    if (mcc_udev_204) {
+        INFO("MCC-USB-204 found\n");
+    } else {
+        WARN("MCC-USB-204 not found\n");
+    }
+
+    // XXX temp
+    exit(1);
 }
 
 static void server(void)

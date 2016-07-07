@@ -82,6 +82,8 @@ static float convert_adc_voltage(float adc_volts);
 static float convert_adc_current(float adc_volts);
 static float convert_adc_pressure(float adc_volts, uint32_t gas_id);
 
+void * xxx_thread(void * cx);
+
 // -----------------  MAIN & TOP LEVEL ROUTINES  -------------------------------------
 
 int32_t main(int32_t argc, char **argv)
@@ -95,11 +97,25 @@ static void init(void)
 {
     pthread_t thread;
     struct rlimit rl;
-    int32_t ret;
 
     rl.rlim_cur = RLIM_INFINITY;
     rl.rlim_max = RLIM_INFINITY;
     setrlimit(RLIMIT_CORE, &rl);
+
+    struct sched_param param;
+    param.sched_priority = 1;
+#if 0
+    ret = pthread_setschedparam(pthread_self(), SCHED_FIFO, &param);
+    if (ret != 0) {
+        ERROR("pthread_setschedparam, %s\n", strerror(ret));
+    }
+#else
+    int32_t ret = sched_setscheduler(getpid(), SCHED_FIFO, &param);
+    if (ret != 0) {
+        ERROR("pthread_setschedparam, %s\n", strerror(ret));
+    }
+#endif
+    INFO("XXXXXXXXXX SET PRIO\n");
 
     INFO("sizeof data_t=%zd part1=%zd part2=%zd\n",
          sizeof(data_t), sizeof(struct data_part1_s), sizeof(struct data_part2_s));
@@ -116,6 +132,16 @@ static void init(void)
                DATAQ_ADC_CHAN_VOLTAGE,
                DATAQ_ADC_CHAN_CURRENT,
                DATAQ_ADC_CHAN_PRESSURE);
+
+
+    pthread_create(&thread, NULL, xxx_thread, NULL);
+}
+
+void * xxx_thread(void * cx)
+{
+    int32_t ret;
+
+
 
     // XXX make a new routine
     libusb_device_handle *udev = NULL;  // XXX global
@@ -156,7 +182,7 @@ static void init(void)
     total_count = 0;
     grand_total_count = 0;
     usbAInScanStart_USB20X(udev, 0, frequency, (0x1<<channel), options, 0, 0);
-    for (i = 0; i < 1000; i++) {
+    for (i = 0; i < 1000000000; i++) {
 #if 0
         ret = usbAInScanRead_USB20X(udev, count, 1, sdataIn, options);
 #else
@@ -165,7 +191,7 @@ static void init(void)
         int32_t transferred;
         ret = libusb_bulk_transfer(udev, LIBUSB_ENDPOINT_IN|1, (unsigned char *) sdataIn, 20000, &transferred, HS_DELAY);
         int32_t status = usbStatus_USB20X(udev);
-        //INFO("ret=%d  transferred=%d  status=%d\n", ret, transferred, status);
+        INFO("ret=%d  transferred=%d  status=%d\n", ret, transferred, status);
 
         total_count += transferred / 2;
         grand_total_count += transferred / 2;
@@ -209,11 +235,7 @@ static void init(void)
         }
         free(sdataIn);
 #endif
-
-
-
-    // XXX temp
-    exit(1);
+    return NULL;
 }
 
 static void server(void)

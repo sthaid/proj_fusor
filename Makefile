@@ -18,11 +18,22 @@ SRC_DISPLAY = display.c \
               util_misc.c
 OBJ_DISPLAY=$(SRC_DISPLAY:.c=.o)
 
-DEP=$(SRC_GET_DATA:.c=.d) $(SRC_DISPLAY:.c=.d)
+SRC_TEST = test.c \
+           util_mccdaq.c \
+           util_misc.c 
+OBJ_TEST=$(SRC_TEST:.c=.o)
+
+DEP=$(SRC_GET_DATA:.c=.d) $(SRC_DISPLAY:.c=.d) $(SRC_TEST:.c=.d)
 
 #
 # build rules
 #
+
+test: $(OBJ_TEST) 
+	$(CC) -pthread -lrt -lm -o $@ $(OBJ_TEST) \
+            -L/usr/local/lib -lmccusb -lhidapi-libusb -lusb-1.0
+	sudo chown root:root $@
+	sudo chmod 4777 $@
 
 all: $(TARGETS)
 
@@ -44,5 +55,5 @@ display: $(OBJ_DISPLAY)
 #
 
 clean:
-	rm -f $(TARGETS) $(OBJ_GET_DATA) $(OBJ_DISPLAY) $(DEP)
+	rm -f $(TARGETS) $(OBJ_GET_DATA) $(OBJ_DISPLAY) $(OBJ_TEST) $(DEP)
 

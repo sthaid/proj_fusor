@@ -20,6 +20,10 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
+// XXX - TODO
+// - the extra packet ?
+// - pass cal tbl to callback ?
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -50,9 +54,23 @@ SOFTWARE.
 #define FREQUENCY  499999         // samples per second
 #define MAX_DATA   (20*500000)    // 20 secs of data
 
+#define STATE_CHANGE(new_state) \
+    do { \
+        INFO("state is now %s\n", STATE_STRING(new_state)); \
+        g_state = (new_state); \
+    } while (0)
+#define STATE_STRING(x) \
+   ((x) == NOT_INITIALIZED  ? "NOT_INITIALIZED" : \
+    (x) == STOPPED          ? "STOPPED"         : \
+    (x) == RUNNING          ? "RUNNING"         : \
+    (x) == STOPPING         ? "STOPPING"          \
+                            : "ERROR")
+
 //
 // typedefs
 //
+
+enum state { NOT_INITIALIZED, STOPPED, RUNNING, STOPPING, ERROR };
 
 //
 // variables
@@ -63,6 +81,9 @@ static float                  g_cal_tbl[NCHAN_USB20X][2];
 static uint16_t             * g_data;
 static uint64_t               g_produced;
 static mccdaq_callback_t      g_cb;
+static enum state             g_state;
+static bool                   g_producer_thread_running;
+static bool                   g_consumer_thread_running;
 
 //
 // protoytpes
@@ -71,16 +92,12 @@ static mccdaq_callback_t      g_cb;
 static void * mccdaq_producer_thread(void * cx);
 static void * mccdaq_consumer_thread(void * cx);
 
-// -----------------  MCCDAQ INIT  --------------------------------------
+// -----------------  PUBLIC ROUTINES  ----------------------------------
 
-int32_t mccdaq_init(mccdaq_callback_t cb)
+int32_t mccdaq_init(void)
 {
     int32_t   ret;
     int32_t   usb_max_packet_size;
-    pthread_t thread;
-
-    // store callback
-    g_cb = cb;
 
     // init usb library
     ret = libusb_init(NULL);
@@ -115,7 +132,57 @@ int32_t mccdaq_init(mccdaq_callback_t cb)
 
     // allocate memory for producer
     g_data = calloc(MAX_DATA, sizeof(uint16_t));
+    if (g_data == NULL) {
+        FATAL("calloc size %zd", MAX_DATA*sizeof(uint16_t));
+    }
     g_produced = 0;
+
+    // set state to stopped
+    STATE_CHANGE(STOPPED);
+
+    // return success
+    INFO("success\n");
+    return 0;
+}
+
+int32_t  mccdaq_start(mccdaq_callback_t cb)
+{
+    pthread_t thread;
+
+    // if not initialized then return error
+    if (g_state == NOT_INITIALIZED) {
+        ERROR("not initialized\n");
+        return -1;
+    }
+
+    // if already running then return error
+    if (g_state == RUNNING) {
+        ERROR("alreday running\n");
+        return -1;
+    }
+
+    // if stopping or in error state then wait for threads to stop
+    if (g_state == STOPPING || g_state == ERROR) {
+        while (g_producer_thread_running || g_consumer_thread_running) {
+            usleep(1000);
+        }
+        STATE_CHANGE(STOPPED);
+    }
+
+    // sanity check
+    if (g_state != STOPPED) {
+        FATAL("state should be STOPPED, but is %d\n", g_state);
+    }
+
+    // clear data
+    memset(g_data, -1, MAX_DATA*sizeof(uint16_t));
+    g_produced = 0;
+
+    // store callback
+    g_cb = cb;
+
+    // set state
+    STATE_CHANGE(RUNNING);
 
     // create threads
     if (pthread_create(&thread, NULL, mccdaq_producer_thread, NULL) != 0) {
@@ -126,13 +193,33 @@ int32_t mccdaq_init(mccdaq_callback_t cb)
     }
 
     // return success
-    INFO("success\n");
+    return 0;
+}
+
+int32_t mccdaq_stop(void)
+{
+    // if not initialized then return error
+    if (g_state == NOT_INITIALIZED) {
+        ERROR("not initialized\n");
+        return -1;
+    }
+
+    // set state to STOPPING
+    STATE_CHANGE(STOPPING);
+
+    // wait for threads to be not running
+    while (g_producer_thread_running || g_consumer_thread_running) {
+        usleep(1000);
+    }
+
+    // set state to STOPPED
+    STATE_CHANGE(STOPPED);
+
+    // return success
     return 0;
 }
 
 // -----------------  MCCDAQ PRODUCER THREAD-----------------------------
-
-// XXX the extra packet ?
 
 static void * mccdaq_producer_thread(void * cx) 
 {
@@ -144,11 +231,27 @@ static void * mccdaq_producer_thread(void * cx)
     int32_t    length_avail, length, transferred_bytes;
     uint16_t * data = g_data;
 
+    g_producer_thread_running = true;
+
+    // start the analog input scan
     usbAInScanStart_USB20X(g_udev, 0, FREQUENCY, 1<<CHANNEL, OPTIONS, 0, 0);
+
+    // loop, performing usb buld transfers
     while (true) {
+        // if state is STOPPING or ERROR then
+        //   exit thread
+        // endif
+        if (g_state == STOPPING || g_state == ERROR) {
+            break;
+        }
+
+        // determine number of bytes to request in call to libusb_bulk_transfer;
+        // this is normally MAX_LENGTH, but will be less when the data pointer nears
+        // the end of the g_data buffer
         length_avail = (g_data + MAX_DATA - data) * sizeof(uint16_t);
         length = (length_avail >= MAX_LENGTH ? MAX_LENGTH : length_avail);
 
+        // transfer analog data from mcc usb 204 device to data buffer
         ret = libusb_bulk_transfer(g_udev, 
                                    LIBUSB_ENDPOINT_IN|1, 
                                    (uint8_t*)data,
@@ -159,14 +262,26 @@ static void * mccdaq_producer_thread(void * cx)
         DEBUG("ret=%d length=%d transferred_byts=%d status=%d\n", 
               ret, length, transferred_bytes, status);
 
-        if ((ret == LIBUSB_ERROR_PIPE) || !(status & AIN_SCAN_RUNNING)) {  // XXX other ret
+        // if error has occurred that can be corrected then
+        //   restart the analog input scan
+        // else if an uncorrectable error occurred then
+        //   set state to ERROR and get out
+        // endif
+        if ((ret == LIBUSB_ERROR_PIPE) || !(status & AIN_SCAN_RUNNING)) {
             WARN("restarting, ret==%d status=0x%x\n", ret, status);
             libusb_clear_halt(g_udev, LIBUSB_ENDPOINT_IN|1);
             usbAInScanStart_USB20X(g_udev, 0, FREQUENCY, 1<<CHANNEL, OPTIONS, 0, 0);
+        } else if (ret != 0 || transferred_bytes == 0) {
+            ERROR("ret=%d transferred_bytes=%d\n", ret, transferred_bytes);
+            STATE_CHANGE(ERROR);
+            break;
         }
 
+        // make data available to consumer thread
         g_produced += transferred_bytes / 2;
-        data       += transferred_bytes / 2;
+
+        // update data pointer to prepare for next call to libusb_bulk_transfer
+        data += transferred_bytes / 2;
         if (data > g_data + MAX_DATA) {
             FATAL("data out of range, %zd\n", data-g_data);
         }
@@ -176,6 +291,7 @@ static void * mccdaq_producer_thread(void * cx)
         }
     }
 
+    g_producer_thread_running = false;
     return NULL;
 }
 
@@ -188,8 +304,23 @@ static void * mccdaq_consumer_thread(void * cx)
     int64_t    count, max_count;
     uint16_t * data;
 
+    g_consumer_thread_running = true;
+
     while (true) {
-        // wait for data
+        // if state is STOPPING or ERROR then
+        //   if error then  
+        //     call calback with error flag set
+        //   endif
+        //   exit thread
+        // endif
+        if (g_state == STOPPING || g_state == ERROR) {
+            if (g_state == ERROR) {
+                g_cb(NULL, 0, true);
+            }
+            break;
+        }
+
+        // if no data then delay 
         produced = g_produced;
         if (produced == consumed) {
             usleep(1000);
@@ -203,18 +334,28 @@ static void * mccdaq_consumer_thread(void * cx)
             continue;
         }
 
-        // call callback to process the data
+        // call callback to process the data;
+        // if callback requests stop then enter stopping state and exit thread
         count = produced - consumed;
         data = g_data + (consumed % MAX_DATA);
         max_count = g_data + MAX_DATA - data;
         if (count <= max_count) {
-            g_cb(data, count);
+            if (g_cb(data, count, false)) {
+                STATE_CHANGE(STOPPING);
+                break;
+            }
         } else {
-            g_cb(data, max_count);
-            g_cb(g_data, count-max_count);
+            if (g_cb(data, max_count, false) || g_cb(g_data, count-max_count, false)) {
+                STATE_CHANGE(STOPPING);
+                break;
+            }
         }
+
+        // increase the amount consumed
         consumed += count;
     }
+
+    g_consumer_thread_running = false;
 
     return NULL;
 }

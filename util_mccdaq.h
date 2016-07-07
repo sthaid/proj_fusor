@@ -24,8 +24,10 @@ SOFTWARE.
 #define __UTIL_MCCDAQ_H__
 
 
-typedef void(*mccdaq_callback_t)(uint16_t * data, int32_t max_data);
+typedef int32_t (*mccdaq_callback_t)(uint16_t * data, int32_t max_data, bool error_flag);
 
-int32_t mccdaq_init(mccdaq_callback_t cb);
+int32_t mccdaq_init(void);
+int32_t  mccdaq_start(mccdaq_callback_t cb);
+int32_t  mccdaq_stop(void);
 
 #endif

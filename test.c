@@ -30,7 +30,7 @@ static bool sigint;
 static bool error;
 
 static void sigint_handler(int sig);
-static char * stars(uint16_t value);
+static char * plot_line(uint16_t value);
 static int32_t mccdaq_callback(uint16_t * data, int32_t max_data, bool error_flag);
 
 // --------------------------------------------------------------
@@ -67,11 +67,10 @@ int32_t main(int argc, char ** argv)
     while (!done) {
         // get cmd_line, and
         // remove newline char at end
+        if (sigint) break;  //XXX
         fputs("> ", stdout);
         fgets(cmd_line, sizeof(cmd_line), stdin);
-        if (sigint) {
-            break;
-        }
+        if (sigint) break;  //XXX
         len = strlen(cmd_line);
         if (len > 0) {
             cmd_line[len-1] = '\0';
@@ -99,7 +98,9 @@ int32_t main(int argc, char ** argv)
             mccdaq_start(mccdaq_callback);
             while (max_data_store < MAX_DATA_STORE && !error) {
                 usleep(10000);
+                if (sigint) break;
             }
+            // XXX may want to stop this
             plot_start = 0;
             break;
         case 'p': {
@@ -111,7 +112,8 @@ int32_t main(int argc, char ** argv)
                 plot_end = max_data_store-1;
             }
             for (i = plot_start; i <= plot_end; i++) {
-                printf("%8d: %d: %s\n", i, data_store[i], stars(data_store[i]));
+                uint16_t value = data_store[i];
+                printf("%8d: %5d: %s\n", i, value-2048, plot_line(value));
             }
             plot_start = plot_end + 1;
             break; }
@@ -158,18 +160,34 @@ static void sigint_handler(int sig)
     sigint = true;
 }
 
-static char * stars(uint16_t value)
+static char * plot_line(uint16_t value)
 {
-    int32_t count;
-    static char str[200];
+    static char str[106];
+    int32_t     idx, i;
 
-    count = value / 40;
-    if (count > 100) {
-        count = 100;
+    // value                : range 0 - 4095
+    // idx = value/40 + 1   : range  1 - 103
+    // plot_line:           :  0  1-51  52  53-103  104
+    //                      :  |        ctr           |
+
+    memset(str, ' ', sizeof(str));
+    str[0]   = '|';
+    str[104] = '|';
+    str[105] = '\0';
+
+    if (value > 4095) {
+        WARN("value %d out of range\n", value);
+        return str;
     }
 
-    memset(str, '*', count);
-    str[count] = '\0';
+    idx = value/40 + 1;
+    i = 52;
+    while (true) {
+        str[i] = '*';
+        if (i == idx) break;
+        i += (idx > 52 ? 1 : -1);
+    }
+
     return str;
 }
 
@@ -198,6 +216,19 @@ static int32_t mccdaq_callback(uint16_t * data, int32_t max_data, bool error_fla
         start_us = curr_us;
         count = 0;
     }
+
+    // XXX temp
+    int32_t i;
+    static int32_t call_count;
+    call_count++;
+    for (i = 0; i < max_data; i++) {
+        if (data[i] > (2048+300)) {
+            printf("%d: data[%d] = %d\n",
+                call_count, i, data[i]-2048);
+        }
+    }
+
+    return 0;
 
     if (max_data_store >= MAX_DATA_STORE) {
         FATAL("invalid max_data_store %d\n", max_data_store);

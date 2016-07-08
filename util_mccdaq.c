@@ -23,6 +23,7 @@ SOFTWARE.
 // XXX - TODO
 // - the extra packet ?
 // - pass cal tbl to callback ?
+// - ctrl c and atexit
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -89,6 +90,7 @@ static bool                   g_consumer_thread_running;
 // protoytpes
 //
 
+static void mccdaq_exit(void);
 static void * mccdaq_producer_thread(void * cx);
 static void * mccdaq_consumer_thread(void * cx);
 
@@ -139,6 +141,9 @@ int32_t mccdaq_init(void)
 
     // set state to stopped
     STATE_CHANGE(STOPPED);
+
+    // register exit handler
+    atexit(mccdaq_exit);
 
     // return success
     INFO("success\n");
@@ -219,6 +224,15 @@ int32_t mccdaq_stop(void)
     return 0;
 }
 
+// -----------------  MCCDAQ EXIT HANDLER  D-----------------------------
+
+static void mccdaq_exit(void)
+{
+    // stop, and call cleanup 
+    mccdaq_stop();
+    cleanup_USB20X(g_udev);
+}
+
 // -----------------  MCCDAQ PRODUCER THREAD-----------------------------
 
 static void * mccdaq_producer_thread(void * cx) 
@@ -262,6 +276,9 @@ static void * mccdaq_producer_thread(void * cx)
         DEBUG("ret=%d length=%d transferred_byts=%d status=%d\n", 
               ret, length, transferred_bytes, status);
 
+        //XXX INFO("dataidx %zd   value %d\n",
+             //XXX data-g_data, data[0]);
+
         // if error has occurred that can be corrected then
         //   restart the analog input scan
         // else if an uncorrectable error occurred then
@@ -290,6 +307,10 @@ static void * mccdaq_producer_thread(void * cx)
             data = g_data;
         }
     }
+
+    // stop the scan
+    usbAInScanStop_USB20X(g_udev);
+    usbAInScanClearFIFO_USB20X(g_udev);
 
     g_producer_thread_running = false;
     return NULL;
@@ -338,6 +359,7 @@ static void * mccdaq_consumer_thread(void * cx)
         // if callback requests stop then enter stopping state and exit thread
         count = produced - consumed;
         data = g_data + (consumed % MAX_DATA);
+        //XXX INFO("CONSUMER dataidx %zd\n", data-g_data);
         max_count = g_data + MAX_DATA - data;
         if (count <= max_count) {
             if (g_cb(data, count, false)) {

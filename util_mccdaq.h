@@ -23,7 +23,6 @@ SOFTWARE.
 #ifndef __UTIL_MCCDAQ_H__
 #define __UTIL_MCCDAQ_H__
 
-
 typedef int32_t (*mccdaq_callback_t)(uint16_t * data, int32_t max_data, bool error_flag);
 
 int32_t mccdaq_init(void);

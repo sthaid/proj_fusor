@@ -14,6 +14,7 @@ OBJ_GET_DATA=$(SRC_GET_DATA:.c=.o)
 SRC_DISPLAY = display.c \
               util_sdl.c \
               util_sdl_predefined_displays.c \
+              util_cam.c \
               util_jpeg_decode.c \
               util_misc.c
 OBJ_DISPLAY=$(SRC_DISPLAY:.c=.o)

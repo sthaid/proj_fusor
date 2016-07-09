@@ -50,6 +50,7 @@ SOFTWARE.
 #include "common.h"
 #include "util_sdl.h"
 #include "util_jpeg_decode.h"
+#include "util_cam.h"
 #include "util_misc.h"
 #include "about.h"
 
@@ -131,6 +132,11 @@ static int32_t                  graph_scale_idx[MAX_GRAPH];
 
 static int32_t                  test_file_secs;
 
+static uint8_t                  jpeg_buff[1000000];
+static int32_t                  jpeg_buff_len;
+static uint64_t                 jpeg_buff_us;
+static pthread_mutex_t          jpeg_mutex = PTHREAD_MUTEX_INITIALIZER;
+
 //
 // prototypes
 //
@@ -138,6 +144,7 @@ static int32_t                  test_file_secs;
 static int32_t initialize(int32_t argc, char ** argv);
 static void usage(void);
 static void * get_live_data_thread(void * cx);
+static void * cam_thread(void * cx);
 static int32_t display_handler();
 static void draw_camera_image(rect_t * cam_pane, int32_t file_idx);
 static void draw_data_values(rect_t * data_pane, int32_t file_idx);
@@ -376,6 +383,7 @@ static int32_t initialize(int32_t argc, char ** argv)
     //   connect to server
     //   create thread to acquire data from server
     //   wait for first data to be received from server
+    //   cam_init
     // endif
     if (mode == LIVE) {
         int32_t sfd;
@@ -395,6 +403,7 @@ static int32_t initialize(int32_t argc, char ** argv)
              sock_addr_to_str(s, sizeof(s), (struct sockaddr *)&sockaddr));
 
         // create socket
+        // XXX move these to the thread
         sfd = socket(AF_INET, SOCK_STREAM, 0);
         if (sfd == -1) {
             ERROR("create socket, %s\n", strerror(errno));
@@ -402,6 +411,7 @@ static int32_t initialize(int32_t argc, char ** argv)
         }
 
         // connect to the server
+        // XXX move these to the thread
         if (connect(sfd, (struct sockaddr *)&sockaddr, sizeof(sockaddr)) < 0) {
             char s[100];
             ERROR("connect to %s, %s\n", 
@@ -424,6 +434,13 @@ static int32_t initialize(int32_t argc, char ** argv)
             if (wait_ms >= 5000) {
                 ERROR("failed to receive data from server\n");
                 return -1;
+            }
+        }
+
+        // cam_init
+        if (cam_init(CAM_WIDTH, CAM_HEIGHT, FRAMES_PER_SEC) == 0) {
+            if (pthread_create(&thread, NULL, cam_thread, NULL) != 0) {
+                FATAL("pthread_create cam_thread, %s\n", strerror(errno));
             }
         }
     }
@@ -449,7 +466,7 @@ static void usage(void)
     // XXX tbd
 }
 
-// -----------------  CLIENT THREAD  -------------------------------------------------
+// -----------------  GET LIVE DATA THREAD  ------------------------------------------
 
 static void * get_live_data_thread(void * cx)
 {
@@ -523,6 +540,20 @@ static void * get_live_data_thread(void * cx)
             break;
         }
 
+        // if data part2 does not contain camera data then 
+        // see if the camera data is being captured by this program, 
+        // and add it
+        if (!data_part1.data_part2_jpeg_buff_valid) {
+            pthread_mutex_lock(&jpeg_mutex);
+            if (microsec_timer() - jpeg_buff_us < 1000000) {
+                memcpy(data_part2->jpeg_buff, jpeg_buff, jpeg_buff_len);
+                data_part2->jpeg_buff_len = jpeg_buff_len;
+                data_part1.data_part2_jpeg_buff_valid = true;
+                data_part1.data_part2_length = sizeof(struct data_part2_s) + jpeg_buff_len;
+            }
+            pthread_mutex_unlock(&jpeg_mutex);
+        }
+
         // check for time increasing by other than 1 second;
         // if so, print warning
         if (last_time != -1 && data_part1.time != last_time + 1) {
@@ -576,6 +607,36 @@ static void * get_live_data_thread(void * cx)
     get_live_data_state = STATE_ERROR;  
     mode = PLAYBACK;
     ERROR("thread terminating\n");
+    return NULL;
+}
+
+// -----------------  CAM THREAD  ----------------------------------------------------
+
+static void * cam_thread(void * cx)
+{
+    int32_t   ret;
+    uint8_t * ptr;
+    uint32_t  len;
+
+    while (true) {
+        // get cam buff
+        ret = cam_get_buff(&ptr, &len);
+        if (ret != 0) {
+            usleep(100000);
+            continue;
+        }
+
+        // copy buff to global
+        pthread_mutex_lock(&jpeg_mutex);
+        memcpy(jpeg_buff, ptr, len);
+        jpeg_buff_len = len;
+        jpeg_buff_us = microsec_timer();
+        pthread_mutex_unlock(&jpeg_mutex);
+
+        // put buff
+        cam_put_buff(ptr);
+    }
+
     return NULL;
 }
 

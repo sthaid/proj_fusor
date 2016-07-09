@@ -52,6 +52,8 @@ SOFTWARE.
 #define GAS_ID_D2 0
 #define GAS_ID_N2 1
 
+//#define CAM_ENABLE
+
 //
 // typedefs
 //
@@ -60,10 +62,12 @@ SOFTWARE.
 // variables
 //
 
-uint8_t         jpeg_buff[1000000];
-int32_t         jpeg_buff_len;
-uint64_t        jpeg_buff_us;
-pthread_mutex_t jpeg_mutex = PTHREAD_MUTEX_INITIALIZER;
+#ifdef CAM_ENABLE
+static uint8_t         jpeg_buff[1000000];
+static int32_t         jpeg_buff_len;
+static uint64_t        jpeg_buff_us;
+static pthread_mutex_t jpeg_mutex = PTHREAD_MUTEX_INITIALIZER;
+#endif
 
 //
 // prototypes
@@ -71,7 +75,9 @@ pthread_mutex_t jpeg_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 static void init(void);
 static void server(void);
-void * cam_thread(void * cx);
+#ifdef CAM_ENABLE
+static void * cam_thread(void * cx);
+#endif
 static void * server_thread(void * cx);
 static void init_data_struct(data_t * data, time_t time_now);
 static float convert_adc_voltage(float adc_volts);
@@ -89,7 +95,6 @@ int32_t main(int32_t argc, char **argv)
 
 static void init(void)
 {
-    pthread_t thread;
     struct rlimit rl;
 
     rl.rlim_cur = RLIM_INFINITY;
@@ -99,11 +104,14 @@ static void init(void)
     INFO("sizeof data_t=%zd part1=%zd part2=%zd\n",
          sizeof(data_t), sizeof(struct data_part1_s), sizeof(struct data_part2_s));
 
+#ifdef CAM_ENABLE
+    pthread_t thread;
     if (cam_init(CAM_WIDTH, CAM_HEIGHT, FRAMES_PER_SEC) == 0) {
         if (pthread_create(&thread, NULL, cam_thread, NULL) != 0) {
             FATAL("pthread_create cam_thread, %s\n", strerror(errno));
         }
     }
+#endif
 
     dataq_init(0.5,   // averaging duration in secs
                1200,  // scan rate  (samples per second)
@@ -174,7 +182,8 @@ static void server(void)
     }
 }
 
-void * cam_thread(void * cx) 
+#ifdef CAM_ENABLE
+static void * cam_thread(void * cx) 
 {
     int32_t   ret;
     uint8_t * ptr;
@@ -198,7 +207,10 @@ void * cam_thread(void * cx)
         // put buff
         cam_put_buff(ptr);
     }
+
+    return NULL;
 }
+#endif
 
 // -----------------  SERVER_THREAD  -------------------------------------------------
 
@@ -330,6 +342,7 @@ static void init_data_struct(data_t * data, time_t time_now)
                                  data->part2.pressure_adc_samples_mv,
                                  DATAQ_MAX_ADC_SAMPLES);
 
+#ifdef CAM_ENABLE
     // data part2: jpeg_buff
     pthread_mutex_lock(&jpeg_mutex);
     if (microsec_timer() - jpeg_buff_us < 1000000) {
@@ -337,6 +350,7 @@ static void init_data_struct(data_t * data, time_t time_now)
         data->part2.jpeg_buff_len = jpeg_buff_len;
     }
     pthread_mutex_unlock(&jpeg_mutex);
+#endif
 
     //
     // data part1 (continued)

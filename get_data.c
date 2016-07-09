@@ -82,6 +82,8 @@ static float convert_adc_voltage(float adc_volts);
 static float convert_adc_current(float adc_volts);
 static float convert_adc_pressure(float adc_volts, uint32_t gas_id);
 
+void * xxx_thread(void * cx);
+
 // -----------------  MAIN & TOP LEVEL ROUTINES  -------------------------------------
 
 int32_t main(int32_t argc, char **argv)
@@ -95,11 +97,25 @@ static void init(void)
 {
     pthread_t thread;
     struct rlimit rl;
-    int32_t ret;
 
     rl.rlim_cur = RLIM_INFINITY;
     rl.rlim_max = RLIM_INFINITY;
     setrlimit(RLIMIT_CORE, &rl);
+
+    struct sched_param param;
+    param.sched_priority = 1;
+#if 0
+    ret = pthread_setschedparam(pthread_self(), SCHED_FIFO, &param);
+    if (ret != 0) {
+        ERROR("pthread_setschedparam, %s\n", strerror(ret));
+    }
+#else
+    int32_t ret = sched_setscheduler(getpid(), SCHED_FIFO, &param);
+    if (ret != 0) {
+        ERROR("pthread_setschedparam, %s\n", strerror(ret));
+    }
+#endif
+    INFO("XXXXXXXXXX SET PRIO\n");
 
     INFO("sizeof data_t=%zd part1=%zd part2=%zd\n",
          sizeof(data_t), sizeof(struct data_part1_s), sizeof(struct data_part2_s));
@@ -117,20 +133,109 @@ static void init(void)
                DATAQ_ADC_CHAN_CURRENT,
                DATAQ_ADC_CHAN_PRESSURE);
 
-    libusb_device_handle *mcc_udev_204 = NULL;  // XXX global
+
+    pthread_create(&thread, NULL, xxx_thread, NULL);
+}
+
+void * xxx_thread(void * cx)
+{
+    int32_t ret;
+
+
+
+    // XXX make a new routine
+    libusb_device_handle *udev = NULL;  // XXX global
     ret = libusb_init(NULL);
     if (ret != LIBUSB_SUCCESS) {
         FATAL("libusb_init ret %d\n", ret);
     }
-    mcc_udev_204 = usb_device_find_USB_MCC(USB204_PID, NULL);
-    if (mcc_udev_204) {
+    udev = usb_device_find_USB_MCC(USB204_PID, NULL);
+    if (udev) {
         INFO("MCC-USB-204 found\n");
     } else {
         WARN("MCC-USB-204 not found\n");
     }
 
-    // XXX temp
-    exit(1);
+    INFO("wMaxPacketSize = %d\n", usb_get_max_packet_size(udev,0));
+
+    int32_t i;
+    float table_AIN[NCHAN_USB20X][2];
+    usbBuildGainTable_USB20X(udev, table_AIN);
+    for (i = 0; i < NCHAN_USB20X; i++) {
+        INFO("Calibration Table: %d   Slope = %f   Offset = %f\n", i, table_AIN[i][0], table_AIN[i][1]);
+    }
+
+    struct tm calDate;
+    usbCalDate_USB20X(udev, &calDate);
+    INFO("MFG Calibration date = %s\n", asctime(&calDate));
+
+    //int32_t count = 10000;
+    int32_t channel = 0;
+    double frequency = 499999;
+    int32_t options = 0;
+    static uint16_t sdataIn[500000];
+    bzero(sdataIn, sizeof(sdataIn));
+
+    uint64_t start_us, end_us, total_count, grand_total_count, grand_start_us;
+    start_us = microsec_timer();
+    grand_start_us = microsec_timer();
+    total_count = 0;
+    grand_total_count = 0;
+    usbAInScanStart_USB20X(udev, 0, frequency, (0x1<<channel), options, 0, 0);
+    for (i = 0; i < 1000000000; i++) {
+#if 0
+        ret = usbAInScanRead_USB20X(udev, count, 1, sdataIn, options);
+#else
+        #define HS_DELAY 2000
+
+        int32_t transferred;
+        ret = libusb_bulk_transfer(udev, LIBUSB_ENDPOINT_IN|1, (unsigned char *) sdataIn, 20000, &transferred, HS_DELAY);
+        int32_t status = usbStatus_USB20X(udev);
+        INFO("ret=%d  transferred=%d  status=%d\n", ret, transferred, status);
+
+        total_count += transferred / 2;
+        grand_total_count += transferred / 2;
+
+#if 0
+        if (ret == LIBUSB_ERROR_PIPE) {
+            INFO("CLEAR HALT\n");
+            libusb_clear_halt(udev, LIBUSB_ENDPOINT_IN|1);
+            //libusb_clear_halt(udev, LIBUSB_ENDPOINT_OUT|1);
+        }
+#endif
+
+        if ((ret == LIBUSB_ERROR_PIPE) || !(status & AIN_SCAN_RUNNING))  {
+            end_us = microsec_timer();
+            int32_t rate = (double)total_count / (end_us - start_us) * 1000000;
+            INFO("RESTARTING ***  RATE = %d samples/sec   total_count = %"PRId64"\n", rate, total_count);
+            start_us = end_us;
+            total_count = 0;
+
+            libusb_clear_halt(udev, LIBUSB_ENDPOINT_IN|1);
+            usbAInScanStart_USB20X(udev, 0, frequency, (0x1<<channel), options, 0, 0);
+        }
+
+#endif
+    }
+    end_us = microsec_timer();
+    int32_t rate = (double)grand_total_count / (end_us - grand_start_us) * 1000000;
+    INFO("RATE %d samples / sec\n", rate);
+
+  cleanup_USB20X(udev);
+#if 0
+/* Status bit values */
+#define AIN_SCAN_RUNNING   (0x1 << 1)
+#define AIN_SCAN_OVERRUN   (0x1 << 2)
+
+
+        for (i = 0; i < count; i++) {
+          sdataIn[i] = rint(sdataIn[i]*table_AIN[channel][0] + table_AIN[channel][1]);
+          printf("Channel %d  Sample[%d] = %#x Volts = %lf\n", channel,
+                 i, sdataIn[i], volts_USB20X(sdataIn[i]));
+        }
+        free(sdataIn);
+#endif
+    return NULL;
 }
 
 static void server(void)

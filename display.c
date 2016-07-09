@@ -113,6 +113,8 @@ typedef struct {
 
 static enum mode                mode;
 static enum get_live_data_state get_live_data_state;
+static bool                     program_terminating;
+static bool                     cam_thread_running;
 
 static uint32_t                 win_width;
 static uint32_t                 win_height;
@@ -163,11 +165,15 @@ static char * sock_addr_to_str(char * s, int slen, struct sockaddr * addr);
 
 int32_t main(int32_t argc, char **argv)
 {
+    int32_t wait_time_ms;
+
+    // initialize
     if (initialize(argc, argv) < 0) {
         ERROR("initialize failed, program terminating\n");
         return 1;
     }
 
+    // run time
     switch (mode) {
     case TEST:
         if (generate_test_file() < 0) {
@@ -184,6 +190,14 @@ int32_t main(int32_t argc, char **argv)
     default:
         FATAL("mode %d not valid\n", mode);
         break;
+    }
+
+    // program termination
+    program_terminating = true;
+    wait_time_ms = 0;
+    while (cam_thread_running && wait_time_ms < 5000) {
+        usleep(10000);  // 10 ms
+        wait_time_ms += 10;
     }
 
     INFO("terminating normally\n");
@@ -403,7 +417,6 @@ static int32_t initialize(int32_t argc, char ** argv)
              sock_addr_to_str(s, sizeof(s), (struct sockaddr *)&sockaddr));
 
         // create socket
-        // XXX move these to the thread
         sfd = socket(AF_INET, SOCK_STREAM, 0);
         if (sfd == -1) {
             ERROR("create socket, %s\n", strerror(errno));
@@ -411,7 +424,6 @@ static int32_t initialize(int32_t argc, char ** argv)
         }
 
         // connect to the server
-        // XXX move these to the thread
         if (connect(sfd, (struct sockaddr *)&sockaddr, sizeof(sockaddr)) < 0) {
             char s[100];
             ERROR("connect to %s, %s\n", 
@@ -477,8 +489,6 @@ static void * get_live_data_thread(void * cx)
     struct timeval        rcvto;
     struct data_part1_s   data_part1;
     struct data_part2_s * data_part2;
-
-    // XXX reconnect on failure, up to 10 times
 
     // init
     sfd    = (uintptr_t)cx;
@@ -618,7 +628,15 @@ static void * cam_thread(void * cx)
     uint8_t * ptr;
     uint32_t  len;
 
+    INFO("starting\n");
+    cam_thread_running = true;
+
     while (true) {
+        // if program terminating then exit this thread
+        if (program_terminating) {
+            break;
+        }
+
         // get cam buff
         ret = cam_get_buff(&ptr, &len);
         if (ret != 0) {
@@ -637,6 +655,8 @@ static void * cam_thread(void * cx)
         cam_put_buff(ptr);
     }
 
+    INFO("exitting\n");
+    cam_thread_running = false;
     return NULL;
 }
 

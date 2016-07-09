@@ -461,6 +461,8 @@ static void * get_live_data_thread(void * cx)
     struct data_part1_s   data_part1;
     struct data_part2_s * data_part2;
 
+    // XXX reconnect on failure, up to 10 times
+
     // init
     sfd    = (uintptr_t)cx;
     offset = FILE_DATA_PART2_OFFSET;
@@ -470,8 +472,8 @@ static void * get_live_data_thread(void * cx)
         FATAL("calloc\n");
     }
 
-    // set recv timeout to 2 seconds
-    rcvto.tv_sec  = 2;
+    // set recv timeout to 5 seconds
+    rcvto.tv_sec  = 5;
     rcvto.tv_usec = 0;
     if (setsockopt(sfd, SOL_SOCKET, SO_RCVTIMEO, (char *)&rcvto, sizeof(rcvto)) < 0) {
         FATAL("setsockopt SO_RCVTIMEO, %s\n",strerror(errno));
@@ -1012,13 +1014,17 @@ static void draw_graph1(int32_t file_idx)
             (_graph)->max_points = 0; \
             if (_valid && dp2 != NULL) { \
                 float tmp = (graph_y_range / (float)(y_max_mv)); \
-                int32_t y_limit = graph_y_origin - graph_y_range; \
+                int32_t y_limit1 = graph_y_origin - graph_y_range; \
+                int32_t y_limit2 = graph_y_origin + FONT0_HEIGHT; \
                 for (i = 0; i < DATAQ_MAX_ADC_SAMPLES; i++) { \
                     point_t * p = &(_graph)->points[i]; \
                     p->x = graph_x_origin + i; \
                     p->y = graph_y_origin - tmp * dp2->_field_name[i]; \
-                    if (p->y < y_limit) { \
-                        p->y = y_limit; \
+                    if (p->y < y_limit1) { \
+                        p->y = y_limit1; \
+                    } \
+                    if (p->y > y_limit2) { \
+                        p->y = y_limit2; \
                     } \
                     (_graph)->max_points++; \
                 } \

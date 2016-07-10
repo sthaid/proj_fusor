@@ -1082,6 +1082,7 @@ static void draw_graph1(int32_t file_idx)
     static graph_t g_voltage_samples;
     static graph_t g_current_samples;
     static graph_t g_pressure_samples;
+    static graph_t g_he3_samples;
     static int32_t y_max_mv_tbl[] = {100, 1000, 2000, 5000, 10000};
 
     #define MAX_Y_MAX_MV_TBL (sizeof(y_max_mv_tbl)/sizeof(y_max_mv_tbl[0]))
@@ -1134,13 +1135,13 @@ static void draw_graph1(int32_t file_idx)
                GREEN, dp1->data_part2_current_adc_samples_mv_valid);
     INIT_GRAPH(&g_pressure_samples, "PRESSURE", pressure_adc_samples_mv, \
                BLUE, dp1->data_part2_pressure_adc_samples_mv_valid);
-    INIT_GRAPH(&g_pressure_samples, "HE3", he3_adc_samples_mv, \
+    INIT_GRAPH(&g_he3_samples, "HE3", he3_adc_samples_mv, \
                PURPLE, dp1->data_part2_he3_adc_samples_mv_valid);
 
     // draw the graph
     sprintf(info_str, "Y_MAX %d mV  (-/+)", y_max_mv);
     draw_graph_common("ADC SAMPLES - 1 SECOND", info_str, -1, NULL, 
-                      3, &g_voltage_samples, &g_current_samples, &g_pressure_samples);
+                      4, &g_voltage_samples, &g_current_samples, &g_pressure_samples, &g_he3_samples);
 }
 
 static void draw_graph_common(char * title_str, char * info_str, int32_t cursor_x, char * cursor_str, 

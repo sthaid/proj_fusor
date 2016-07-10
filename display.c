@@ -1097,7 +1097,7 @@ static void draw_graph1(int32_t file_idx)
                 float tmp = (graph_y_range / (float)(y_max_mv)); \
                 int32_t y_limit1 = graph_y_origin - graph_y_range; \
                 int32_t y_limit2 = graph_y_origin + FONT0_HEIGHT; \
-                for (i = 0; i < DATAQ_MAX_ADC_SAMPLES; i++) { \
+                for (i = 0; i < MAX_ADC_SAMPLES; i++) { \
                     point_t * p = &(_graph)->points[i]; \
                     p->x = graph_x_origin + i; \
                     p->y = graph_y_origin - tmp * dp2->_field_name[i]; \
@@ -1134,6 +1134,8 @@ static void draw_graph1(int32_t file_idx)
                GREEN, dp1->data_part2_current_adc_samples_mv_valid);
     INIT_GRAPH(&g_pressure_samples, "PRESSURE", pressure_adc_samples_mv, \
                BLUE, dp1->data_part2_pressure_adc_samples_mv_valid);
+    INIT_GRAPH(&g_pressure_samples, "HE3", he3_adc_samples_mv, \
+               PURPLE, dp1->data_part2_he3_adc_samples_mv_valid);
 
     // draw the graph
     sprintf(info_str, "Y_MAX %d mV  (-/+)", y_max_mv);
@@ -1296,10 +1298,13 @@ static int32_t generate_test_file(void)
         dp1->current_ma = 0;
         dp1->pressure_d2_mtorr = 10;
         dp1->pressure_n2_mtorr = 20;
-        for (i = 0; i < MAX_DETECTOR_CHAN; i++) {
+
+#if 0// XXX  this needs to be updatae
+        for (i = 0; i < MAX_HE3_CHAN; i++) {
             dp1->average_cpm[i] = ERROR_NO_VALUE;
             dp1->moving_average_cpm[i] = ERROR_NO_VALUE;
         }
+#endif
 
         dp1->data_part2_offset = dp2_offset;
         dp1->data_part2_length = sizeof(struct data_part2_s) + jpeg_buff_len;
@@ -1310,10 +1315,10 @@ static int32_t generate_test_file(void)
 
         // data part2
         dp2->magic = MAGIC_DATA_PART2;
-        for (i = 0; i < DATAQ_MAX_ADC_SAMPLES; i++) {
-            dp2->voltage_adc_samples_mv[i]  = 10000 * i / DATAQ_MAX_ADC_SAMPLES;
-            dp2->current_adc_samples_mv[i]  =  5000 * i / DATAQ_MAX_ADC_SAMPLES;
-            dp2->pressure_adc_samples_mv[i] =  1000 * i / DATAQ_MAX_ADC_SAMPLES;
+        for (i = 0; i < MAX_ADC_SAMPLES; i++) {
+            dp2->voltage_adc_samples_mv[i]  = 10000 * i / MAX_ADC_SAMPLES;
+            dp2->current_adc_samples_mv[i]  =  5000 * i / MAX_ADC_SAMPLES;
+            dp2->pressure_adc_samples_mv[i] =  1000 * i / MAX_ADC_SAMPLES;
         }
         dp2->jpeg_buff_len = jpeg_buff_len;
         memcpy(dp2->jpeg_buff, jpeg_buff, jpeg_buff_len);

@@ -30,12 +30,12 @@ SOFTWARE.
 #define DATAQ_ADC_CHAN_VOLTAGE   1
 #define DATAQ_ADC_CHAN_CURRENT   2
 #define DATAQ_ADC_CHAN_PRESSURE  3
-#define DATAQ_MAX_ADC_SAMPLES    1200
 
-#define MAX_DETECTOR_CHAN    4
+#define MAX_ADC_SAMPLES    1200
+#define MAX_HE3_CHAN       4
 
 #define IS_ERROR(x) ((int32_t)(x) >= ERROR_FIRST && (int32_t)(x) <= ERROR_LAST)
-#define ERROR_FIRST                   1000000
+#define ERROR_FIRST                   1000000 
 #define ERROR_PRESSURE_SENSOR_FAULTY  1000000
 #define ERROR_OVER_PRESSURE           1000001
 #define ERROR_NO_VALUE                1000002
@@ -51,6 +51,12 @@ SOFTWARE.
 #define MAGIC_DATA_PART1  0xaabbccdd55aa55aa
 #define MAGIC_DATA_PART2  0x77777777aaaaaaaa
 
+typedef struct {
+    float     cpm_1_sec[MAX_HE3_CHAN];
+    float     cpm_10_sec[MAX_HE3_CHAN];
+    // XXX more   60, 3600
+} he3_t;
+
 // data_part1_s and data_part2_s are each padded to 8 byte boundary
 typedef struct {
     struct data_part1_s {
@@ -63,21 +69,23 @@ typedef struct {
         float    current_ma;
         float    pressure_d2_mtorr;
         float    pressure_n2_mtorr;
-        float    average_cpm[MAX_DETECTOR_CHAN];
-        float    moving_average_cpm[MAX_DETECTOR_CHAN];
+        he3_t    he3;
 
-        off_t    data_part2_offset;   // for display pgm
+        off_t    data_part2_offset;      // for use by display pgm
         uint32_t data_part2_length;
         bool     data_part2_jpeg_buff_valid;
         bool     data_part2_voltage_adc_samples_mv_valid;
         bool     data_part2_current_adc_samples_mv_valid;
         bool     data_part2_pressure_adc_samples_mv_valid;
+        bool     data_part2_he3_adc_samples_mv_valid;
+        uint8_t  pad[7];
     } part1;
     struct data_part2_s {
         uint64_t magic;
-        int16_t  voltage_adc_samples_mv[DATAQ_MAX_ADC_SAMPLES];
-        int16_t  current_adc_samples_mv[DATAQ_MAX_ADC_SAMPLES];
-        int16_t  pressure_adc_samples_mv[DATAQ_MAX_ADC_SAMPLES];
+        int16_t  voltage_adc_samples_mv[MAX_ADC_SAMPLES];    // scan rate is 1200 samples/sec
+        int16_t  current_adc_samples_mv[MAX_ADC_SAMPLES];
+        int16_t  pressure_adc_samples_mv[MAX_ADC_SAMPLES];
+        int16_t  he3_adc_samples_mv[MAX_ADC_SAMPLES];        // scan rate is 500000 samples/sec
         uint32_t jpeg_buff_len;
         uint8_t  pad[4];
         uint8_t  jpeg_buff[0];

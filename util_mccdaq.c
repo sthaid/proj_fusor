@@ -65,13 +65,13 @@ SOFTWARE.
     (x) == STOPPED          ? "STOPPED"         : \
     (x) == RUNNING          ? "RUNNING"         : \
     (x) == STOPPING         ? "STOPPING"          \
-                            : "ERROR")
+                            : "????")
 
 //
 // typedefs
 //
 
-enum state { NOT_INITIALIZED, STOPPED, RUNNING, STOPPING, ERROR };
+enum state { NOT_INITIALIZED, STOPPED, RUNNING, STOPPING };
 
 //
 // variables
@@ -166,8 +166,8 @@ int32_t  mccdaq_start(mccdaq_callback_t cb)
         return -1;
     }
 
-    // if stopping or in error state then wait for threads to stop
-    if (g_state == STOPPING || g_state == ERROR) {
+    // if stopping then wait for threads to stop
+    if (g_state == STOPPING) {
         while (g_producer_thread_running || g_consumer_thread_running) {
             usleep(1000);
         }
@@ -252,10 +252,10 @@ static void * mccdaq_producer_thread(void * cx)
 
     // loop, performing usb buld transfers
     while (true) {
-        // if state is STOPPING or ERROR then
+        // if state is STOPPING then
         //   exit thread
         // endif
-        if (g_state == STOPPING || g_state == ERROR) {
+        if (g_state == STOPPING) {
             break;
         }
 
@@ -276,22 +276,13 @@ static void * mccdaq_producer_thread(void * cx)
         DEBUG("ret=%d length=%d transferred_byts=%d status=%d\n", 
               ret, length, transferred_bytes, status);
 
-        //XXX INFO("dataidx %zd   value %d\n",
-             //XXX data-g_data, data[0]);
-
-        // if error has occurred that can be corrected then
+        // if error has occurred then
         //   restart the analog input scan
-        // else if an uncorrectable error occurred then
-        //   set state to ERROR and get out
         // endif
-        if ((ret == LIBUSB_ERROR_PIPE) || !(status & AIN_SCAN_RUNNING)) {
+        if ((ret == LIBUSB_ERROR_PIPE) || !(status & AIN_SCAN_RUNNING) || ret != 0) {
             WARN("restarting, ret==%d status=0x%x\n", ret, status);
             libusb_clear_halt(g_udev, LIBUSB_ENDPOINT_IN|1);
             usbAInScanStart_USB20X(g_udev, 0, FREQUENCY, 1<<CHANNEL, OPTIONS, 0, 0);
-        } else if (ret != 0 || transferred_bytes == 0) {
-            ERROR("ret=%d transferred_bytes=%d\n", ret, transferred_bytes);
-            STATE_CHANGE(ERROR);
-            break;
         }
 
         // make data available to consumer thread
@@ -328,16 +319,10 @@ static void * mccdaq_consumer_thread(void * cx)
     g_consumer_thread_running = true;
 
     while (true) {
-        // if state is STOPPING or ERROR then
-        //   if error then  
-        //     call calback with error flag set
-        //   endif
+        // if state is STOPPING then
         //   exit thread
         // endif
-        if (g_state == STOPPING || g_state == ERROR) {
-            if (g_state == ERROR) {
-                g_cb(NULL, 0, true);
-            }
+        if (g_state == STOPPING) {
             break;
         }
 
@@ -359,15 +344,14 @@ static void * mccdaq_consumer_thread(void * cx)
         // if callback requests stop then enter stopping state and exit thread
         count = produced - consumed;
         data = g_data + (consumed % MAX_DATA);
-        //XXX INFO("CONSUMER dataidx %zd\n", data-g_data);
         max_count = g_data + MAX_DATA - data;
         if (count <= max_count) {
-            if (g_cb(data, count, false)) {
+            if (g_cb(data, count)) {
                 STATE_CHANGE(STOPPING);
                 break;
             }
         } else {
-            if (g_cb(data, max_count, false) || g_cb(g_data, count-max_count, false)) {
+            if (g_cb(data, max_count) || g_cb(g_data, count-max_count)) {
                 STATE_CHANGE(STOPPING);
                 break;
             }

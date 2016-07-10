@@ -20,6 +20,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
+// XXX ctrl c hndler for exit
 #define _FILE_OFFSET_BITS 64
 
 #include <stdio.h>
@@ -42,6 +43,7 @@ SOFTWARE.
 
 #include "common.h"
 #include "util_dataq.h"
+#include "util_mccdaq.h"
 #include "util_cam.h"
 #include "util_misc.h"
 
@@ -69,6 +71,11 @@ static uint64_t        jpeg_buff_us;
 static pthread_mutex_t jpeg_mutex = PTHREAD_MUTEX_INITIALIZER;
 #endif
 
+static pthread_mutex_t he3_mutex = PTHREAD_MUTEX_INITIALIZER;
+static uint64_t        he3_time;
+static he3_t           he3;
+static int16_t         he3_adc_samples_mv[MAX_ADC_SAMPLES];
+
 //
 // prototypes
 //
@@ -83,6 +90,7 @@ static void init_data_struct(data_t * data, time_t time_now);
 static float convert_adc_voltage(float adc_volts);
 static float convert_adc_current(float adc_volts);
 static float convert_adc_pressure(float adc_volts, uint32_t gas_id);
+static int32_t mccdaq_callback(uint16_t * data, int32_t max_data);
 
 // -----------------  MAIN & TOP LEVEL ROUTINES  -------------------------------------
 
@@ -97,14 +105,17 @@ static void init(void)
 {
     struct rlimit rl;
 
+    // allow core dump
     rl.rlim_cur = RLIM_INFINITY;
     rl.rlim_max = RLIM_INFINITY;
     setrlimit(RLIMIT_CORE, &rl);
 
+    // print size of data part1 and part2
     INFO("sizeof data_t=%zd part1=%zd part2=%zd\n",
          sizeof(data_t), sizeof(struct data_part1_s), sizeof(struct data_part2_s));
 
 #ifdef CAM_ENABLE
+    // init camera
     pthread_t thread;
     if (cam_init(CAM_WIDTH, CAM_HEIGHT, FRAMES_PER_SEC) == 0) {
         if (pthread_create(&thread, NULL, cam_thread, NULL) != 0) {
@@ -113,12 +124,18 @@ static void init(void)
     }
 #endif
 
+    // init dataq device used to acquire chamber voltage, current and pressure readings
     dataq_init(0.5,   // averaging duration in secs
                1200,  // scan rate  (samples per second)
                3,     // number of adc channels
                DATAQ_ADC_CHAN_VOLTAGE,
                DATAQ_ADC_CHAN_CURRENT,
                DATAQ_ADC_CHAN_PRESSURE);
+
+    // init mccdaq device, used to acquire 500000 samples per second from the
+    // ludlum 2929 amplifier output
+    mccdaq_init();
+    mccdaq_start(mccdaq_callback);
 }
 
 static void server(void)
@@ -274,8 +291,8 @@ static void * server_thread(void * cx)
 static void init_data_struct(data_t * data, time_t time_now)
 {
     int16_t mean_mv, min_mv, max_mv;
-    int32_t ret;
-    bool    ret1, ret2, ret3;
+    int32_t ret, wait_ms, chan;
+    bool    ret1, ret2, ret3, ret4;
 
     // 
     // zero data struct 
@@ -321,8 +338,21 @@ static void init_data_struct(data_t * data, time_t time_now)
         data->part1.pressure_n2_mtorr = ERROR_NO_VALUE;
     }
 
-    // data part1 average_cpm XXX
-    // data part1 moving_average_cpm XXX
+    // wait for up to 250 ms for he3 data to be available for time_now;  
+    // if he3 data avail then copy it into data part1 and part2
+    for (wait_ms = 0; he3_time != time_now && wait_ms < 250; wait_ms++) {
+        usleep(1000);
+    }
+    pthread_mutex_lock(&he3_mutex);
+    if (he3_time == time_now) {
+        data->part1.he3 = he3;
+    } else {
+        for (chan = 0; chan < MAX_HE3_CHAN; chan++) {
+            data->part1.he3.cpm_1_sec[chan] = ERROR_NO_VALUE;
+            data->part1.he3.cpm_10_sec[chan] = ERROR_NO_VALUE;
+        }
+    }
+    pthread_mutex_unlock(&he3_mutex);
 
     //
     // data part2
@@ -334,13 +364,19 @@ static void init_data_struct(data_t * data, time_t time_now)
     // data part2: adc_samples
     ret1 = dataq_get_adc_samples(DATAQ_ADC_CHAN_VOLTAGE, 
                                  data->part2.voltage_adc_samples_mv,
-                                 DATAQ_MAX_ADC_SAMPLES);
+                                 MAX_ADC_SAMPLES);
     ret2 = dataq_get_adc_samples(DATAQ_ADC_CHAN_CURRENT, 
                                  data->part2.current_adc_samples_mv,
-                                 DATAQ_MAX_ADC_SAMPLES);
+                                 MAX_ADC_SAMPLES);
     ret3 = dataq_get_adc_samples(DATAQ_ADC_CHAN_PRESSURE, 
                                  data->part2.pressure_adc_samples_mv,
-                                 DATAQ_MAX_ADC_SAMPLES);
+                                 MAX_ADC_SAMPLES);
+    pthread_mutex_lock(&he3_mutex);
+    ret4 = (he3_time == time_now ? 0 : -1);
+    if (ret4 == 0) {
+        memcpy(data->part2.he3_adc_samples_mv, he3_adc_samples_mv, MAX_ADC_SAMPLES*sizeof(uint16_t));
+    }
+    pthread_mutex_unlock(&he3_mutex);
 
 #ifdef CAM_ENABLE
     // data part2: jpeg_buff
@@ -362,6 +398,7 @@ static void init_data_struct(data_t * data, time_t time_now)
     data->part1.data_part2_voltage_adc_samples_mv_valid  = (ret1 == 0);
     data->part1.data_part2_current_adc_samples_mv_valid  = (ret2 == 0);
     data->part1.data_part2_pressure_adc_samples_mv_valid = (ret3 == 0);
+    data->part1.data_part2_he3_adc_samples_mv_valid      = (ret4 == 0);
 }
 
 // -----------------  CONVERT ADC HV VOLTAGE & CURRENT  ------------------------------
@@ -515,3 +552,158 @@ static float convert_adc_pressure(float adc_volts, uint32_t gas_id)
     }
 }    
 
+// -----------------  MCCDAQ CALLBACK - NEUTRON DETECTOR PULSES  ---------------------
+
+// XXX replace numbers with defines
+static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
+{
+    #define MAX_C1SH 4000
+
+    static uint16_t data[1000000];
+    static int32_t  max_data;
+    static int32_t  idx;
+    static int32_t  largest_pulse_height;
+    static int32_t  largest_pulse_idx;
+    static int32_t  counts_1_sec[MAX_HE3_CHAN];
+    static int32_t  counts_10_sec[MAX_HE3_CHAN];
+    static int32_t  max_c1sh;
+    static int32_t  counts_1_sec_history[MAX_C1SH][MAX_HE3_CHAN];
+
+    #define RESET_FOR_NEXT_SEC \
+        do { \
+            max_data             = 0; \
+            idx                  = 0; \
+            largest_pulse_height = 0; \
+            largest_pulse_idx    = 0; \
+            bzero(counts_1_sec, sizeof(counts_1_sec)); \
+        } while (0)
+
+    #define CIRC_MAX_C1SH(x) (max_c1sh+(x) >= 0 && max_c1sh+(x) < MAX_C1SH ? max_c1sh+(x) : \
+                              max_c1sh+(x) < 0                             ? max_c1sh+(x) + MAX_C1SH  \
+                                                                           : max_c1sh+(x) - MAX_C1SH)
+
+    // if max_data too big then 
+    //   print an error 
+    //   reset 
+    // endif
+    if (max_data + max_d > 1000000) {
+        ERROR("max_data %d or max_d %d are too large\n", max_data, max_d);
+        RESET_FOR_NEXT_SEC;
+        return 0;
+    }
+
+    // copy caller supplied data to static data buffer
+    memcpy(data+max_data, d, max_d*sizeof(uint16_t));
+    max_data += max_d;
+
+    // continue scanning data starting at idx, 
+    // stop scanning when idx is near the end
+    while (true) {
+        bool    begining_of_pulse;
+        int32_t pulse_height;
+        int32_t chan;
+
+        // if idx is near the end then exit this loop
+        if (max_data - idx < 10) {
+            break;
+        }
+
+        // if data[idx] too big then print an error and continue
+        if (data[idx] >= 4096) {
+            ERROR("out of range data[%d] = %d, max_data=%d\n", idx, data[idx], max_data);
+            continue;
+        }
+
+        // check for the begining of a pulse at idx
+        // if no pulse then
+        //   advance idx by 1, and
+        //   continue
+        // else
+        //   inspect next values to determine pulse height
+        //   advance index to after the pulse
+        // endif
+        begining_of_pulse = (data[idx] >= 2500);
+        if (!begining_of_pulse) {
+            idx++;
+            continue;
+        } else {
+            pulse_height = data[idx] - 2500;
+            idx++;
+        }
+
+        // pulse_height can't be negative
+        if (pulse_height < 0) {
+            ERROR("pulse_height %d is negative\n", pulse_height);
+            continue;
+        }
+       
+        // determine channel from pulse_height
+        chan = pulse_height / ((4096 - 2500) / 4);
+        if (chan >= 4) {
+            WARN("chan being reduced from %d to 3\n", chan);
+            chan = 3;
+        }
+
+        // increment count for the channel
+        counts_1_sec[chan]++;
+
+        // keep track of largest pule_height
+        if (pulse_height > largest_pulse_height) {
+            largest_pulse_height = pulse_height;
+            largest_pulse_idx = idx;
+        }
+    }
+
+    // if time has incremented then
+    //   publish new he3 data
+    // endif
+    uint64_t time_now = time(NULL);
+    if (time_now > he3_time) {    
+        int32_t i, j, chan;
+
+        // compute the moving average cpm
+        for (chan = 0; chan < 4; chan++) {
+            counts_10_sec[chan] = counts_10_sec[chan] + 
+                                  counts_1_sec[chan] -
+                                  counts_1_sec_history[CIRC_MAX_C1SH(-10)][chan];
+        }
+        memcpy(counts_1_sec_history[CIRC_MAX_C1SH(0)], counts_1_sec, sizeof(counts_1_sec));
+        max_c1sh++;
+
+        // acquire he3_mutex
+        pthread_mutex_lock(&he3_mutex);
+
+        // publish he3 cpm values
+        for (chan = 0; chan < 4; chan++) {
+            he3.cpm_1_sec[chan] = counts_1_sec[chan] * 60;
+            if (max_c1sh >= 10) {
+                he3.cpm_10_sec[chan] = counts_10_sec[chan] * 6;
+            } else {
+                he3.cpm_10_sec[chan] = ERROR_NO_VALUE;
+            }
+        }
+
+        // publish he3_adc_samples_mv 
+        j = largest_pulse_idx - 600;
+        if (j < 0) {
+            j = 0;
+        } else if (j > max_data - 1200) {
+            j = max_data - 1200;
+        }
+        for (i = 0; i < 1200; i++,j++) {
+            he3_adc_samples_mv[i] = data[j] * 1000 / 205 - 10000;
+        }
+
+        // save the time associated with the new he3 data
+        he3_time = time_now;
+
+        // release he3_mutex
+        pthread_mutex_unlock(&he3_mutex);
+
+        // reset for the next second
+        RESET_FOR_NEXT_SEC;
+    }
+
+    // return 'continue-scanning' 
+    return 0;
+}

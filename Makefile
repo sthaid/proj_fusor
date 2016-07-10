@@ -7,6 +7,7 @@ CFLAGS = -c -g -O2 -pthread -fsigned-char -Wall \
 
 SRC_GET_DATA = get_data.c \
                util_dataq.c \
+               util_mccdaq.c \
                util_cam.c \
                util_misc.c
 OBJ_GET_DATA=$(SRC_GET_DATA:.c=.o)

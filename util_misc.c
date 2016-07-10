@@ -33,6 +33,7 @@ SOFTWARE.
 
 #include <time.h>
 #include <sys/time.h>
+#include <math.h>
 
 #include "util_misc.h"
 

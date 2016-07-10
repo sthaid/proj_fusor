@@ -57,7 +57,7 @@ SOFTWARE.
 
 #define STATE_CHANGE(new_state) \
     do { \
-        INFO("state is now %s\n", STATE_STRING(new_state)); \
+        DEBUG("state is now %s\n", STATE_STRING(new_state)); \
         g_state = (new_state); \
     } while (0)
 #define STATE_STRING(x) \
@@ -124,7 +124,7 @@ int32_t mccdaq_init(void)
     // get the calibration date, and print
     struct tm calDate;
     usbCalDate_USB20X(g_udev, &calDate);
-    INFO("MFG Calibration date = %s\n", asctime(&calDate));
+    INFO("MFG Calibration date = %s", asctime(&calDate));
 
     // get the calibration table, and print channel 0 values
     int32_t idx = 0;
@@ -285,6 +285,7 @@ static void * mccdaq_producer_thread(void * cx)
         if (transferred_bytes >= 2) {
             uint16_t * d16 = data;
             int32_t    len = transferred_bytes/2;
+            int32_t    i;
             for (i = 0; i < len; i++) {
                 d16[i] = 2048;
             }
@@ -295,7 +296,9 @@ static void * mccdaq_producer_thread(void * cx)
         //   restart the analog input scan
         // endif
         if ((ret == LIBUSB_ERROR_PIPE) || !(status & AIN_SCAN_RUNNING) || ret != 0) {
-            WARN("restarting, ret==%d status=0x%x\n", ret, status);
+            if (ret != LIBUSB_ERROR_PIPE) {
+                WARN("restarting, ret==%d status=0x%x\n", ret, status);
+            }
             libusb_clear_halt(g_udev, LIBUSB_ENDPOINT_IN|1);
             usbAInScanStart_USB20X(g_udev, 0, FREQUENCY, 1<<CHANNEL, OPTIONS, 0, 0);
         }

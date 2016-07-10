@@ -287,7 +287,7 @@ static void * mccdaq_producer_thread(void * cx)
             int32_t    len = transferred_bytes/2;
             int32_t    i;
             for (i = 0; i < len; i++) {
-                d16[i] = 2048;
+                d16[i] = 2050;
             }
             d16[len/2] = random_triangular(2600,4000);
         }
@@ -296,8 +296,10 @@ static void * mccdaq_producer_thread(void * cx)
         //   restart the analog input scan
         // endif
         if ((ret == LIBUSB_ERROR_PIPE) || !(status & AIN_SCAN_RUNNING) || ret != 0) {
-            if (ret != LIBUSB_ERROR_PIPE) {
+            if (ret != LIBUSB_ERROR_PIPE && ret != 0) {
                 WARN("restarting, ret==%d status=0x%x\n", ret, status);
+            } else {
+                WARN("restarting, ret==%d status=0x%x\n", ret, status);  // XXX DEBUG
             }
             libusb_clear_halt(g_udev, LIBUSB_ENDPOINT_IN|1);
             usbAInScanStart_USB20X(g_udev, 0, FREQUENCY, 1<<CHANNEL, OPTIONS, 0, 0);
@@ -312,7 +314,7 @@ static void * mccdaq_producer_thread(void * cx)
             FATAL("data out of range, %zd\n", data-g_data);
         }
         if (data == g_data + MAX_DATA) {
-            INFO("resetting data to begining of circular buffer\n");
+            DEBUG("resetting data to begining of circular buffer\n");
             data = g_data;
         }
     }

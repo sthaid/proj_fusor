@@ -622,6 +622,7 @@ static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
     static int32_t  idx;
     static int32_t  largest_pulse_height;
     static int32_t  largest_pulse_idx;
+    static int32_t  samples_1_sec;
     static int32_t  counts_1_sec[MAX_HE3_CHAN];
     static int32_t  counts_10_sec[MAX_HE3_CHAN];
     static int32_t  max_c1sh;
@@ -633,6 +634,7 @@ static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
             idx                  = 0; \
             largest_pulse_height = 0; \
             largest_pulse_idx    = 0; \
+            samples_1_sec        = 0; \
             bzero(counts_1_sec, sizeof(counts_1_sec)); \
         } while (0)
 
@@ -653,6 +655,9 @@ static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
     // copy caller supplied data to static data buffer
     memcpy(data+max_data, d, max_d*sizeof(uint16_t));
     max_data += max_d;
+
+    // track number of samples provided by caller
+    samples_1_sec += max_d;
 
     // continue scanning data starting at idx, 
     // stop scanning when idx is near the end
@@ -727,6 +732,14 @@ static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
         }
         memcpy(counts_1_sec_history[CIRC_MAX_C1SH(0)], counts_1_sec, sizeof(counts_1_sec));
         max_c1sh++;
+
+        // debug print
+        INFO("samples_1_sec = %d\n", samples_1_sec);
+        INFO("counts_1_sec  = %5d %5d %5d %5d\n", 
+             counts_1_sec[0], counts_1_sec[1], counts_1_sec[2], counts_1_sec[3]);
+        INFO("counts_10_sec = %5d %5d %5d %5d\n", 
+             counts_10_sec[0], counts_10_sec[1], counts_10_sec[2], counts_10_sec[3]);
+        INFO("\n");
 
         // acquire he3_mutex
         pthread_mutex_lock(&he3_mutex);

@@ -20,7 +20,6 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-// XXX ctrl c hndler for exit
 #define _FILE_OFFSET_BITS 64
 
 #include <stdio.h>
@@ -36,6 +35,7 @@ SOFTWARE.
 #include <limits.h>
 
 #include <pthread.h>
+#include <signal.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -56,6 +56,16 @@ SOFTWARE.
 
 //#define CAM_ENABLE
 
+#define ATOMIC_INCREMENT(x) \
+    do { \
+        __sync_fetch_and_add(x,1); \
+    } while (0)
+
+#define ATOMIC_DECREMENT(x)  \
+    do { \
+        __sync_fetch_and_sub(x,1); \
+    } while (0)
+
 //
 // typedefs
 //
@@ -63,6 +73,9 @@ SOFTWARE.
 //
 // variables
 //
+
+static int32_t         active_thread_count;
+static bool            sigint;
 
 #ifdef CAM_ENABLE
 static uint8_t         jpeg_buff[1000000];
@@ -85,6 +98,7 @@ static void server(void);
 #ifdef CAM_ENABLE
 static void * cam_thread(void * cx);
 #endif
+static void sigint_handler(int sig);
 static void * server_thread(void * cx);
 static void init_data_struct(data_t * data, time_t time_now);
 static float convert_adc_voltage(float adc_volts);
@@ -96,14 +110,29 @@ static int32_t mccdaq_callback(uint16_t * data, int32_t max_data);
 
 int32_t main(int32_t argc, char **argv)
 {
+    int32_t wait_ms;
+
+    // init
     init();
+
+    // runtime
     server();
+
+    // terminate
+    for (wait_ms = 0; active_thread_count > 0 && wait_ms < 5000; wait_ms++) {
+        usleep(1000);
+    }
+    if (active_thread_count > 0) {
+        ERROR("all threads did not terminate, active_thread_count=%d\n", active_thread_count);
+    }
+    INFO("terminating\n");
     return 0;
 }
 
 static void init(void)
 {
     struct rlimit rl;
+    struct sigaction action;
 
     // allow core dump
     rl.rlim_cur = RLIM_INFINITY;
@@ -113,6 +142,11 @@ static void init(void)
     // print size of data part1 and part2
     INFO("sizeof data_t=%zd part1=%zd part2=%zd\n",
          sizeof(data_t), sizeof(struct data_part1_s), sizeof(struct data_part2_s));
+
+    // register signal handler for SIGINT
+    bzero(&action, sizeof(action));
+    action.sa_handler = sigint_handler;
+    sigaction(SIGINT, &action, NULL);
 
 #ifdef CAM_ENABLE
     // init camera
@@ -189,6 +223,9 @@ static void server(void)
         len = sizeof(address);
         sockfd = accept(listen_sockfd, (struct sockaddr *) &address, &len);
         if (sockfd == -1) {
+            if (sigint) {
+                break;
+            }
             FATAL("accept, %s\n", strerror(errno));
         }
 
@@ -206,7 +243,14 @@ static void * cam_thread(void * cx)
     uint8_t * ptr;
     uint32_t  len;
 
+    ATOMIC_INCREMENT(&active_thread_count);
+
     while (true) {
+        // if sigint then exit thread
+        if (sigint) {
+            break;
+        }
+
         // get cam buff
         ret = cam_get_buff(&ptr, &len);
         if (ret != 0) {
@@ -225,9 +269,16 @@ static void * cam_thread(void * cx)
         cam_put_buff(ptr);
     }
 
+    ATOMIC_DECREMENT(&active_thread_count);
+
     return NULL;
 }
 #endif
+
+static void sigint_handler(int sig)
+{
+    sigint = true;
+}
 
 // -----------------  SERVER_THREAD  -------------------------------------------------
 
@@ -237,6 +288,8 @@ static void * server_thread(void * cx)
     time_t    time_now, time_last;
     ssize_t   len;
     data_t  * data;
+
+    ATOMIC_INCREMENT(&active_thread_count);
 
     INFO("accepted connection, sockfd=%d\n", sockfd);
 
@@ -251,6 +304,9 @@ static void * server_thread(void * cx)
                 break;
             }
             usleep(1000);  // 1 ms
+            if (sigint) {
+                goto exit_thread;
+            }
         }
 
         // sanity check time_now, should be time_last+1
@@ -280,9 +336,11 @@ static void * server_thread(void * cx)
         time_last = time_now;
     }
 
+exit_thread:
     // terminate connection with client, and 
     // terminate thread
     close(sockfd);
+    ATOMIC_DECREMENT(&active_thread_count);
     return NULL;
 }
 

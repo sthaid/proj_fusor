@@ -276,6 +276,21 @@ static void * mccdaq_producer_thread(void * cx)
         DEBUG("ret=%d length=%d transferred_byts=%d status=%d\n", 
               ret, length, transferred_bytes, status);
 
+        // print warning if transferred_bytes is odd
+        if (transferred_bytes & 1) {
+            WARN("transferred_bytes = %d\n", transferred_bytes);    
+        }
+
+        // XXX fake data for unit test
+        if (transferred_bytes >= 2) {
+            uint16_t * d16 = data;
+            int32_t    len = transferred_bytes/2;
+            for (i = 0; i < len; i++) {
+                d16[i] = 2048;
+            }
+            d16[len/2] = random_triangular(2600,4000);
+        }
+
         // if error has occurred then
         //   restart the analog input scan
         // endif

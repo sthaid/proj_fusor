@@ -117,3 +117,21 @@ char * time2str(char * str, int64_t us, bool gmt, bool display_ms, bool display_
 
     return str;
 }
+
+// -----------------  RANDOM NUMBERS  -------------------------------------
+
+// Refer to:
+// - http://en.wikipedia.org/wiki/Triangular_distribution
+// - http://stackoverflow.com/questions/3510475/generate-random-numbers-according-to-distributions
+int32_t random_triangular(int32_t low, int32_t high)
+{
+    int32_t range = high - low;
+    double U = random() / (double) RAND_MAX;
+
+    if (U <= 0.5) {
+        return low + sqrt(U * range * range / 2);
+    } else {
+        return high - sqrt((1 - U) * range * range / 2);
+    }
+}
+

@@ -2,4 +2,5 @@
 *.d
 *.dat
 get_data
+get_data.log
 display

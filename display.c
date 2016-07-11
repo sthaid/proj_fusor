@@ -66,7 +66,7 @@ SOFTWARE.
 
 #define MAX_FILE_DATA_PART1   86400   // 1 day
 #define MAX_DATA_PART2_LENGTH 1000000
-#define MAX_GRAPH             2
+#define MAX_GRAPH             3
 #define MAX_GRAPH_POINTS      100000
 
 #define FILE_DATA_PART2_OFFSET \
@@ -115,6 +115,7 @@ static enum mode                mode;
 static enum get_live_data_state get_live_data_state;
 static bool                     program_terminating;
 static bool                     cam_thread_running;
+static bool                     opt_no_cam;
 
 static uint32_t                 win_width;
 static uint32_t                 win_height;
@@ -153,6 +154,7 @@ static void draw_data_values(rect_t * data_pane, int32_t file_idx);
 static void draw_graph_init(rect_t * graph_pane);
 static void draw_graph0(int32_t file_idx);
 static void draw_graph1(int32_t file_idx);
+static void draw_graph2(int32_t file_idx);
 static void draw_graph_common(char * title_str, char * info_str, int32_t cursor_x, char * cursor_str, 
     int32_t max_graph, ...);
 static int32_t generate_test_file(void);
@@ -243,9 +245,10 @@ static int32_t initialize(int32_t argc, char ** argv)
     // -g WxH      : window width and height, default 1920x1080
     // -s name     : server name
     // -p filename : playback file
+    // -x          : don't capture cam data in live mode
     // -t secs     : generate test data file, secs long
     while (true) {
-        char opt_char = getopt(argc, argv, "hvg:s:p:t:");
+        char opt_char = getopt(argc, argv, "hvg:s:p:xt:");
         if (opt_char == -1) {
             break;
         }
@@ -269,6 +272,9 @@ static int32_t initialize(int32_t argc, char ** argv)
             mode = PLAYBACK;
             strcpy(filename, optarg);
             break;
+        case 'x':
+            opt_no_cam = true;
+            break;  
         case 't':
             mode = TEST;
             if (sscanf(optarg, "%d", &test_file_secs) != 1 || test_file_secs < 1 || test_file_secs > MAX_FILE_DATA_PART1) {
@@ -450,9 +456,11 @@ static int32_t initialize(int32_t argc, char ** argv)
         }
 
         // cam_init
-        if (cam_init(CAM_WIDTH, CAM_HEIGHT, FRAMES_PER_SEC) == 0) {
-            if (pthread_create(&thread, NULL, cam_thread, NULL) != 0) {
-                FATAL("pthread_create cam_thread, %s\n", strerror(errno));
+        if (!opt_no_cam) {
+            if (cam_init(CAM_WIDTH, CAM_HEIGHT, FRAMES_PER_SEC) == 0) {
+                if (pthread_create(&thread, NULL, cam_thread, NULL) != 0) {
+                    FATAL("pthread_create cam_thread, %s\n", strerror(errno));
+                }
             }
         }
     }
@@ -562,6 +570,13 @@ static void * get_live_data_thread(void * cx)
                 data_part1.data_part2_length = sizeof(struct data_part2_s) + jpeg_buff_len;
             }
             pthread_mutex_unlock(&jpeg_mutex);
+        }
+
+        // if opt_no_cam then disacard camera data
+        if (opt_no_cam) {
+            data_part2->jpeg_buff_len = 0;
+            data_part1.data_part2_jpeg_buff_valid = false;
+            data_part1.data_part2_length = sizeof(struct data_part2_s);
         }
 
         // check for time increasing by other than 1 second;
@@ -760,6 +775,9 @@ static int32_t display_handler(void)
             break;
         case 1:
             draw_graph1(file_idx);
+            break;
+        case 2:
+            draw_graph2(file_idx);
             break;
         default:
             FATAL("graph_select %d out of range\n", graph_select);
@@ -1082,7 +1100,6 @@ static void draw_graph1(int32_t file_idx)
     static graph_t g_voltage_samples;
     static graph_t g_current_samples;
     static graph_t g_pressure_samples;
-    static graph_t g_he3_samples;
     static int32_t y_max_mv_tbl[] = {100, 1000, 2000, 5000, 10000};
 
     #define MAX_Y_MAX_MV_TBL (sizeof(y_max_mv_tbl)/sizeof(y_max_mv_tbl[0]))
@@ -1125,7 +1142,7 @@ static void draw_graph1(int32_t file_idx)
     dp1 = &file_data_part1[file_idx];
     dp2 = read_data_part2(file_idx);
     if (dp2 == NULL) {
-        //ERROR
+        //ERROR XXX
     }
 
     // init graph_t
@@ -1135,13 +1152,82 @@ static void draw_graph1(int32_t file_idx)
                GREEN, dp1->data_part2_current_adc_samples_mv_valid);
     INIT_GRAPH(&g_pressure_samples, "PRESSURE", pressure_adc_samples_mv, \
                BLUE, dp1->data_part2_pressure_adc_samples_mv_valid);
+
+    // draw the graph
+    sprintf(info_str, "Y_MAX %d mV  (-/+)", y_max_mv);
+    draw_graph_common("ADC SAMPLES - 1 SECOND", info_str, -1, NULL, 
+                      3, &g_voltage_samples, &g_current_samples, &g_pressure_samples);
+}
+
+static void draw_graph2(int32_t file_idx)
+{
+    struct data_part1_s * dp1;
+    struct data_part2_s * dp2;
+    int32_t               y_max_mv;
+    char                  info_str[100];
+
+    static graph_t g_he3_samples;
+
+    static int32_t y_max_mv_tbl[] = {100, 1000, 2000, 5000, 10000};
+
+    #undef MAX_Y_MAX_MV_TBL
+    #define MAX_Y_MAX_MV_TBL (sizeof(y_max_mv_tbl)/sizeof(y_max_mv_tbl[0]))
+
+    #undef INIT_GRAPH
+    #define INIT_GRAPH(_graph, _title, _field_name, _color, _valid) \
+        do { \
+            int32_t i; \
+            strcpy((_graph)->title, (_title)); \
+            (_graph)->color = (_color);; \
+            (_graph)->max_points = 0; \
+            if (_valid && dp2 != NULL) { \
+                float tmp = (graph_y_range / (float)(y_max_mv)); \
+                int32_t y_limit1 = graph_y_origin - graph_y_range; \
+                int32_t y_limit2 = graph_y_origin + FONT0_HEIGHT; \
+                for (i = 0; i < MAX_ADC_SAMPLES; i++) { \
+                    point_t * p; \
+                    p = &(_graph)->points[(_graph)->max_points++]; \
+                    p->x = graph_x_origin + i; \
+                    p->y = graph_y_origin; \
+                    p = &(_graph)->points[(_graph)->max_points++]; \
+                    p->x = graph_x_origin + i; \
+                    p->y = graph_y_origin - tmp * dp2->_field_name[i]; \
+                    if (p->y < y_limit1) { \
+                        p->y = y_limit1; \
+                    } \
+                    if (p->y > y_limit2) { \
+                        p->y = y_limit2; \
+                    } \
+                    p = &(_graph)->points[(_graph)->max_points++]; \
+                    p->x = graph_x_origin + i; \
+                    p->y = graph_y_origin; \
+                } \
+            } \
+        } while(0)
+
+    // sanitize graph_scale_idx
+    if (graph_scale_idx[2] < 0) {
+        graph_scale_idx[2] = 0;
+    } else if (graph_scale_idx[2] >= MAX_Y_MAX_MV_TBL) {
+        graph_scale_idx[2] = MAX_Y_MAX_MV_TBL - 1;
+    }
+
+    // init
+    y_max_mv = y_max_mv_tbl[graph_scale_idx[2]];
+    dp1 = &file_data_part1[file_idx];
+    dp2 = read_data_part2(file_idx);
+    if (dp2 == NULL) {
+        //ERROR XXX
+    }
+
+    // init graph_t
     INIT_GRAPH(&g_he3_samples, "HE3", he3_adc_samples_mv, \
                PURPLE, dp1->data_part2_he3_adc_samples_mv_valid);
 
     // draw the graph
     sprintf(info_str, "Y_MAX %d mV  (-/+)", y_max_mv);
-    draw_graph_common("ADC SAMPLES - 1 SECOND", info_str, -1, NULL, 
-                      4, &g_voltage_samples, &g_current_samples, &g_pressure_samples, &g_he3_samples);
+    draw_graph_common("HE3 ADC SAMPLES - 2.4 MILLISECONDS", info_str, -1, NULL, 
+                      1, &g_he3_samples);
 }
 
 static void draw_graph_common(char * title_str, char * info_str, int32_t cursor_x, char * cursor_str, 

@@ -75,7 +75,7 @@ SOFTWARE.
 //
 
 static int32_t         active_thread_count;
-static bool            sigint;
+static bool            sigint_or_sigterm;
 
 #ifdef CAM_ENABLE
 static uint8_t         jpeg_buff[1000000];
@@ -98,7 +98,7 @@ static void server(void);
 #ifdef CAM_ENABLE
 static void * cam_thread(void * cx);
 #endif
-static void sigint_handler(int sig);
+static void signal_handler(int sig);
 static void * server_thread(void * cx);
 static void init_data_struct(data_t * data, time_t time_now);
 static float convert_adc_voltage(float adc_volts);
@@ -143,10 +143,14 @@ static void init(void)
     INFO("sizeof data_t=%zd part1=%zd part2=%zd\n",
          sizeof(data_t), sizeof(struct data_part1_s), sizeof(struct data_part2_s));
 
-    // register signal handler for SIGINT
+    // register signal handler for SIGINT, and SIGTERM
     bzero(&action, sizeof(action));
-    action.sa_handler = sigint_handler;
+    action.sa_handler = signal_handler;
     sigaction(SIGINT, &action, NULL);
+
+    bzero(&action, sizeof(action));
+    action.sa_handler = signal_handler;
+    sigaction(SIGTERM, &action, NULL);
 
 #ifdef CAM_ENABLE
     // init camera
@@ -223,7 +227,7 @@ static void server(void)
         len = sizeof(address);
         sockfd = accept(listen_sockfd, (struct sockaddr *) &address, &len);
         if (sockfd == -1) {
-            if (sigint) {
+            if (sigint_or_sigterm) {
                 break;
             }
             FATAL("accept, %s\n", strerror(errno));
@@ -246,8 +250,8 @@ static void * cam_thread(void * cx)
     ATOMIC_INCREMENT(&active_thread_count);
 
     while (true) {
-        // if sigint then exit thread
-        if (sigint) {
+        // if sigint_or_sigterm then exit thread
+        if (sigint_or_sigterm) {
             break;
         }
 
@@ -275,9 +279,9 @@ static void * cam_thread(void * cx)
 }
 #endif
 
-static void sigint_handler(int sig)
+static void signal_handler(int sig)
 {
-    sigint = true;
+    sigint_or_sigterm = true;
 }
 
 // -----------------  SERVER_THREAD  -------------------------------------------------
@@ -304,7 +308,7 @@ static void * server_thread(void * cx)
                 break;
             }
             usleep(1000);  // 1 ms
-            if (sigint) {
+            if (sigint_or_sigterm) {
                 goto exit_thread;
             }
         }

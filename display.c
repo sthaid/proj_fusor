@@ -116,6 +116,7 @@ static enum get_live_data_state get_live_data_state;
 static bool                     program_terminating;
 static bool                     cam_thread_running;
 static bool                     opt_no_cam;
+static char                     screenshot_prefix[100];
 
 static uint32_t                 win_width;
 static uint32_t                 win_height;
@@ -212,7 +213,7 @@ static int32_t initialize(int32_t argc, char ** argv)
 {
     struct rlimit      rl;
     pthread_t          thread;
-    int32_t            ret;
+    int32_t            ret, len;
     char               filename[100];
     char               servername[100];
     struct sockaddr_in sockaddr;
@@ -303,7 +304,7 @@ static int32_t initialize(int32_t argc, char ** argv)
             time_t t = time(NULL);
             struct tm * tm = localtime(&t);
             sprintf(filename, "fusor_%2.2d%2.2d%2.2d_%2.2d%2.2d%2.2d.dat",
-                    tm->tm_mon+1, tm->tm_mday, tm->tm_year-100,
+                    tm->tm_year-100, tm->tm_mon+1, tm->tm_mday,
                     tm->tm_hour, tm->tm_min, tm->tm_sec);
         } else {  // mode is TEST
             sprintf(filename, "fusor_test_%d_secs.dat", test_file_secs);
@@ -316,6 +317,15 @@ static int32_t initialize(int32_t argc, char ** argv)
     if (mode == TEST) {
         INFO("test_file_secs  = %d\n", test_file_secs);
     }
+
+    // validate filename extension is '.dat', and
+    // save screenshot prefix
+    len = strlen(filename);
+    if (len < 5 || strcmp(&filename[len-4], ".dat") != 0) {
+        ERROR("filename must have '.dat. extension\n");
+        return -1;
+    }
+    memcpy(screenshot_prefix, filename, len-4);
 
     // if mode is live or test then 
     //   verify filename does not exist
@@ -692,13 +702,21 @@ static int32_t display_handler(void)
     int32_t       event_processed_count;
     int32_t       file_max_last;
     bool          lost_conn_msg_displayed;
+    uint64_t      screenshot_time_us;
+    bool          screenshot_msg_is_requested;
+    bool          screenshot_msg_is_displayed;
+
+    #define MAX_SCREENSHOT_US 1000000
 
     // initializae 
     quit = false;
     file_max_last = -1;
     lost_conn_msg_displayed = false;
+    screenshot_time_us = 0;
+    screenshot_msg_is_requested = false;
+    screenshot_msg_is_displayed = false;
 
-    if (sdl_init(win_width, win_height) < 0) {
+    if (sdl_init(win_width, win_height, screenshot_prefix) < 0) {
         ERROR("sdl_init %dx%d failed\n", win_width, win_height);
         return -1;
     }
@@ -750,13 +768,20 @@ static int32_t display_handler(void)
         t = file_data_part1[file_idx].time;
         tm = localtime(&t);
         sprintf(str, "%d/%d/%d %2.2d:%2.2d:%2.2d",
-                tm->tm_mon+1, tm->tm_mday, tm->tm_year-100,
+                tm->tm_year-100, tm->tm_mon+1, tm->tm_mday,
                 tm->tm_hour, tm->tm_min, tm->tm_sec);
         sdl_render_text(&title_pane, 0, 10, 0, str, WHITE, BLACK);
 
         if (get_live_data_state == STATE_ERROR) {
             sdl_render_text(&title_pane, 0, 35, 0, "LOST CONNECTION", RED, BLACK);
             lost_conn_msg_displayed = true;
+        }
+
+        if (screenshot_msg_is_requested) {
+            sdl_render_text(&title_pane, 0, 60, 0, "SCREENSHOT", WHITE, BLACK);
+            screenshot_msg_is_displayed = true;
+        } else {
+            screenshot_msg_is_displayed = false;
         }
 
         sdl_render_text(&title_pane, 0, -5, 0, "(ESC)", WHITE, BLACK);
@@ -802,7 +827,7 @@ static int32_t display_handler(void)
         // present the display
         sdl_display_present();
 
-        // loop until
+        // loop until XXX commetns
         // 1- quit flag is set, OR
         // 2- (there is no current event) AND
         //    ((at least one event has been processed) OR
@@ -816,6 +841,9 @@ static int32_t display_handler(void)
             switch (event->event) {
             case SDL_EVENT_QUIT: case SDL_EVENT_KEY_ESC: 
                 quit = true;
+                break;
+            case SDL_EVENT_SCREENSHOT_TAKEN:
+                screenshot_time_us = microsec_timer();
                 break;
             case '?':  
                 sdl_display_text(about);
@@ -871,9 +899,13 @@ static int32_t display_handler(void)
                 break;
             }
 
+            // determine if screenshot msg should be displayed 
+            screenshot_msg_is_requested = (microsec_timer() - screenshot_time_us) < MAX_SCREENSHOT_US;
+
             // test if should break out of this loop
             if ((quit) ||
                 (get_live_data_state == STATE_ERROR && !lost_conn_msg_displayed) ||
+                (screenshot_msg_is_requested != screenshot_msg_is_displayed) ||
                 ((event->event == SDL_EVENT_NONE) &&
                  ((event_processed_count > 0) ||
                   (file_idx != file_idx_global) ||

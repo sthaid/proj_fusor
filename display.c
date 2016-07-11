@@ -1014,11 +1014,12 @@ static void draw_graph0(int32_t file_idx)
     float    x_pixels_per_sec;
 
     static int32_t x_time_span_sec_tbl[] = {60, 600, 3600, 86400};
-    static graph_t g_kv, g_ma, g_mtorr;
+    static graph_t g_kv, g_ma, g_mtorr, g_he3_cpm;
 
     #define MAX_X_TIME_SPAN_SEC_TBL \
         (sizeof(x_time_span_sec_tbl) / sizeof(x_time_span_sec_tbl[0]))
 
+    // XXX maybe field_name should be variable_name
     #define INIT_GRAPH(_graph, _title, _field_name, _color, _val_max) \
         do { \
             float   x; \
@@ -1077,6 +1078,7 @@ static void draw_graph0(int32_t file_idx)
     INIT_GRAPH(&g_kv, "kV", voltage_mean_kv, RED, 30);
     INIT_GRAPH(&g_ma, "mA", current_ma, GREEN, 30);
     INIT_GRAPH(&g_mtorr, "mTorr", pressure_d2_mtorr, BLUE, 30);
+    INIT_GRAPH(&g_he3_cpm, "cpm", he3.cpm_10_sec[2], PURPLE, 10000);
 
     // init info_str
     sprintf(info_str, "X-SPAN %d SEC  (-/+)", x_time_span_sec);
@@ -1087,7 +1089,7 @@ static void draw_graph0(int32_t file_idx)
     time2str(cursor_str, cursor_time_sec*1000000, false, false, false);
 
     // draw the graph
-    draw_graph_common("SUMMARY", info_str, cursor_x, cursor_str, 3, &g_kv, &g_ma, &g_mtorr);
+    draw_graph_common("SUMMARY", info_str, cursor_x, cursor_str, 4, &g_kv, &g_ma, &g_mtorr, &g_he3_cpm);
 }
 
 static void draw_graph1(int32_t file_idx)

@@ -1,3 +1,16 @@
+XXX update doc
+
+- sudo vi /etc/rc.local, and add the following so that the get_data
+  will automatically start when the Raspberry Pi is rebooted
+    # Start get_data
+    if [ -x /home/haid/proj_fusor/get_data ]
+    then
+      su haid -c "cd /home/haid/proj_fusor; ./get_data </dev/null &>>get_data.log &"
+    fi
+
+XXX also describe how to build ge_data
+
+
 ================================
 TITLE: INSTALL RASPBERRY PI 3
 ================================

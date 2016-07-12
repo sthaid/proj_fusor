@@ -40,6 +40,7 @@ SOFTWARE.
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <sys/resource.h>
+#include <sys/socket.h>
 
 #include "common.h"
 #include "util_dataq.h"
@@ -183,11 +184,19 @@ static void server(void)
     int32_t            ret;
     pthread_t          thread;
     pthread_attr_t     attr;
+    int32_t            optval;
 
     // create socket
     listen_sockfd = socket(AF_INET, SOCK_STREAM, 0);
     if (listen_sockfd == -1) {
         FATAL("socket, %s\n", strerror(errno));
+    }
+
+    // set reuseaddr
+    optval = 1;
+    ret = setsockopt(listen_sockfd, SOL_SOCKET, SO_REUSEADDR, &optval, 4);
+    if (ret == -1) {
+        FATAL("SO_REUSEADDR, %s\n", strerror(errno));
     }
 
     // bind socket

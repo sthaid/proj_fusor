@@ -54,6 +54,8 @@ SOFTWARE.
 #define SDL_EVENT_WIN_SIZE_CHANGE      145
 #define SDL_EVENT_WIN_MINIMIZED        146
 #define SDL_EVENT_WIN_RESTORED         147
+// - screenshot
+#define SDL_EVENT_SCREENSHOT_TAKEN     149
 // - quit
 #define SDL_EVENT_QUIT                 150
 // - available to be defined by users
@@ -125,7 +127,7 @@ typedef struct {
 //
 
 // window initialize, and get_state
-int32_t sdl_init(uint32_t w, uint32_t h);
+int32_t sdl_init(uint32_t w, uint32_t h, char * screenshot_prefix);
 void sdl_get_state(int32_t * win_width, int32_t * win_height, bool * win_minimized);
 
 // display init and present

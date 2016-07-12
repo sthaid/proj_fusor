@@ -35,6 +35,9 @@ SOFTWARE.
 #include <SDL_ttf.h>
 #include <SDL_mixer.h>
 #include <png.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 #include "util_sdl.h"
 #include "util_sdl_button_sound.h"
@@ -78,6 +81,8 @@ static int32_t          sdl_win_width;
 static int32_t          sdl_win_height;
 static bool             sdl_win_minimized;
 
+static char             sdl_screenshot_prefix[100];
+
 static Mix_Chunk      * sdl_button_sound;
 
 static sdl_font_t       sdl_font[MAX_FONT];
@@ -111,12 +116,15 @@ static void sdl_set_color(int32_t color);
 
 // -----------------  SDL INIT & CLOSE  --------------------------------- 
 
-int32_t sdl_init(uint32_t w, uint32_t h)
+int32_t sdl_init(uint32_t w, uint32_t h, char * screenshot_prefix)
 {
     #define SDL_FLAGS SDL_WINDOW_RESIZABLE
 
     char  * font0_path, * font1_path;
     int32_t font0_ptsize, font1_ptsize;
+
+    // save copy of screenshot_prefix
+    strcpy(sdl_screenshot_prefix, screenshot_prefix);
 
     // initialize Simple DirectMedia Layer  (SDL)
     if (SDL_Init(SDL_INIT_VIDEO|SDL_INIT_AUDIO) < 0) {
@@ -515,6 +523,7 @@ sdl_event_t * sdl_poll_event(void)
             if (ctrl && key == 'p') {
                 print_screen();
                 play_event_sound();
+                event.event = SDL_EVENT_SCREENSHOT_TAKEN;
                 break;
             }
 
@@ -666,14 +675,39 @@ static void print_screen(void)
     }
 
     //
-    // creeate the file_name using localtime
+    // creeate the file_name ...
+    // if no sdl_screenshot_prefix then
+    //   filename is based on localtime
+    // else
+    //   filename 'prefix_N.png'
+    // endif
     //
 
-    t = time(NULL);
-    localtime_r(&t, &tm);
-    sprintf(file_name, "screenshot_%2.2d%2.2d%2.2d_%2.2d%2.2d%2.2d.png",
-            tm.tm_year - 100, tm.tm_mon + 1, tm.tm_mday,
-            tm.tm_hour, tm.tm_min, tm.tm_sec);
+    if (sdl_screenshot_prefix[0] == '\0') {
+        t = time(NULL);
+        localtime_r(&t, &tm);
+        sprintf(file_name, "%s_screenshot_%2.2d%2.2d%2.2d_%2.2d%2.2d%2.2d.png",
+                sdl_screenshot_prefix,
+                tm.tm_year-100, tm.tm_mon+1, tm.tm_mday,
+                tm.tm_hour, tm.tm_min, tm.tm_sec);
+    } else {
+        bool file_name_found = false;
+        struct stat buf;
+        int32_t i;
+        for (i = 1; i < 1000; i++) {
+            sprintf(file_name, "%s_screenshot_%d.png",
+                    sdl_screenshot_prefix, i);
+            if (stat(file_name,&buf) == -1 && errno == ENOENT) {
+                file_name_found = true;
+                break;
+            }
+        }
+        if (!file_name_found) {
+            ERROR("unable to select file_name for screenshot, prefix=%s\n", 
+                  sdl_screenshot_prefix);
+            goto done;
+        }
+    }
 
     //
     // write pixels to file_name ...

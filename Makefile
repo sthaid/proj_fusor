@@ -1,4 +1,4 @@
-TARGETS = get_data display
+TARGETS = display get_data 
 
 CC = gcc
 OUTPUT_OPTION=-MMD -MP -o $@

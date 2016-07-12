@@ -113,6 +113,7 @@ static enum mode                mode;
 static bool                     initially_live_mode;
 static bool                     lost_connection;
 static bool                     file_error;
+static bool                     time_error;
 static bool                     program_terminating;
 static bool                     cam_thread_running;
 static bool                     opt_no_cam;
@@ -491,9 +492,9 @@ static void * get_live_data_thread(void * cx)
     struct data_part1_s * dp1;
     struct data_part2_s * dp2;
     uint64_t              last_data_time_written_to_file;
-    uint64_t              t, time_now;
+    uint64_t              t, time_now, time_delta;
 
-    static data_t data_novalue;  //XXX
+    static data_t data_novalue;  //XXX  init
 
     // init
     sfd = -1;
@@ -534,10 +535,10 @@ try_to_connect_again:
     while (true) {
         // read data part1 from server, and
         // verify data part1 magic, and length
-        len = recv(sfd, &dp1, sizeof(dp1), MSG_WAITALL);
-        if (len != sizeof(dp1)) {
+        len = recv(sfd, dp1, sizeof(struct data_part1_s), MSG_WAITALL);
+        if (len != sizeof(struct data_part1_s)) {
             ERROR("recv dp1 len=%d exp=%zd, %s\n",
-                  len, sizeof(dp1), strerror(errno));
+                  len, sizeof(struct data_part1_s), strerror(errno));
             goto connection_failed;
         }
         if (dp1->magic != MAGIC_DATA_PART1) {
@@ -587,6 +588,18 @@ try_to_connect_again:
             dp2->jpeg_buff_len = 0;
             dp1->data_part2_jpeg_buff_valid = false;
             dp1->data_part2_length = sizeof(struct data_part2_s);
+        }
+
+        // verify the time of received data is close to the time 
+        // on the computer running this display program
+        time_now = time(NULL);
+        time_delta = (time_now > data->part1.time 
+                      ? time_now - data->part1.time
+                      : data->part1.time - time_now);
+        INFO("XXX TIME DELTA %"PRId64"\n", time_delta);
+        if (time_delta > 10) {
+            ERROR("server time delta = %"PRId64"\n", time_delta);
+            goto time_error;
         }
 
         // if this is the first write then
@@ -700,6 +713,21 @@ file_error:
         sfd = -1;
     }
     return NULL;
+
+time_error:
+    // handle time error ...
+
+    // this program requires the time on the server to be 
+    // reasonably well synced with the time on the computer running 
+    // the display program; if not then exit this thread
+    ERROR("time error - get_live_data_thread terminating\n");
+    lost_connection = true;
+    time_error = true;
+    if (sfd != -1) {
+        close(sfd);
+        sfd = -1;
+    }
+    return NULL;
 }
 
 static int32_t write_data_to_file(data_t * data)
@@ -802,6 +830,7 @@ static int32_t display_handler(void)
     int32_t       file_max_last;
     bool          lost_connection_msg_is_displayed;
     bool          file_error_msg_is_displayed;
+    bool          time_error_msg_is_displayed;
     uint64_t      screenshot_time_us;
     bool          screenshot_msg;
     bool          screenshot_msg_is_displayed;
@@ -813,6 +842,7 @@ static int32_t display_handler(void)
     file_max_last = -1;
     lost_connection_msg_is_displayed = false;
     file_error_msg_is_displayed = false;
+    time_error_msg_is_displayed = false;
     screenshot_time_us = 0;
     screenshot_msg = false;
     screenshot_msg_is_displayed = false;
@@ -887,8 +917,16 @@ static int32_t display_handler(void)
             file_error_msg_is_displayed = false;
         }
 
+        if (time_error) {
+            sdl_render_text(&title_pane, 0, 65, 0, "TIME_ERROR", RED, BLACK);
+            time_error_msg_is_displayed = true;
+        } else {
+            time_error_msg_is_displayed = false;
+        }
+
+        // XXX test this loc
         if (screenshot_msg) {
-            sdl_render_text(&title_pane, 0, 65, 0, "SCREENSHOT", WHITE, BLACK);
+            sdl_render_text(&title_pane, 0, 80, 0, "SCREENSHOT", WHITE, BLACK);
             screenshot_msg_is_displayed = true;
         } else {
             screenshot_msg_is_displayed = false;
@@ -1017,6 +1055,7 @@ static int32_t display_handler(void)
             if ((quit) ||
                 (lost_connection != lost_connection_msg_is_displayed) ||
                 (file_error != file_error_msg_is_displayed) ||
+                (time_error != time_error_msg_is_displayed) ||
                 (screenshot_msg != screenshot_msg_is_displayed) ||
                 ((event->event == SDL_EVENT_NONE) &&
                  ((event_processed_count > 0) ||

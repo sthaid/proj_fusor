@@ -82,7 +82,7 @@ SOFTWARE.
 #define DEFAULT_WIN_WIDTH   1920
 #define DEFAULT_WIN_HEIGHT  1000
 
-// #define JPEG_BUFF_SAMPLE_CREATE_ENABLE
+//#define JPEG_BUFF_SAMPLE_CREATE_ENABLE
 #define JPEG_BUFF_SAMPLE_FILENAME "jpeg_buff_sample.bin"
 
 //
@@ -90,8 +90,6 @@ SOFTWARE.
 //
 
 enum mode {LIVE, PLAYBACK, TEST};
-
-enum get_live_data_state {STATE_NEVER_CONNECTED, STATE_CONNECTED, STATE_DISCONNECTED};
 
 typedef struct {
     uint64_t magic;
@@ -113,7 +111,8 @@ typedef struct {
 
 static enum mode                mode;
 static bool                     initially_live_mode;
-static enum get_live_data_state get_live_data_state;
+static bool                     lost_connection;
+static bool                     file_error;
 static bool                     program_terminating;
 static bool                     cam_thread_running;
 static bool                     opt_no_cam;
@@ -150,6 +149,7 @@ static pthread_mutex_t          jpeg_mutex = PTHREAD_MUTEX_INITIALIZER;
 static int32_t initialize(int32_t argc, char ** argv);
 static void usage(void);
 static void * get_live_data_thread(void * cx);
+static int32_t write_data_to_file(data_t * data);
 static void * cam_thread(void * cx);
 static int32_t display_handler();
 static void draw_camera_image(rect_t * cam_pane, int32_t file_idx);
@@ -481,37 +481,31 @@ static void usage(void)
 
 // -----------------  GET LIVE DATA THREAD  ------------------------------------------
 
-//XXX skip over data when time increases
+// XXX check time sync
 static void * get_live_data_thread(void * cx)
 {
     int32_t               sfd;
     int32_t               len;
-    off_t                 offset;
-    uint64_t              last_time;
     struct timeval        rcvto;
-    struct data_part1_s   data_part1;
-    struct data_part2_s * data_part2;
+    data_t              * data;
+    struct data_part1_s * dp1;
+    struct data_part2_s * dp2;
+    uint64_t              last_data_time_written_to_file;
+    uint64_t              t, time_now;
+
+    static data_t data_novalue;  //XXX
 
     // init
     sfd = -1;
-    offset = FILE_DATA_PART2_OFFSET;
-    last_time = -1;
-    data_part2 = calloc(1, MAX_DATA_PART2_LENGTH);
-    if (data_part2 == NULL) {
+    data = calloc(1, sizeof(struct data_part1_s) + MAX_DATA_PART2_LENGTH);
+    if (data == NULL) {
         FATAL("calloc\n");
     }
+    dp1 = &data->part1;
+    dp2 = &data->part2;
+    last_data_time_written_to_file = 0;
 
-reconnect:
-    // if socket created then 
-    //    close it 
-    //    sleep 1 second to pace the execution
-    // endif
-    if (sfd != -1) {
-        close(sfd);
-        sfd = -1;
-        sleep(1);
-    }
-
+try_to_connect_again:
     // create socket 
     sfd = socket(AF_INET, SOCK_STREAM, 0);
     if (sfd == -1) {
@@ -519,14 +513,14 @@ reconnect:
     }
 
     // if failed to connect to the server then
-    //   goto reconnect
+    //   goto connection_failed
     // endif
     if (connect(sfd, (struct sockaddr *)&server_sockaddr, sizeof(server_sockaddr)) < 0) {
         char s[100];
         ERROR("connect to %s, %s\n", 
               sock_addr_to_str(s, sizeof(s), (struct sockaddr *)&server_sockaddr),
               strerror(errno));
-        goto reconnect;
+        goto connection_failed;
     }
 
     // set recv timeout to 5 seconds
@@ -538,92 +532,101 @@ reconnect:
 
     // loop getting data
     while (true) {
-        // if file is full then terminate thread
-        if (file_idx_global >= MAX_FILE_DATA_PART1) {
-            ERROR("file is full\n");
-            break;
-        }
-
         // read data part1 from server, and
         // verify data part1 magic, and length
-        len = recv(sfd, &data_part1, sizeof(data_part1), MSG_WAITALL);
-        if (len != sizeof(data_part1)) {
-            ERROR("recv data_part1 len=%d exp=%zd, %s\n",
-                  len, sizeof(data_part1), strerror(errno));
-            break;
+        len = recv(sfd, &dp1, sizeof(dp1), MSG_WAITALL);
+        if (len != sizeof(dp1)) {
+            ERROR("recv dp1 len=%d exp=%zd, %s\n",
+                  len, sizeof(dp1), strerror(errno));
+            goto connection_failed;
         }
-        if (data_part1.magic != MAGIC_DATA_PART1) {
-            ERROR("recv data_part1 bad magic 0x%"PRIx64"\n", 
-                  data_part1.magic);
-            break;
+        if (dp1->magic != MAGIC_DATA_PART1) {
+            ERROR("recv dp1 bad magic 0x%"PRIx64"\n", 
+                  dp1->magic);
+            goto connection_failed;
         }
-        if (data_part1.data_part2_length > MAX_DATA_PART2_LENGTH) {
+        if (dp1->data_part2_length > MAX_DATA_PART2_LENGTH) {
             ERROR("data_part2_length %d is too big\n", 
-                  data_part1.data_part2_length);
-            break;
+                  dp1->data_part2_length);
+            goto connection_failed;
         }
 
         // read data part2 from server,
         // verify magic
-        len = recv(sfd, data_part2, data_part1.data_part2_length, MSG_WAITALL);
-        if (len != data_part1.data_part2_length) {
-            ERROR("recv data_part2 len=%d exp=%d, %s\n",
-                  len, data_part1.data_part2_length, strerror(errno));
-            break;
+        len = recv(sfd, dp2, dp1->data_part2_length, MSG_WAITALL);
+        if (len != dp1->data_part2_length) {
+            ERROR("recv dp2 len=%d exp=%d, %s\n",
+                  len, dp1->data_part2_length, strerror(errno));
+            goto connection_failed;
         }
-        if (data_part2->magic != MAGIC_DATA_PART2) {
-            ERROR("recv data_part2 bad magic 0x%"PRIx64"\n", 
-                  data_part2->magic);
-            break;
+        if (dp2->magic != MAGIC_DATA_PART2) {
+            ERROR("recv dp2 bad magic 0x%"PRIx64"\n", 
+                  dp2->magic);
+            goto connection_failed;
         }
 
-        // got data part1 and part2 so must be connected
-        get_live_data_state = STATE_CONNECTED;
+        // got data part1 and part2 therefore connection is working
+        lost_connection = false;
 
         // if data part2 does not contain camera data then 
         // see if the camera data is being captured by this program, 
         // and add it
-        if (!data_part1.data_part2_jpeg_buff_valid) {
+        if (!dp1->data_part2_jpeg_buff_valid) {
             pthread_mutex_lock(&jpeg_mutex);
             if (microsec_timer() - jpeg_buff_us < 1000000) {
-                memcpy(data_part2->jpeg_buff, jpeg_buff, jpeg_buff_len);
-                data_part2->jpeg_buff_len = jpeg_buff_len;
-                data_part1.data_part2_jpeg_buff_valid = true;
-                data_part1.data_part2_length = sizeof(struct data_part2_s) + jpeg_buff_len;
+                memcpy(dp2->jpeg_buff, jpeg_buff, jpeg_buff_len);
+                dp2->jpeg_buff_len = jpeg_buff_len;
+                dp1->data_part2_jpeg_buff_valid = true;
+                dp1->data_part2_length = sizeof(struct data_part2_s) + jpeg_buff_len;
             }
             pthread_mutex_unlock(&jpeg_mutex);
         }
 
         // if opt_no_cam then disacard camera data
         if (opt_no_cam) {
-            data_part2->jpeg_buff_len = 0;
-            data_part1.data_part2_jpeg_buff_valid = false;
-            data_part1.data_part2_length = sizeof(struct data_part2_s);
+            dp2->jpeg_buff_len = 0;
+            dp1->data_part2_jpeg_buff_valid = false;
+            dp1->data_part2_length = sizeof(struct data_part2_s);
         }
 
-        // check for time increasing by other than 1 second;
-        // if so, print warning
-        if (last_time != -1 && data_part1.time != last_time + 1) {
-            WARN("time increased by %"PRId64"\n", data_part1.time - last_time);
+        // if this is the first write then
+        //    write the data to file
+        // else if data time <= last_data_time_written_to_file
+        //    discard
+        // else 
+        //    write 'no-value' data if needed
+        //    write data to file
+        // endif
+        if (last_data_time_written_to_file == 0) {
+            // write data to file
+            if (write_data_to_file(data) < 0) {
+                goto file_error;
+            }
+            last_data_time_written_to_file = dp1->time;
+        } else if (dp1->time <= last_data_time_written_to_file) {
+            // discard
+            WARN("discarding received data, time %"PRId64" <= %"PRId64"\n",
+                 dp1->time, last_data_time_written_to_file);
+        } else {
+            // if there is a time gap then
+            // write no-value data to file to fill the gap
+            for (t = last_data_time_written_to_file+1; t < dp1->time; t++) {
+                WARN("writing no-value data to file for time %"PRId64"\n", t);
+                data_novalue.part1.time = t;
+                if (write_data_to_file(&data_novalue) < 0) {
+                    goto file_error;
+                }
+                last_data_time_written_to_file = t;
+            }
+
+            // write data to file
+            if (write_data_to_file(data) < 0) {
+                goto file_error;
+            }
+            last_data_time_written_to_file = dp1->time;
         }
-        last_time = data_part1.time;
 
-        // save file offset in data_part1
-        data_part1.data_part2_offset = offset;
-
-        // write data to file
-        file_data_part1[file_hdr->max] = data_part1;
-        len = pwrite(file_fd, data_part2, data_part1.data_part2_length, offset);
-        if (len != data_part1.data_part2_length) {
-            ERROR("write data_part2 len=%d exp=%d, %s\n",
-                  len, data_part1.data_part2_length, strerror(errno));
-            break;
-        }
-        offset += data_part1.data_part2_length;
-
-        // update file header, and
         // if live mode then update file_idx_global
-        file_hdr->max++;
         if (mode == LIVE) {
             file_idx_global = file_hdr->max - 1;
         }
@@ -631,15 +634,15 @@ reconnect:
 #ifdef JPEG_BUFF_SAMPLE_CREATE_ENABLE
         // write a sample jpeg buffer to jpeg_buff_sample file
         static bool sample_written = false;
-        if (!sample_written) {
+        if (!sample_written && dp1->data_part2_jpeg_buff_valid) {
             int32_t fd = open(JPEG_BUFF_SAMPLE_FILENAME, O_CREAT|O_TRUNC|O_RDWR, 0666);
             if (fd < 0) {
                 ERROR("open %s, %s\n", JPEG_BUFF_SAMPLE_FILENAME, strerror(errno));
             } else {
-                int32_t len = write(fd, data_part2->jpeg_buff, data_part2->jpeg_buff_len);
-                if (len != data_part2->jpeg_buff_len) {
+                int32_t len = write(fd, dp2->jpeg_buff, dp2->jpeg_buff_len);
+                if (len != dp2->jpeg_buff_len) {
                     ERROR("write %s len exp=%d act=%d, %s\n",
-                        JPEG_BUFF_SAMPLE_FILENAME, data_part2->jpeg_buff_len, len, strerror(errno));
+                        JPEG_BUFF_SAMPLE_FILENAME, dp2->jpeg_buff_len, len, strerror(errno));
                 }
                 close(fd);
             }
@@ -648,13 +651,97 @@ reconnect:
 #endif
     }
 
-    // an error has occurred, set state to disconnected, and goto reconnect
-    get_live_data_state = STATE_DISCONNECTED;
-    goto reconnect;
+connection_failed:
+    // handle connectio failed error ...
 
-    // not reached
-    ERROR("thread terminating\n");
+    // set lost_connection flag,
+    // close socket
+    ERROR("connection_failed - attempting to reestablish connection\n");
+    lost_connection = true;
+    if (sfd != -1) {
+        close(sfd);
+        sfd = -1;
+    }
+
+    // write no-value data to file to fill the gap
+    if (last_data_time_written_to_file != 0) {
+        time_now = time(NULL);
+        for (t = last_data_time_written_to_file+1; t < time_now; t++) {
+            WARN("writing no-value data to file for time %"PRId64"\n", t);
+            data_novalue.part1.time = t;
+            if (write_data_to_file(&data_novalue) < 0) {
+                goto file_error;
+            }
+            last_data_time_written_to_file = t;
+        }
+    }
+
+    // if live mode then update file_idx_global
+    if (mode == LIVE) {
+        file_idx_global = file_hdr->max - 1;
+    }
+
+    // sleep 1 sec, 
+    // and try to connect again
+    sleep(1);
+    goto try_to_connect_again;
+
+file_error:
+    // handle file error ...
+
+    // this program can not continue receiving data because the program 
+    // relies on being able to read data from the file, so set error flags
+    // and exit this thread
+    ERROR("file error - get_live_data_thread terminating\n");
+    lost_connection = true;
+    file_error = true;
+    if (sfd != -1) {
+        close(sfd);
+        sfd = -1;
+    }
     return NULL;
+}
+
+static int32_t write_data_to_file(data_t * data)
+{
+    int32_t         len;
+
+    static uint64_t last_time;
+    static off_t    data_part2_offset = FILE_DATA_PART2_OFFSET;
+
+    // if file is full then return error
+    if (file_hdr->max >= MAX_FILE_DATA_PART1) {
+        ERROR("file is full\n");
+        return -1;
+    }
+
+    // verify file is being written with increasing timestamp
+    if (last_time != 0 && data->part1.time != last_time+1) {
+        FATAL("data time out of sequence, %"PRId64" should be %"PRId64"\n",
+              data->part1.time, last_time+1);
+    }
+    last_time = data->part1.time;
+
+    // save file data_part2_offset in data part1
+    data->part1.data_part2_offset = data_part2_offset;
+
+    // write data_part1 to file (file_data_part1 is memory mapped to the file)              
+    file_data_part1[file_hdr->max] = data->part1;
+
+    // write data_part2 to file
+    len = pwrite(file_fd, &data->part2, data->part1.data_part2_length, data_part2_offset);
+    if (len != data->part1.data_part2_length) {
+        ERROR("write data_part2 len=%d exp=%d, %s\n",
+              len, data->part1.data_part2_length, strerror(errno));
+        return -1;
+    }
+    data_part2_offset += data->part1.data_part2_length;
+
+    // update the file_hdr (also memory mapped)
+    file_hdr->max++;
+
+    // return success
+    return 0;
 }
 
 // -----------------  CAM THREAD  ----------------------------------------------------
@@ -713,9 +800,10 @@ static int32_t display_handler(void)
     int32_t       file_idx;
     int32_t       event_processed_count;
     int32_t       file_max_last;
-    bool          lost_conn_msg_displayed;
+    bool          lost_connection_msg_is_displayed;
+    bool          file_error_msg_is_displayed;
     uint64_t      screenshot_time_us;
-    bool          screenshot_msg_is_requested;
+    bool          screenshot_msg;
     bool          screenshot_msg_is_displayed;
 
     #define MAX_SCREENSHOT_US 1000000
@@ -723,9 +811,10 @@ static int32_t display_handler(void)
     // initializae 
     quit = false;
     file_max_last = -1;
-    lost_conn_msg_displayed = false;
+    lost_connection_msg_is_displayed = false;
+    file_error_msg_is_displayed = false;
     screenshot_time_us = 0;
-    screenshot_msg_is_requested = false;
+    screenshot_msg = false;
     screenshot_msg_is_displayed = false;
 
     if (sdl_init(win_width, win_height, screenshot_prefix) < 0) {
@@ -784,21 +873,29 @@ static int32_t display_handler(void)
                 tm->tm_hour, tm->tm_min, tm->tm_sec);
         sdl_render_text(&title_pane, 0, 10, 0, str, WHITE, BLACK);
 
-        if (get_live_data_state == STATE_DISCONNECTED) {
-            sdl_render_text(&title_pane, 0, 35, 0, "LOST CONNECTION", RED, BLACK);
-            lost_conn_msg_displayed = true;
+        if (lost_connection) {
+            sdl_render_text(&title_pane, 0, 35, 0, "LOST_CONN", RED, BLACK);
+            lost_connection_msg_is_displayed = true;
         } else {
-            lost_conn_msg_displayed = false;
+            lost_connection_msg_is_displayed = false;
         }
 
-        if (screenshot_msg_is_requested) {
-            sdl_render_text(&title_pane, 0, 60, 0, "SCREENSHOT", WHITE, BLACK);
+        if (file_error) {
+            sdl_render_text(&title_pane, 0, 50, 0, "FILE_ERROR", RED, BLACK);
+            file_error_msg_is_displayed = true;
+        } else {
+            file_error_msg_is_displayed = false;
+        }
+
+        if (screenshot_msg) {
+            sdl_render_text(&title_pane, 0, 65, 0, "SCREENSHOT", WHITE, BLACK);
             screenshot_msg_is_displayed = true;
         } else {
             screenshot_msg_is_displayed = false;
         }
 
         sdl_render_text(&title_pane, 0, -5, 0, "(ESC)", WHITE, BLACK);
+
         sdl_render_text(&title_pane, 0, -11, 0, "(?)", WHITE, BLACK);
         
         // draw the camera image,
@@ -914,13 +1011,13 @@ static int32_t display_handler(void)
             }
 
             // determine if screenshot msg should be displayed 
-            screenshot_msg_is_requested = (microsec_timer() - screenshot_time_us) < MAX_SCREENSHOT_US;
+            screenshot_msg = (microsec_timer() - screenshot_time_us) < MAX_SCREENSHOT_US;
 
             // test if should break out of this loop
             if ((quit) ||
-                (get_live_data_state == STATE_DISCONNECTED && !lost_conn_msg_displayed) ||
-                (get_live_data_state == STATE_CONNECTED && lost_conn_msg_displayed) ||
-                (screenshot_msg_is_requested != screenshot_msg_is_displayed) ||
+                (lost_connection != lost_connection_msg_is_displayed) ||
+                (file_error != file_error_msg_is_displayed) ||
+                (screenshot_msg != screenshot_msg_is_displayed) ||
                 ((event->event == SDL_EVENT_NONE) &&
                  ((event_processed_count > 0) ||
                   (file_idx != file_idx_global) ||
@@ -1041,6 +1138,7 @@ static void draw_data_values(rect_t * data_pane, int32_t file_idx)
 
 // - - - - - - - - -  DISPLAY HANDLER - DRAW GRAPH  - - - - - - - - - - - - - - - - 
 
+// XXX redo this section
 static void draw_graph_init(rect_t * graph_pane)
 {
     graph_pane_global = *graph_pane;

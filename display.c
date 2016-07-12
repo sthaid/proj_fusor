@@ -91,7 +91,7 @@ SOFTWARE.
 
 enum mode {LIVE, PLAYBACK, TEST};
 
-enum get_live_data_state {STATE_INACTIVE, STATE_ACTIVE, STATE_ERROR};
+enum get_live_data_state {STATE_NEVER_CONNECTED, STATE_CONNECTED, STATE_DISCONNECTED};
 
 typedef struct {
     uint64_t magic;
@@ -112,11 +112,13 @@ typedef struct {
 //
 
 static enum mode                mode;
+static bool                     initially_live_mode;
 static enum get_live_data_state get_live_data_state;
 static bool                     program_terminating;
 static bool                     cam_thread_running;
 static bool                     opt_no_cam;
 static char                     screenshot_prefix[100];
+static struct sockaddr_in       server_sockaddr;
 
 static uint32_t                 win_width;
 static uint32_t                 win_height;
@@ -216,7 +218,6 @@ static int32_t initialize(int32_t argc, char ** argv)
     int32_t            ret, len;
     char               filename[100];
     char               servername[100];
-    struct sockaddr_in sockaddr;
     char               s[100];
     int32_t            wait_ms;
 
@@ -410,46 +411,25 @@ static int32_t initialize(int32_t argc, char ** argv)
     }
 
     // if in live mode then
-    //   connect to server
+    //   get server address
     //   create thread to acquire data from server
     //   wait for first data to be received from server
     //   cam_init
     // endif
     if (mode == LIVE) {
-        int32_t sfd;
-
-        // print servername
-        INFO("servername      = %s\n", servername);
-
-        // get address of server
-        ret =  getsockaddr(servername, PORT, SOCK_STREAM, 0, &sockaddr);
+        // get address of server, 
+        // print servername, and serveraddr
+        ret =  getsockaddr(servername, PORT, SOCK_STREAM, 0, &server_sockaddr);
         if (ret < 0) {
             ERROR("failed to get address of %s\n", servername);
             return -1;
         }
- 
-        // print serveraddr
+        INFO("servername      = %s\n", servername);
         INFO("serveraddr      = %s\n", 
-             sock_addr_to_str(s, sizeof(s), (struct sockaddr *)&sockaddr));
-
-        // create socket
-        sfd = socket(AF_INET, SOCK_STREAM, 0);
-        if (sfd == -1) {
-            ERROR("create socket, %s\n", strerror(errno));
-            return -1;
-        }
-
-        // connect to the server
-        if (connect(sfd, (struct sockaddr *)&sockaddr, sizeof(sockaddr)) < 0) {
-            char s[100];
-            ERROR("connect to %s, %s\n", 
-                  sock_addr_to_str(s, sizeof(s), (struct sockaddr *)&sockaddr),
-                  strerror(errno));
-            return -1;
-        }
+             sock_addr_to_str(s, sizeof(s), (struct sockaddr *)&server_sockaddr));
 
         // create get_live_data_thread        
-        if (pthread_create(&thread, NULL, get_live_data_thread, (void*)(uintptr_t)sfd) != 0) {
+        if (pthread_create(&thread, NULL, get_live_data_thread, NULL)) {
             ERROR("pthread_create get_live_data_thread, %s\n", strerror(errno));
             return -1;
         }
@@ -487,6 +467,9 @@ static int32_t initialize(int32_t argc, char ** argv)
         file_idx_global = 0;
     }
 
+    // set initially_live_mode flag
+    initially_live_mode = (mode == LIVE);
+
     // return success
     return 0;
 }
@@ -498,6 +481,7 @@ static void usage(void)
 
 // -----------------  GET LIVE DATA THREAD  ------------------------------------------
 
+//XXX skip over data when time increases
 static void * get_live_data_thread(void * cx)
 {
     int32_t               sfd;
@@ -509,12 +493,40 @@ static void * get_live_data_thread(void * cx)
     struct data_part2_s * data_part2;
 
     // init
-    sfd    = (uintptr_t)cx;
+    sfd = -1;
     offset = FILE_DATA_PART2_OFFSET;
     last_time = -1;
     data_part2 = calloc(1, MAX_DATA_PART2_LENGTH);
     if (data_part2 == NULL) {
         FATAL("calloc\n");
+    }
+
+reconnect:
+    // if socket created then 
+    //    close it 
+    //    sleep 1 second to pace the execution
+    // endif
+    if (sfd != -1) {
+        close(sfd);
+        sfd = -1;
+        sleep(1);
+    }
+
+    // create socket 
+    sfd = socket(AF_INET, SOCK_STREAM, 0);
+    if (sfd == -1) {
+        FATAL("create socket, %s\n", strerror(errno));
+    }
+
+    // if failed to connect to the server then
+    //   goto reconnect
+    // endif
+    if (connect(sfd, (struct sockaddr *)&server_sockaddr, sizeof(server_sockaddr)) < 0) {
+        char s[100];
+        ERROR("connect to %s, %s\n", 
+              sock_addr_to_str(s, sizeof(s), (struct sockaddr *)&server_sockaddr),
+              strerror(errno));
+        goto reconnect;
     }
 
     // set recv timeout to 5 seconds
@@ -523,9 +535,6 @@ static void * get_live_data_thread(void * cx)
     if (setsockopt(sfd, SOL_SOCKET, SO_RCVTIMEO, (char *)&rcvto, sizeof(rcvto)) < 0) {
         FATAL("setsockopt SO_RCVTIMEO, %s\n",strerror(errno));
     }
-
-    // set state
-    get_live_data_state = STATE_ACTIVE;
 
     // loop getting data
     while (true) {
@@ -567,6 +576,9 @@ static void * get_live_data_thread(void * cx)
                   data_part2->magic);
             break;
         }
+
+        // got data part1 and part2 so must be connected
+        get_live_data_state = STATE_CONNECTED;
 
         // if data part2 does not contain camera data then 
         // see if the camera data is being captured by this program, 
@@ -636,11 +648,11 @@ static void * get_live_data_thread(void * cx)
 #endif
     }
 
-    // an error has occurred
-    // - set state
-    // - set mode
-    get_live_data_state = STATE_ERROR;  
-    mode = PLAYBACK;
+    // an error has occurred, set state to disconnected, and goto reconnect
+    get_live_data_state = STATE_DISCONNECTED;
+    goto reconnect;
+
+    // not reached
     ERROR("thread terminating\n");
     return NULL;
 }
@@ -772,9 +784,11 @@ static int32_t display_handler(void)
                 tm->tm_hour, tm->tm_min, tm->tm_sec);
         sdl_render_text(&title_pane, 0, 10, 0, str, WHITE, BLACK);
 
-        if (get_live_data_state == STATE_ERROR) {
+        if (get_live_data_state == STATE_DISCONNECTED) {
             sdl_render_text(&title_pane, 0, 35, 0, "LOST CONNECTION", RED, BLACK);
             lost_conn_msg_displayed = true;
+        } else {
+            lost_conn_msg_displayed = false;
         }
 
         if (screenshot_msg_is_requested) {
@@ -874,7 +888,7 @@ static int32_t display_handler(void)
                 if (x >= file_hdr->max) {
                     x = file_hdr->max - 1;
                     file_idx_global = x;
-                    mode = (get_live_data_state == STATE_ACTIVE ? LIVE : PLAYBACK);
+                    mode = (initially_live_mode ? LIVE : PLAYBACK);
                 } else {
                     file_idx_global = x;
                     mode = PLAYBACK;
@@ -886,7 +900,7 @@ static int32_t display_handler(void)
                 break;
             case SDL_EVENT_KEY_END:
                 file_idx_global = file_hdr->max - 1;
-                mode = (get_live_data_state == STATE_ACTIVE ? LIVE : PLAYBACK);
+                mode = (initially_live_mode ? LIVE : PLAYBACK);
                 break;
             case '-': 
                 graph_scale_idx[graph_select]--;
@@ -904,7 +918,8 @@ static int32_t display_handler(void)
 
             // test if should break out of this loop
             if ((quit) ||
-                (get_live_data_state == STATE_ERROR && !lost_conn_msg_displayed) ||
+                (get_live_data_state == STATE_DISCONNECTED && !lost_conn_msg_displayed) ||
+                (get_live_data_state == STATE_CONNECTED && lost_conn_msg_displayed) ||
                 (screenshot_msg_is_requested != screenshot_msg_is_displayed) ||
                 ((event->event == SDL_EVENT_NONE) &&
                  ((event_processed_count > 0) ||

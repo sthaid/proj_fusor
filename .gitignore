@@ -1,6 +1,7 @@
 *.o
 *.d
 *.dat
+*.png
 get_data
 get_data.log
 display

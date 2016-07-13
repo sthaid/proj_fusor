@@ -622,8 +622,7 @@ try_to_connect_again:
         time_delta = (time_now > data->part1.time 
                       ? time_now - data->part1.time
                       : data->part1.time - time_now);
-        INFO("XXX TIME DELTA %"PRId64"\n", time_delta);
-        if (time_delta > 10) {
+        if (time_delta > 5) {
             ERROR("server time delta = %"PRId64"\n", time_delta);
             goto time_error;
         }
@@ -1001,9 +1000,10 @@ static int32_t display_handler(void)
         // present the display
         sdl_display_present();
 
-        // loop until XXX commetns
+        // loop until
         // 1- quit flag is set, OR
-        // 2- (there is no current event) AND
+        // 2- a message has changed state OR
+        // 3- (there is no current event) AND
         //    ((at least one event has been processed) OR
         //     (file index that is currently displayed is not file_idx_global) OR
         //     (file max has changed))
@@ -1187,7 +1187,7 @@ static void draw_data_values(rect_t * data_pane, int32_t file_idx)
             val2str(s3, dp1->voltage_max_kv));
     sdl_render_text(data_pane, 0, 0, 1, str, WHITE, BLACK);
 
-    sprintf(str, "MA    %s",  // XXX add min and max
+    sprintf(str, "MA    %s",
             val2str(s1, dp1->current_ma));
     sdl_render_text(data_pane, 1, 0, 1, str, WHITE, BLACK);
 
@@ -1555,7 +1555,7 @@ static int32_t generate_test_file(void)
     uint8_t               jpeg_buff[200000];
     uint32_t              jpeg_buff_len;
     uint64_t              dp2_offset;
-    int32_t               len, idx, i, fd;
+    int32_t               len, idx, i, fd, chan;
     struct data_part1_s * dp1;
     struct data_part2_s * dp2;
 
@@ -1597,12 +1597,10 @@ static int32_t generate_test_file(void)
         dp1->pressure_d2_mtorr = 10;
         dp1->pressure_n2_mtorr = 20;
 
-#if 0// XXX  this needs to be updatae
-        for (i = 0; i < MAX_HE3_CHAN; i++) {
-            dp1->average_cpm[i] = ERROR_NO_VALUE;
-            dp1->moving_average_cpm[i] = ERROR_NO_VALUE;
+        for (chan = 0; chan < MAX_HE3_CHAN; chan++) {
+            dp1->he3.cpm_1_sec[chan] = 1000;
+            dp1->he3.cpm_10_sec[chan] = 1200;
         }
-#endif
 
         dp1->data_part2_offset = dp2_offset;
         dp1->data_part2_length = sizeof(struct data_part2_s) + jpeg_buff_len;

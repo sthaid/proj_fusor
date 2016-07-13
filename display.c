@@ -67,7 +67,6 @@ SOFTWARE.
 #define MAX_FILE_DATA_PART1   86400   // 1 day
 #define MAX_DATA_PART2_LENGTH 1000000
 #define MAX_GRAPH             3
-// XXX del #define MAX_GRAPH_POINTS      100000 
 
 #define FILE_DATA_PART2_OFFSET \
    ((sizeof(file_hdr_t) +  \
@@ -97,15 +96,6 @@ typedef struct {
     uint32_t max;
     uint8_t  reserved[4096-20];
 } file_hdr_t;
-
-#if 0 //XXX
-typedef struct {
-    char    title[100];
-    int32_t color;
-    int32_t max_points;
-    point_t points[MAX_GRAPH_POINTS];
-} graph_t;
-#endif
 
 //
 // variables
@@ -163,7 +153,8 @@ static void draw_graph1(int32_t file_idx);
 static void draw_graph2(int32_t file_idx);
 static void draw_graph_common(char * title_str, char * info_str, float cursor_pos, char * cursor_str, int32_t max_graph, ...);
 static int32_t generate_test_file(void);
-static char * val2str(char * str, float val);
+static char * val2str(float val);
+static char * val2str2(float val, char * trailer_str);
 static struct data_part2_s * read_data_part2(int32_t file_idx);
 static int getsockaddr(char * node, int port, int socktype, int protcol, struct sockaddr_in * ret_addr);
 static char * sock_addr_to_str(char * s, int slen, struct sockaddr * addr);
@@ -1178,26 +1169,26 @@ error:
 static void draw_data_values(rect_t * data_pane, int32_t file_idx)
 {
     struct data_part1_s * dp1;
-    char str[100], s1[100], s2[100], s3[100];
+    char str[100];
 
     dp1 = &file_data_part1[file_idx];
 
     sprintf(str, "KV    %s %s %s",
-            val2str(s1, dp1->voltage_mean_kv),
-            val2str(s2, dp1->voltage_min_kv),
-            val2str(s3, dp1->voltage_max_kv));
+            val2str(dp1->voltage_mean_kv),
+            val2str(dp1->voltage_min_kv),
+            val2str(dp1->voltage_max_kv));
     sdl_render_text(data_pane, 0, 0, 1, str, WHITE, BLACK);
 
     sprintf(str, "MA    %s",
-            val2str(s1, dp1->current_ma));
+            val2str(dp1->current_ma));
     sdl_render_text(data_pane, 1, 0, 1, str, WHITE, BLACK);
 
     sprintf(str, "D2 mT %s",
-            val2str(s1, dp1->pressure_d2_mtorr));
+            val2str(dp1->pressure_d2_mtorr));
     sdl_render_text(data_pane, 2, 0, 1, str, WHITE, BLACK);
 
     sprintf(str, "N2 mT %s",
-            val2str(s1, dp1->pressure_n2_mtorr));
+            val2str(dp1->pressure_n2_mtorr));
     sdl_render_text(data_pane, 3, 0, 1, str, WHITE, BLACK);
 }
 
@@ -1216,102 +1207,14 @@ static void draw_graph_init(rect_t * graph_pane)
 
 static void draw_graph0(int32_t file_idx)
 {
-#if 0
-    int32_t  file_idx_start, file_idx_end;
-    uint64_t cursor_time_sec;
-    int32_t  cursor_x;
-    char     cursor_str[100], info_str[100], str[100];
-    int32_t  x_time_span_sec;
-    float    x_pixels_per_sec;
-
-    static int32_t x_time_span_sec_tbl[] = {60, 600, 3600, 86400};
-    static graph_t g_kv, g_ma, g_mtorr, g_he3_cpm;
-
-    #define MAX_X_TIME_SPAN_SEC_TBL \
-        (sizeof(x_time_span_sec_tbl) / sizeof(x_time_span_sec_tbl[0]))
-
-    // XXX maybe field_name should be variable_name
-    #define INIT_GRAPH(_graph, _title, _field_name, _color, _val_max) \
-        do { \
-            float   x; \
-            int32_t idx; \
-            sprintf((_graph)->title, "%s %6s : %.0f MAX", \
-                    val2str(str, file_data_part1[file_idx]._field_name), \
-                    _title, \
-                    (float)(_val_max)); \
-            (_graph)->color = (_color); \
-            (_graph)->max_points = 0; \
-            x = graph_x_origin + graph_x_range - 1; \
-            for (idx = file_idx_end; idx >= file_idx_start; idx--) { \
-                float tmp = (graph_y_range / (float)(_val_max)); \
-                int32_t y_limit = graph_y_origin - graph_y_range; \
-                if (idx >= 0 &&  \
-                    idx < file_hdr->max && \
-                    !IS_ERROR(file_data_part1[idx]._field_name)) \
-                { \
-                    point_t * p = &(_graph)->points[(_graph)->max_points]; \
-                    p->x = x; \
-                    p->y = graph_y_origin - tmp * file_data_part1[idx]._field_name; \
-                    if (p->y < y_limit) { \
-                        p->y = y_limit; \
-                    } \
-                    (_graph)->max_points++; \
-                } \
-                x -= x_pixels_per_sec; \
-            } \
-        } while (0)
-
-    // sanitize graph_scale_idx[0]
-    if (graph_scale_idx[0] < 0) {
-        graph_scale_idx[0] = 0;
-    } else if (graph_scale_idx[0] >= MAX_X_TIME_SPAN_SEC_TBL) {
-        graph_scale_idx[0] = MAX_X_TIME_SPAN_SEC_TBL - 1;
-    }
-        
-    // init
-    x_time_span_sec = x_time_span_sec_tbl[graph_scale_idx[0]];
-    x_pixels_per_sec = (float)graph_x_range / x_time_span_sec;
-    cursor_time_sec = file_data_part1[file_idx].time;
-
-    // init file_idx_start & file_idx_end
-    if (mode == LIVE) {
-        file_idx_end   = file_idx;
-        file_idx_start = file_idx_end - (x_time_span_sec - 1);
-    } else {
-        file_idx_start = file_idx - x_time_span_sec / 2;
-        file_idx_end   = file_idx_start + x_time_span_sec - 1;
-    }
-
-    // init graph_t for:
-    // - voltage_mean_kv 
-    // - current_ma 
-    // - pressure_d2_mtorr 
-    INIT_GRAPH(&g_kv, "kV", voltage_mean_kv, RED, 30);
-    INIT_GRAPH(&g_ma, "mA", current_ma, GREEN, 30);
-    INIT_GRAPH(&g_mtorr, "mTorr", pressure_d2_mtorr, BLUE, 30);
-    INIT_GRAPH(&g_he3_cpm, "cpm", he3.cpm_10_sec[2], PURPLE, 10000);
-
-    // init info_str
-    sprintf(info_str, "X-SPAN %d SEC  (-/+)", x_time_span_sec);
-
-    // init cursor position and string
-    cursor_x = (graph_x_origin + graph_x_range - 1) -
-               (file_idx_end - file_idx) * x_pixels_per_sec;
-    time2str(cursor_str, cursor_time_sec*1000000, false, false, false);
-
-    // draw the graph
-    draw_graph_common("SUMMARY", info_str, cursor_x, cursor_str, 4, &g_kv, &g_ma, &g_mtorr, &g_he3_cpm);
-    // - char * graph_title
-    // - int32_t graph_color
-    // - float   graph_y_max     
-    // - int32_t graph_max_values
-    // - float * graph_values
-#endif
     #define MAX_X_TIME_SPAN_SEC_TBL \
         (sizeof(x_time_span_sec_tbl) / sizeof(x_time_span_sec_tbl[0]))
 
     float    voltage_mean_kv_values[MAX_FILE_DATA_PART1];
-    int32_t  file_idx_start, file_idx_end, x_time_span_sec, max_values;
+    float    current_ma_values[MAX_FILE_DATA_PART1];
+    float    pressure_d2_mtorr_values[MAX_FILE_DATA_PART1];
+    float    he3_cpm_10_sec_values[MAX_FILE_DATA_PART1];
+    int32_t  file_idx_start, file_idx_end, x_time_span_sec, max_values, i;
     int32_t  x_time_span_sec_tbl[] = {60, 600, 3600, 86400};
     uint64_t cursor_time_us;
     float    cursor_pos;
@@ -1343,162 +1246,124 @@ static void draw_graph0(int32_t file_idx)
 
     // init arrays of the values to graph
     max_values = 0;
-    for (file_idx = file_idx_start; file_idx <= file_idx_end; file_idx++) {
-        if (file_idx >= 0 && file_idx < file_hdr->max) {
-            voltage_mean_kv_values[max_values] = file_data_part1[file_idx].voltage_mean_kv;
-        } else {
-            voltage_mean_kv_values[max_values] = ERROR_NO_VALUE;
-        }
+    for (i = file_idx_start; i <= file_idx_end; i++) {
+        voltage_mean_kv_values[max_values]   = (i >= 0 && i < file_hdr->max)
+                                               ? file_data_part1[i].voltage_mean_kv
+                                               : ERROR_NO_VALUE;
+        current_ma_values[max_values]        = (i >= 0 && i < file_hdr->max)
+                                                ? file_data_part1[i].current_ma      
+                                                : ERROR_NO_VALUE;
+        pressure_d2_mtorr_values[max_values] = (i >= 0 && i < file_hdr->max)
+                                                ? file_data_part1[i].pressure_d2_mtorr
+                                                : ERROR_NO_VALUE;
+        he3_cpm_10_sec_values[max_values]    = (i >= 0 && i < file_hdr->max)
+                                                ? file_data_part1[i].he3.cpm_10_sec[2]
+                                                : ERROR_NO_VALUE;
         max_values++;
     }
 
     // draw the graph
-    draw_graph_common("SUMMARY", info_str, cursor_pos, cursor_str, 1, 
-                      "kV", RED, 30.0, max_values, voltage_mean_kv_values);
+    i = file_idx - file_idx_start;
+    draw_graph_common(
+        "SUMMARY", info_str, cursor_pos, cursor_str, 4, 
+        val2str2(voltage_mean_kv_values[i], "KV   "),   RED,    30.0,    max_values, voltage_mean_kv_values,
+        val2str2(current_ma_values[i], "MA   "),        GREEN,  30.0,    max_values, current_ma_values,
+        val2str2(pressure_d2_mtorr_values[i], "MTORR"), BLUE,   30.0,    max_values, pressure_d2_mtorr_values,
+        val2str2(he3_cpm_10_sec_values[i], "CPM  "),    PURPLE, 10000.0, max_values, he3_cpm_10_sec_values);
 }
 
+// XXX replace 1200
 static void draw_graph1(int32_t file_idx)
 {
-#if 0
+    #define MAX_Y_MAX_MV_TBL (sizeof(y_max_mv_tbl)/sizeof(y_max_mv_tbl[0]))
+
     struct data_part1_s * dp1;
     struct data_part2_s * dp2;
     int32_t               y_max_mv;
-    char                  info_str[100];
+    int32_t               y_max_mv_tbl[] = {100, 1000, 2000, 5000, 10000};
+    float                 voltage_adc_samples_mv_values[1200];
+    float                 current_adc_samples_mv_values[1200];
+    float                 pressure_adc_samples_mv_values[1200];
+    int32_t               i;
 
-    static graph_t g_voltage_samples;
-    static graph_t g_current_samples;
-    static graph_t g_pressure_samples;
-    static int32_t y_max_mv_tbl[] = {100, 1000, 2000, 5000, 10000};
-
-    #define MAX_Y_MAX_MV_TBL (sizeof(y_max_mv_tbl)/sizeof(y_max_mv_tbl[0]))
-
-    #undef INIT_GRAPH
-    #define INIT_GRAPH(_graph, _title, _field_name, _color, _valid) \
-        do { \
-            int32_t i; \
-            strcpy((_graph)->title, (_title)); \
-            (_graph)->color = (_color);; \
-            (_graph)->max_points = 0; \
-            if (_valid && dp2 != NULL) { \
-                float tmp = (graph_y_range / (float)(y_max_mv)); \
-                int32_t y_limit1 = graph_y_origin - graph_y_range; \
-                int32_t y_limit2 = graph_y_origin + FONT0_HEIGHT; \
-                for (i = 0; i < MAX_ADC_SAMPLES; i++) { \
-                    point_t * p = &(_graph)->points[i]; \
-                    p->x = graph_x_origin + i; \
-                    p->y = graph_y_origin - tmp * dp2->_field_name[i]; \
-                    if (p->y < y_limit1) { \
-                        p->y = y_limit1; \
-                    } \
-                    if (p->y > y_limit2) { \
-                        p->y = y_limit2; \
-                    } \
-                    (_graph)->max_points++; \
-                } \
-            } \
-        } while(0)
-
-    // sanitize graph_scale_idx
+    // init y_max_mv
     if (graph_scale_idx[1] < 0) {
         graph_scale_idx[1] = 0;
     } else if (graph_scale_idx[1] >= MAX_Y_MAX_MV_TBL) {
         graph_scale_idx[1] = MAX_Y_MAX_MV_TBL - 1;
     }
-
-    // init
     y_max_mv = y_max_mv_tbl[graph_scale_idx[1]];
+
+    // init pointer to dp1, and read dp2
     dp1 = &file_data_part1[file_idx];
     dp2 = read_data_part2(file_idx);
     if (dp2 == NULL) {
-        //ERROR XXX
+        ERROR("failed read data part2\n");
+        draw_graph_common("ADC SAMPLES", "1 SEC INTERVAL", -1, NULL, 0);
+        return;
     }
 
-    // init graph_t
-    INIT_GRAPH(&g_voltage_samples, "VOLTAGE", voltage_adc_samples_mv, \
-               RED, dp1->data_part2_voltage_adc_samples_mv_valid);
-    INIT_GRAPH(&g_current_samples, "CURRENT", current_adc_samples_mv, \
-               GREEN, dp1->data_part2_current_adc_samples_mv_valid);
-    INIT_GRAPH(&g_pressure_samples, "PRESSURE", pressure_adc_samples_mv, \
-               BLUE, dp1->data_part2_pressure_adc_samples_mv_valid);
+    // init arrays of the values to graph
+    for (i = 0; i < 1200; i++) {
+        voltage_adc_samples_mv_values[i] = dp1->data_part2_voltage_adc_samples_mv_valid 
+                                       ? dp2->voltage_adc_samples_mv[i]
+                                       : ERROR_NO_VALUE;
+        current_adc_samples_mv_values[i] = dp1->data_part2_current_adc_samples_mv_valid 
+                                       ? dp2->current_adc_samples_mv[i]
+                                       : ERROR_NO_VALUE;
+        pressure_adc_samples_mv_values[i] = dp1->data_part2_pressure_adc_samples_mv_valid 
+                                       ? dp2->pressure_adc_samples_mv[i]
+                                       : ERROR_NO_VALUE;
+    }
 
     // draw the graph
-    sprintf(info_str, "Y_MAX %d mV  (-/+)", y_max_mv);
-    draw_graph_common("ADC SAMPLES - 1 SECOND", info_str, -1, NULL, 
-                      3, &g_voltage_samples, &g_current_samples, &g_pressure_samples);
-#endif
+    draw_graph_common(
+        "ADC SAMPLES", "1 SEC INTERVAL", -1, NULL, 3,
+        "VOLTAGE ", RED,   (double)y_max_mv, 1200, voltage_adc_samples_mv_values,
+        "CURRENT ", GREEN, (double)y_max_mv, 1200, current_adc_samples_mv_values,
+        "PRESSURE", BLUE,  (double)y_max_mv, 1200, pressure_adc_samples_mv_values);
 }
 
 static void draw_graph2(int32_t file_idx)
 {
-#if 0
+    #define MAX_Y_MAX_MV_TBL (sizeof(y_max_mv_tbl)/sizeof(y_max_mv_tbl[0]))
+
     struct data_part1_s * dp1;
     struct data_part2_s * dp2;
     int32_t               y_max_mv;
-    char                  info_str[100];
+    int32_t               y_max_mv_tbl[] = {100, 1000, 2000, 5000, 10000};
+    float                 he3_adc_samples_mv_values[1200];
+    int32_t               i;
 
-    static graph_t g_he3_samples;
-
-    static int32_t y_max_mv_tbl[] = {100, 1000, 2000, 5000, 10000};
-
-    #undef MAX_Y_MAX_MV_TBL
-    #define MAX_Y_MAX_MV_TBL (sizeof(y_max_mv_tbl)/sizeof(y_max_mv_tbl[0]))
-
-    #undef INIT_GRAPH
-    #define INIT_GRAPH(_graph, _title, _field_name, _color, _valid) \
-        do { \
-            int32_t i; \
-            strcpy((_graph)->title, (_title)); \
-            (_graph)->color = (_color);; \
-            (_graph)->max_points = 0; \
-            if (_valid && dp2 != NULL) { \
-                float tmp = (graph_y_range / (float)(y_max_mv)); \
-                int32_t y_limit1 = graph_y_origin - graph_y_range; \
-                int32_t y_limit2 = graph_y_origin + FONT0_HEIGHT; \
-                for (i = 0; i < MAX_ADC_SAMPLES; i++) { \
-                    point_t * p; \
-                    p = &(_graph)->points[(_graph)->max_points++]; \
-                    p->x = graph_x_origin + i; \
-                    p->y = graph_y_origin; \
-                    p = &(_graph)->points[(_graph)->max_points++]; \
-                    p->x = graph_x_origin + i; \
-                    p->y = graph_y_origin - tmp * dp2->_field_name[i]; \
-                    if (p->y < y_limit1) { \
-                        p->y = y_limit1; \
-                    } \
-                    if (p->y > y_limit2) { \
-                        p->y = y_limit2; \
-                    } \
-                    p = &(_graph)->points[(_graph)->max_points++]; \
-                    p->x = graph_x_origin + i; \
-                    p->y = graph_y_origin; \
-                } \
-            } \
-        } while(0)
-
-    // sanitize graph_scale_idx
+    // init y_max_mv
     if (graph_scale_idx[2] < 0) {
         graph_scale_idx[2] = 0;
     } else if (graph_scale_idx[2] >= MAX_Y_MAX_MV_TBL) {
         graph_scale_idx[2] = MAX_Y_MAX_MV_TBL - 1;
     }
-
-    // init
     y_max_mv = y_max_mv_tbl[graph_scale_idx[2]];
+
+    // init pointer to dp1, and read dp2
     dp1 = &file_data_part1[file_idx];
     dp2 = read_data_part2(file_idx);
     if (dp2 == NULL) {
-        //ERROR XXX
+        ERROR("failed read data part2\n");
+        draw_graph_common("ADC SAMPLES", "2.4 MS INTERVAL", -1, NULL, 0);
+        return;
     }
 
-    // init graph_t
-    INIT_GRAPH(&g_he3_samples, "HE3", he3_adc_samples_mv, \
-               PURPLE, dp1->data_part2_he3_adc_samples_mv_valid);
+    // init arrays of the values to graph
+    for (i = 0; i < 1200; i++) {
+        he3_adc_samples_mv_values[i] = dp1->data_part2_he3_adc_samples_mv_valid 
+                                       ? dp2->he3_adc_samples_mv[i]
+                                       : ERROR_NO_VALUE;
+    }
 
     // draw the graph
-    sprintf(info_str, "Y_MAX %d mV  (-/+)", y_max_mv);
-    draw_graph_common("HE3 ADC SAMPLES - 2.4 MILLISECONDS", info_str, -1, NULL, 
-                      1, &g_he3_samples);
-#endif
+    // XXX make bar graph
+    draw_graph_common(
+        "ADC SAMPLES", "2.4 MS INTERVAL", -1, NULL, 1,
+        "HE3 ", PURPLE, (double)y_max_mv, 1200, he3_adc_samples_mv_values);
 }
 
 static void draw_graph_common(char * title_str, char * info_str, float cursor_pos, char * cursor_str, int32_t max_graph, ...)
@@ -1519,6 +1384,8 @@ static void draw_graph_common(char * title_str, char * info_str, float cursor_po
     int32_t  title_str_col;
     int32_t  info_str_col;
     int32_t  cursor_str_col;
+    int32_t  graph_title_str_col;
+    char     graph_title_str[100];
 
     struct graph_s {
         char    * title;
@@ -1601,8 +1468,9 @@ static void draw_graph_common(char * title_str, char * info_str, float cursor_po
         }
 
         // draw the graph title
-        info_str_col = (graph_x_range + graph_x_origin) / FONT0_WIDTH + 6;
-        sdl_render_text(&graph_pane_global, gridx+1, info_str_col, 0, g->title, g->color, WHITE);
+        graph_title_str_col = (graph_x_range + graph_x_origin) / FONT0_WIDTH + 6;
+        sprintf(graph_title_str, "%s : %.0f MAX", g->title, g->y_max);
+        sdl_render_text(&graph_pane_global, gridx+1, graph_title_str_col, 0, graph_title_str, g->color, WHITE);
     }
 
     // draw x axis
@@ -1764,8 +1632,15 @@ static int32_t generate_test_file(void)
 
 // -----------------  SUPPORT  ------------------------------------------------------ 
 
-static char * val2str(char * str, float val)
+static char * val2str(float val)
 {
+    static char str_tbl[20][100];
+    static uint32_t idx;
+    char * str;
+
+    str = str_tbl[idx];
+    idx = (idx + 1) % 20;
+
     if (IS_ERROR(val)) {
         sprintf(str, "%-6s", ERROR_TEXT(val));
     } else if (val < 1000.0) {
@@ -1773,8 +1648,30 @@ static char * val2str(char * str, float val)
     } else {
         sprintf(str, "%-6.0f", val);
     }
+
     return str;
 }
+
+static char * val2str2(float val, char * trailer_str)
+{
+    static char str_tbl[20][100];
+    static uint32_t idx;
+    char * str;
+
+    str = str_tbl[idx];
+    idx = (idx + 1) % 20;
+
+    if (IS_ERROR(val)) {
+        sprintf(str, "%-6s %s", ERROR_TEXT(val), trailer_str);
+    } else if (val < 1000.0) {
+        sprintf(str, "%-6.2f %s", val, trailer_str);
+    } else {
+        sprintf(str, "%-6.0f %s", val, trailer_str);
+    }
+
+    return str;
+}
+    
 
 struct data_part2_s * read_data_part2(int32_t file_idx)
 {

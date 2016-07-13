@@ -482,21 +482,47 @@ static void usage(void)
 
 // -----------------  GET LIVE DATA THREAD  ------------------------------------------
 
-// XXX check time sync
 static void * get_live_data_thread(void * cx)
 {
-    int32_t               sfd;
-    int32_t               len;
+    int32_t               sfd, len, chan;
     struct timeval        rcvto;
     data_t              * data;
     struct data_part1_s * dp1;
     struct data_part2_s * dp2;
     uint64_t              last_data_time_written_to_file;
     uint64_t              t, time_now, time_delta;
+    he3_t                 he3_novalue;
+    data_t                data_novalue;
 
-    static data_t data_novalue;  //XXX  init
+    // init data_novalue
+    for (chan = 0; chan < MAX_HE3_CHAN; chan++) {
+        he3_novalue.cpm_1_sec[chan] = ERROR_NO_VALUE;
+        he3_novalue.cpm_10_sec[chan] = ERROR_NO_VALUE;
+    }
 
-    // init
+    dp1                                           = &data_novalue.part1;
+    dp1->magic                                    = MAGIC_DATA_PART1;
+    dp1->time                                     = 0;
+    dp1->voltage_mean_kv                          = ERROR_NO_VALUE;
+    dp1->voltage_min_kv                           = ERROR_NO_VALUE;
+    dp1->voltage_max_kv                           = ERROR_NO_VALUE;
+    dp1->current_ma                               = ERROR_NO_VALUE;
+    dp1->pressure_d2_mtorr                        = ERROR_NO_VALUE;
+    dp1->pressure_n2_mtorr                        = ERROR_NO_VALUE;
+    dp1->he3                                      = he3_novalue;
+    dp1->data_part2_offset                        = 0;
+    dp1->data_part2_length                        = sizeof(struct data_part2_s);
+    dp1->data_part2_jpeg_buff_valid               = false;
+    dp1->data_part2_voltage_adc_samples_mv_valid  = false;
+    dp1->data_part2_current_adc_samples_mv_valid  = false;
+    dp1->data_part2_pressure_adc_samples_mv_valid = false;
+    dp1->data_part2_he3_adc_samples_mv_valid      = false;
+
+    dp2                                           = &data_novalue.part2;
+    dp2->magic                                    = MAGIC_DATA_PART2;
+    dp2->jpeg_buff_len                            = 0;
+
+    // init others
     sfd = -1;
     data = calloc(1, sizeof(struct data_part1_s) + MAX_DATA_PART2_LENGTH);
     if (data == NULL) {
@@ -911,22 +937,21 @@ static int32_t display_handler(void)
         }
 
         if (file_error) {
-            sdl_render_text(&title_pane, 0, 50, 0, "FILE_ERROR", RED, BLACK);
+            sdl_render_text(&title_pane, 0, 49, 0, "FILE_ERROR", RED, BLACK);
             file_error_msg_is_displayed = true;
         } else {
             file_error_msg_is_displayed = false;
         }
 
         if (time_error) {
-            sdl_render_text(&title_pane, 0, 65, 0, "TIME_ERROR", RED, BLACK);
+            sdl_render_text(&title_pane, 0, 63, 0, "TIME_ERROR", RED, BLACK);
             time_error_msg_is_displayed = true;
         } else {
             time_error_msg_is_displayed = false;
         }
 
-        // XXX test this loc
         if (screenshot_msg) {
-            sdl_render_text(&title_pane, 0, 80, 0, "SCREENSHOT", WHITE, BLACK);
+            sdl_render_text(&title_pane, 0, 77, 0, "SCREENSHOT", WHITE, BLACK);
             screenshot_msg_is_displayed = true;
         } else {
             screenshot_msg_is_displayed = false;

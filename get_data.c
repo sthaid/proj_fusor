@@ -628,9 +628,10 @@ static float convert_adc_pressure(float adc_volts, uint32_t gas_id)
 // XXX replace numbers with defines
 static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
 {
+    #define MAX_DATA 1000000
     #define MAX_C1SH 4000
 
-    static uint16_t data[1000000];
+    static uint16_t data[MAX_DATA];
     static int32_t  max_data;
     static int32_t  idx;
     static int32_t  largest_pulse_height;
@@ -659,7 +660,7 @@ static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
     //   print an error 
     //   reset 
     // endif
-    if (max_data + max_d > 1000000) {
+    if (max_data + max_d > MAX_DATA) {
         ERROR("max_data %d or max_d %d are too large\n", max_data, max_d);
         RESET_FOR_NEXT_SEC;
         return 0;
@@ -698,7 +699,7 @@ static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
         //   inspect next values to determine pulse height
         //   advance index to after the pulse
         // endif
-        begining_of_pulse = (data[idx] >= 2500);
+        begining_of_pulse = (data[idx] >= 2500);  // XXX 2500 tbd
         if (!begining_of_pulse) {
             idx++;
             continue;
@@ -771,10 +772,10 @@ static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
         j = largest_pulse_idx - 600;
         if (j < 0) {
             j = 0;
-        } else if (j > max_data - 1200) {
-            j = max_data - 1200;
+        } else if (j > max_data - MAX_ADC_SAMPLES) {
+            j = max_data - MAX_ADC_SAMPLES;
         }
-        for (i = 0; i < 1200; i++,j++) {
+        for (i = 0; i < MAX_ADC_SAMPLES; i++,j++) {
             he3_adc_samples_mv[i] = data[j] * 1000 / 205 - 10000;
         }
 

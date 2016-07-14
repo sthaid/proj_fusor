@@ -84,6 +84,8 @@ SOFTWARE.
 //#define JPEG_BUFF_SAMPLE_CREATE_ENABLE
 #define JPEG_BUFF_SAMPLE_FILENAME "jpeg_buff_sample.bin"
 
+#define NEUTRON_CPM(_file_idx) (file_data_part1[_file_idx].he3.cpm_10_sec[2])
+
 //
 // typedefs
 //
@@ -469,7 +471,7 @@ static int32_t initialize(int32_t argc, char ** argv)
 
 static void usage(void)
 {
-    // XXX tbd
+    // xxx tbd later
 }
 
 // -----------------  GET LIVE DATA THREAD  ------------------------------------------
@@ -1190,11 +1192,14 @@ static void draw_data_values(rect_t * data_pane, int32_t file_idx)
     sprintf(str, "N2 mT %s",
             val2str(dp1->pressure_n2_mtorr));
     sdl_render_text(data_pane, 3, 0, 1, str, WHITE, BLACK);
+
+    sprintf(str, "CPM   %s",
+            val2str(NEUTRON_CPM(file_idx)));
+    sdl_render_text(data_pane, 4, 0, 1, str, WHITE, BLACK);
 }
 
 // - - - - - - - - -  DISPLAY HANDLER - DRAW GRAPH  - - - - - - - - - - - - - - - - 
 
-// XXX redo this section
 static void draw_graph_init(rect_t * graph_pane)
 {
     graph_pane_global = *graph_pane;
@@ -1213,7 +1218,7 @@ static void draw_graph0(int32_t file_idx)
     float    voltage_mean_kv_values[MAX_FILE_DATA_PART1];
     float    current_ma_values[MAX_FILE_DATA_PART1];
     float    pressure_d2_mtorr_values[MAX_FILE_DATA_PART1];
-    float    he3_cpm_10_sec_values[MAX_FILE_DATA_PART1];
+    float    neutron_cpm_values[MAX_FILE_DATA_PART1];
     int32_t  file_idx_start, file_idx_end, x_time_span_sec, max_values, i;
     int32_t  x_time_span_sec_tbl[] = {60, 600, 3600, 86400};
     uint64_t cursor_time_us;
@@ -1256,8 +1261,8 @@ static void draw_graph0(int32_t file_idx)
         pressure_d2_mtorr_values[max_values] = (i >= 0 && i < file_hdr->max)
                                                 ? file_data_part1[i].pressure_d2_mtorr
                                                 : ERROR_NO_VALUE;
-        he3_cpm_10_sec_values[max_values]    = (i >= 0 && i < file_hdr->max)
-                                                ? file_data_part1[i].he3.cpm_10_sec[2]
+        neutron_cpm_values[max_values]       = (i >= 0 && i < file_hdr->max)
+                                                ? NEUTRON_CPM(i)
                                                 : ERROR_NO_VALUE;
         max_values++;
     }
@@ -1269,10 +1274,9 @@ static void draw_graph0(int32_t file_idx)
         val2str2(voltage_mean_kv_values[i], "KV   "),   RED,    30.0,    max_values, voltage_mean_kv_values,
         val2str2(current_ma_values[i], "MA   "),        GREEN,  30.0,    max_values, current_ma_values,
         val2str2(pressure_d2_mtorr_values[i], "MTORR"), BLUE,   30.0,    max_values, pressure_d2_mtorr_values,
-        val2str2(he3_cpm_10_sec_values[i], "CPM  "),    PURPLE, 10000.0, max_values, he3_cpm_10_sec_values);
+        val2str2(neutron_cpm_values[i], "CPM  "),       PURPLE, 10000.0, max_values, neutron_cpm_values);
 }
 
-// XXX replace 1200
 static void draw_graph1(int32_t file_idx)
 {
     #define MAX_Y_MAX_MV_TBL (sizeof(y_max_mv_tbl)/sizeof(y_max_mv_tbl[0]))
@@ -1281,9 +1285,9 @@ static void draw_graph1(int32_t file_idx)
     struct data_part2_s * dp2;
     int32_t               y_max_mv;
     int32_t               y_max_mv_tbl[] = {100, 1000, 2000, 5000, 10000};
-    float                 voltage_adc_samples_mv_values[1200];
-    float                 current_adc_samples_mv_values[1200];
-    float                 pressure_adc_samples_mv_values[1200];
+    float                 voltage_adc_samples_mv_values[MAX_ADC_SAMPLES];
+    float                 current_adc_samples_mv_values[MAX_ADC_SAMPLES];
+    float                 pressure_adc_samples_mv_values[MAX_ADC_SAMPLES];
     int32_t               i;
 
     // init y_max_mv
@@ -1304,7 +1308,7 @@ static void draw_graph1(int32_t file_idx)
     }
 
     // init arrays of the values to graph
-    for (i = 0; i < 1200; i++) {
+    for (i = 0; i < MAX_ADC_SAMPLES; i++) {
         voltage_adc_samples_mv_values[i] = dp1->data_part2_voltage_adc_samples_mv_valid 
                                        ? dp2->voltage_adc_samples_mv[i]
                                        : ERROR_NO_VALUE;
@@ -1319,9 +1323,9 @@ static void draw_graph1(int32_t file_idx)
     // draw the graph
     draw_graph_common(
         "ADC SAMPLES", "1 SEC INTERVAL", -1, NULL, 3,
-        "VOLTAGE ", RED,   (double)y_max_mv, 1200, voltage_adc_samples_mv_values,
-        "CURRENT ", GREEN, (double)y_max_mv, 1200, current_adc_samples_mv_values,
-        "PRESSURE", BLUE,  (double)y_max_mv, 1200, pressure_adc_samples_mv_values);
+        "VOLTAGE ", RED,   (double)y_max_mv, MAX_ADC_SAMPLES, voltage_adc_samples_mv_values,
+        "CURRENT ", GREEN, (double)y_max_mv, MAX_ADC_SAMPLES, current_adc_samples_mv_values,
+        "PRESSURE", BLUE,  (double)y_max_mv, MAX_ADC_SAMPLES, pressure_adc_samples_mv_values);
 }
 
 static void draw_graph2(int32_t file_idx)
@@ -1332,7 +1336,7 @@ static void draw_graph2(int32_t file_idx)
     struct data_part2_s * dp2;
     int32_t               y_max_mv;
     int32_t               y_max_mv_tbl[] = {100, 1000, 2000, 5000, 10000};
-    float                 he3_adc_samples_mv_values[1200];
+    float                 he3_adc_samples_mv_values[MAX_ADC_SAMPLES];
     int32_t               i;
 
     // init y_max_mv
@@ -1353,17 +1357,17 @@ static void draw_graph2(int32_t file_idx)
     }
 
     // init arrays of the values to graph
-    for (i = 0; i < 1200; i++) {
+    for (i = 0; i < MAX_ADC_SAMPLES; i++) {
         he3_adc_samples_mv_values[i] = dp1->data_part2_he3_adc_samples_mv_valid 
                                        ? dp2->he3_adc_samples_mv[i]
                                        : ERROR_NO_VALUE;
     }
 
     // draw the graph
-    // XXX make bar graph
+    // xxx later, maybe use bar graph ?
     draw_graph_common(
         "ADC SAMPLES", "2.4 MS INTERVAL", -1, NULL, 1,
-        "HE3 ", PURPLE, (double)y_max_mv, 1200, he3_adc_samples_mv_values);
+        "HE3 ", PURPLE, (double)y_max_mv, MAX_ADC_SAMPLES, he3_adc_samples_mv_values);
 }
 
 static void draw_graph_common(char * title_str, char * info_str, float cursor_pos, char * cursor_str, int32_t max_graph, ...)

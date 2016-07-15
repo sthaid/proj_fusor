@@ -23,7 +23,6 @@ SOFTWARE.
 // XXX - TODO
 // - the extra packet ?
 // - pass cal tbl to callback ?
-// - ctrl c and atexit
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -85,6 +84,7 @@ static mccdaq_callback_t      g_cb;
 static enum state             g_state;
 static bool                   g_producer_thread_running;
 static bool                   g_consumer_thread_running;
+static int32_t                g_restart_count;
 
 //
 // protoytpes
@@ -224,7 +224,14 @@ int32_t mccdaq_stop(void)
     return 0;
 }
 
-// -----------------  MCCDAQ EXIT HANDLER  D-----------------------------
+int32_t mccdaq_get_restart_count(void) 
+{
+    int32_t val = g_restart_count;
+    g_restart_count = 0;
+    return val;
+}
+
+// -----------------  MCCDAQ EXIT HANDLER -------------------------------
 
 static void mccdaq_exit(void)
 {
@@ -293,7 +300,8 @@ static void * mccdaq_producer_thread(void * cx)
         }
 
         // if error has occurred then
-        //   restart the analog input scan
+        //   restart the analog input scan, and
+        //   keep track of number of resets
         // endif
         if ((ret == LIBUSB_ERROR_PIPE) || !(status & AIN_SCAN_RUNNING) || ret != 0) {
             if (ret != LIBUSB_ERROR_PIPE && ret != 0) {
@@ -301,8 +309,11 @@ static void * mccdaq_producer_thread(void * cx)
             } else {
                 WARN("restarting, ret==%d status=0x%x\n", ret, status);  // XXX DEBUG
             }
+
             libusb_clear_halt(g_udev, LIBUSB_ENDPOINT_IN|1);
             usbAInScanStart_USB20X(g_udev, 0, FREQUENCY, 1<<CHANNEL, OPTIONS, 0, 0);
+
+            __sync_fetch_and_add(&g_restart_count, 1);
         }
 
         // make data available to consumer thread

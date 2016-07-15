@@ -681,7 +681,7 @@ static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
         int32_t chan;
 
         // if idx is near the end then exit this loop
-        if (max_data - idx < 10) {
+        if (max_data - idx < 10) {  // XXX 10?
             break;
         }
 

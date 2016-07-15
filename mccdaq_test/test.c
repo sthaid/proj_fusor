@@ -44,152 +44,317 @@ SOFTWARE.
 #include "util_mccdaq.h"
 #include "util_misc.h"
 
-#define MAX_DATA_STORE (10*500000)   // 10 secs of samples
+//
+// defines
+//
 
-static uint16_t data_store[MAX_DATA_STORE];
-static uint32_t max_data_store;
-static bool sigint;
-static bool error;
+//
+// typedefs
+//
 
+enum mode { IDLE, INFO, PLOT, PULSEMON };
+
+//
+// variables
+//
+
+static enum mode mode;
+static int32_t   mode_arg;
+static bool      monitor_okay;
+static uint64_t  total_samples_rcvd; 
+static bool      sigint;
+ 
+//
+// prototypes
+//
+
+static void * monitor_thread(void * cx);
 static void sigint_handler(int sig);
-static char * plot_line(uint16_t value);
-static int32_t mccdaq_callback(uint16_t * data, int32_t max_data, bool error_flag);
+static int32_t mccdaq_callback(uint16_t * data, int32_t max_data);
+static void print_plot_str(uint16_t value);
 
-// --------------------------------------------------------------
+// -----------------  MAIN  ------------------------------------------------
 
 int32_t main(int argc, char ** argv)
 {
-    int32_t          ret, plot_start;
-    size_t           len;
-    bool             done;
-    char             cmd_line[100], last_cmd_line[100], cmd_code;
     struct sigaction action;
-
-    // init vars
-    done = false;
-    plot_start = 0;
-    last_cmd_line[0] = '\0';
+    int32_t          ret;
+    int32_t          ms;
+    pthread_t        thread;
 
     // register signal handler for SIGINT
     bzero(&action, sizeof(action));
     action.sa_handler = sigint_handler;
     sigaction(SIGINT, &action, NULL);
 
-    // init
+    // mccdaq init, and start
     INFO("calling mccdaq_init\n");
     ret = mccdaq_init();
     if (ret != 0) {
         FATAL("mccdaq_init ret %d\n", ret);
     }
+    INFO("calling mccdaq_start\n");
+    ret =  mccdaq_start(mccdaq_callback);
+    if (ret != 0) {
+        FATAL("mccdaq_start ret %d\n", ret);
+    }
 
-    // loop, get and process command
-    // - g : get
-    // - p : plot
-    // - e,q : exit
-    while (!done) {
-        // get cmd_line, and
-        // remove newline char at end
-        if (sigint) break;  //XXX
+    // create monitor thread, and 
+    // wait for monitor thread to declare okay
+    pthread_create(&thread, NULL, monitor_thread, NULL);
+    for (ms = 0; ms < 5000 && !monitor_okay; ms++) {
+        usleep(1000);
+    }
+    if (!monitor_okay) {
+        FATAL("data not being received from mccdaq\n");
+    }
+
+    // loop, get and process command, each of
+    // these cmds can be terminated by ctrl c
+    // - info:           displays info once per second
+    // - plot <samples>: plot raw adc data 
+    // - pulsemon:       plot detected pulses
+    // - help:           display this 
+    while (true) {
+        char cmd_line[100], *cmd, *arg;
+
+        // get cmd_line
         fputs("> ", stdout);
-        fgets(cmd_line, sizeof(cmd_line), stdin);
-        if (sigint) break;  //XXX
-        len = strlen(cmd_line);
-        if (len > 0) {
-            cmd_line[len-1] = '\0';
+        if (fgets(cmd_line, sizeof(cmd_line), stdin) == NULL) {
+            break;
         }
 
-        // if cmd_line is zero len, then use last_cmd_line
-        if (strlen(cmd_line) == 0) {
-            strcpy(cmd_line, last_cmd_line);
+        // parse cmd_line
+        cmd = strtok(cmd_line, " \n");
+        if (cmd == NULL) {
+            continue;
+        }
+        arg = strtok(NULL, " \n");
+
+        // process cmd
+        if (strcmp(cmd, "info") == 0) {
+            mode = INFO;
+        } else if (strcmp(cmd, "plot") == 0) {
+            int32_t samples = 1000;
+            if (arg) {
+                if (sscanf(arg, "%d", &samples) != 1 || samples <= 0) {
+                    ERROR("'%s' is not a positive integer\n", arg);
+                    continue;
+                }
+            }
+            mode_arg = samples;
+            mode = PLOT;
+        } else if (strcmp(cmd, "pulsemon") == 0) {
+            mode = PULSEMON;
+        } else if (strcmp(cmd, "help") == 0) {
+            printf("cmds:\n");
+            printf("- info:           displays info once per second\n");
+            printf("- plot <samples>: plot raw adc data \n");
+            printf("- pulsemon:       plot detected pulses\n");
+            printf("- help:           display this\n");
+        } else {
+            ERROR("cmd '%s' not supported\n", cmd);
         }
 
-        // save cmd_line in last_cmd_line
-        strcpy(last_cmd_line, cmd_line);
-
-        // scan the cmd_line
-        cmd_code = ' ';
-        sscanf(cmd_line, "%c", &cmd_code);
-
-        // process the cmd_code
-        printf("XXX got cmd_line '%s' cmd_code='%c'\n", cmd_line, cmd_code);
-        switch (cmd_code) {
-        case 'g':
-            // get data
-            bzero(data_store, MAX_DATA_STORE*sizeof(uint16_t));
-            max_data_store = 0;
-            mccdaq_start(mccdaq_callback);
-            while (max_data_store < MAX_DATA_STORE && !error) {
-                usleep(10000);
-                if (sigint) break;
-            }
-            // XXX may want to stop this
-            plot_start = 0;
-            break;
-        case 'p': {
-            // plot data
-            int32_t i, plot_end;
-            printf("PLOT\n");
-            plot_end = plot_start + 49;  //XXX
-            if (plot_end >= max_data_store) {
-                plot_end = max_data_store-1;
-            }
-            for (i = plot_start; i <= plot_end; i++) {
-                uint16_t value = data_store[i];
-                printf("%8d: %5d: %s\n", i, value-2048, plot_line(value));
-            }
-            plot_start = plot_end + 1;
-            break; }
-        case 'e': case 'q':
-            done = true;
-            break;
-        case ' ':
-            break;
-        default:
-            printf("invalid cmd '%c'\n", cmd_code);
-            break;
+        // wait for cmd to compete 
+        while (mode != IDLE) {
+            usleep(1000);
         }
     }
-            
-    // done
+
+    // terminate
     return 0;
 }
-#if 0
-    // XXX
-    // XXX check for bogus values like 0 or -1
-    // XXX plot
-    // XXX commands    Get, Plot [<x>], Scan for discontinuity
-    // XXX capture ctrl c for orderly exit
-    int32_t i;
-    FILE * fp = fopen("temp.txt", "w");
-    if (fp == NULL) {
-        ERROR("failed open temp.txt, %s\n", strerror(errno));
-    } else {
-        for (i = 0; i < max_data_store; i++) {
-            fprintf(fp, "%6d:  %4d\n", i, data_store[i]-2048);
+
+void * monitor_thread(void * cx)
+{
+    uint64_t start, cnt;
+
+    while (true) {
+        start = total_samples_rcvd;
+        sleep(1);
+        cnt = total_samples_rcvd - start;
+
+        monitor_okay = (cnt >= 450000 && cnt <= 510000);
+        if (!monitor_okay) {
+            ERROR("samples per sec %"PRId64" is out of range\n", cnt);
         }
-        fclose(fp);
     }
-
-    // XXX tbd
-    //INFO("XXX tbd\n");
-    //pause();
-
-    // XXX print chart to file
-#endif
+    return NULL;
+}
 
 static void sigint_handler(int sig)
 {
     sigint = true;
 }
 
-static char * plot_line(uint16_t value)
+// -----------------  MCCDAQ CALLBACK  -----------------------------------------------
+
+static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
+{
+    #define MAX_DATA        1000000
+    #define PULSE_THRESHOLD 2500
+    #define MAX_CHANNEL     4
+
+    static uint16_t data[MAX_DATA];
+    static int32_t  max_data;
+    static int32_t  idx;
+    static int32_t  pulse_count[MAX_CHANNEL];
+    static uint64_t time_last;
+    static uint64_t time_start;
+    
+    DEBUG("max_data=%d\n", max_data);
+
+    // init time_start
+    if (time_start == 0) {
+        time_start = time(NULL);
+    }
+
+    // keep track of total samples received
+    total_samples_rcvd += max_d;
+
+    // if mode is PLOT then plot the value;
+    // mode_arg is the number of samples to plot, when this 
+    // becomes zero then set mode to IDLE
+    if (mode == PLOT) {
+        int32_t i;
+        for (i = 0; i < max_d; i++) {
+            if (mode_arg <= 0) {
+                mode_arg = 0;
+                mode = IDLE;
+                break;
+            }
+            print_plot_str(d[i]);
+            mode_arg--;
+        }
+    }
+
+    // copy received data to array large enough for one second of data
+    if (max_data + max_d > MAX_DATA) {
+        FATAL("too much data %d+%d > %d\n", max_data, max_d, MAX_DATA);
+    }
+    memcpy(data+max_data, d, max_d*sizeof(uint16_t));
+    max_data += max_d;
+
+    // search for pulses in the data
+    // - when pulse is found determine 
+    //   . pulse_start_idx, pulse_end_idx
+    //   . pulse_height
+    //   . pulse_chan
+    //   . pulse_count[MAX_CHANNEL]
+    // - if mode is PULSEMON then 
+    //      plot the pulse and print pulse height
+    //   endif
+    bool    in_a_pulse      = false;
+    int32_t pulse_start_idx = -1;
+    int32_t pulse_end_idx   = -1;
+    while (true) {
+        // terminate this loop when 
+        // - near the end of data and not processing a pulse OR
+        // - at the end of data
+        if ((!in_a_pulse && idx >= max_data-10) || 
+            (idx == max_data))
+        {
+            break;
+        }
+
+        // print warning if data out of range
+        if (data[idx] > 4095) {
+            WARN("data[%d] = %u, is out of range\n", idx, data[idx]);
+            data[idx] = 2048;
+        }
+
+        // determine the pulse_start_idx and pulse_end_idx
+        if (data[idx] >= PULSE_THRESHOLD && !in_a_pulse) {
+            in_a_pulse = true;
+            pulse_start_idx = idx;
+        } else if (data[idx] < PULSE_THRESHOLD && in_a_pulse) {
+            in_a_pulse = false;
+            pulse_end_idx = idx - 1;
+        }
+
+        // if a pulse has been located ...
+        if (pulse_end_idx != -1) {
+            int32_t pulse_height, pulse_channel;
+            int32_t i;
+
+            // scan from start to end of pulse to determine pulse_height
+            // XXX probably needs work
+            pulse_height = -1;
+            for (i = pulse_start_idx; i <= pulse_end_idx; i++) {
+                if (data[i] - PULSE_THRESHOLD > pulse_height) {
+                    pulse_height = data[i] - PULSE_THRESHOLD;
+                }
+            }
+                
+            // determine pulse_channel from pulse_height
+            pulse_channel = pulse_height / ((4096 - PULSE_THRESHOLD) / MAX_CHANNEL);
+            if (pulse_channel >= MAX_CHANNEL) {
+                WARN("chan being reduced from %d to %d\n", pulse_channel, MAX_CHANNEL-1);
+                pulse_channel = MAX_CHANNEL-1;
+            }
+
+            // keep track of pulse_count
+            pulse_count[pulse_channel]++;
+
+            // if mode is PULSEMON then plot this pulse
+            if (mode == PULSEMON) {
+                INFO("pulse_height = %d\n", pulse_height);
+                for (i = pulse_start_idx; i <= pulse_end_idx; i++) {
+                    print_plot_str(data[i]);
+                }
+                printf("\n");
+            }
+
+            // done with this pulse
+            pulse_start_idx = -1;
+            pulse_end_idx = -1;
+        }
+
+        // move to next data 
+        idx++;
+    }
+
+    // if time has incremented from last time this code block was run then ...
+    uint64_t time_now = time(NULL);
+    if (time_now > time_last) {
+        // if mode equal INFO then print stats
+        if (mode == INFO) {
+            printf("time=%-6"PRId64" samples=%-6d mccdaq_restarts=%-6d counts=%-6d %-6d %-6d %-6d\n",
+                   time_now - time_start,
+                   max_data,
+                   mccdaq_get_restart_count(),  
+                   pulse_count[0], pulse_count[1], pulse_count[2], pulse_count[3]);
+        }
+
+        // reset for next second of data
+        time_last = time_now;
+        max_data = 0;
+        idx = 0;
+        bzero(pulse_count, sizeof(pulse_count));
+    }
+
+    // if sigint then set mode to IDLE
+    if (sigint) {
+        mode = IDLE;
+        mode_arg = 0;
+        sigint = false;
+    }
+
+    // return 0, so scanning continues
+    return 0;
+}
+
+// -----------------  SUPPORT ROUTINES  -----------------------------------------------
+
+static void print_plot_str(uint16_t value)
 {
     static char str[106];
     int32_t     idx, i;
 
     // value                : range 0 - 4095
     // idx = value/40 + 1   : range  1 - 103
-    // plot_line:           :  0  1-51  52  53-103  104
+    // plot_str:           :  0  1-51  52  53-103  104
     //                      :  |        ctr           |
 
     memset(str, ' ', sizeof(str));
@@ -198,8 +363,8 @@ static char * plot_line(uint16_t value)
     str[105] = '\0';
 
     if (value > 4095) {
-        WARN("value %d out of range\n", value);
-        return str;
+        printf("%5d: value is out of range\n", value-2048);
+        return;
     }
 
     idx = value/40 + 1;
@@ -210,61 +375,5 @@ static char * plot_line(uint16_t value)
         i += (idx > 52 ? 1 : -1);
     }
 
-    return str;
-}
-
-static int32_t mccdaq_callback(uint16_t * data, int32_t max_data, bool error_flag)
-{
-    uint64_t        intvl, curr_us;
-    int32_t         space_avail, copy_count;
-
-    static uint64_t start_us, count
-    
-    DEBUG("max_data=%d eror_flag=%d\n", max_data, error_flag);
-
-    if (error_flag) {
-        ERROR("error occurred\n");
-        error = error_flag;
-        return 1;
-    }
-
-    curr_us = microsec_timer();
-    intvl   = curr_us - start_us;
-    count  += max_data;
-    if (start_us == 0 || intvl >= 1000000) { 
-        if (start_us != 0) {
-            INFO("rate = %"PRId64" samples/sec\n", count * 1000000 / intvl);
-        }
-        start_us = curr_us;
-        count = 0;
-    }
-
-    // XXX temp
-    int32_t i;
-    static int32_t call_count;
-    call_count++;
-    for (i = 0; i < max_data; i++) {
-        if (data[i] > (2048+300)) {
-            printf("%d: data[%d] = %d\n",
-                call_count, i, data[i]-2048);
-        }
-    }
-
-    return 0;
-
-    if (max_data_store >= MAX_DATA_STORE) {
-        FATAL("invalid max_data_store %d\n", max_data_store);
-    }
-
-    space_avail = MAX_DATA_STORE - max_data_store;
-    copy_count = (space_avail <= max_data ? space_avail : max_data);
-    memcpy(data_store+max_data_store, data, copy_count*2);
-    max_data_store += copy_count;
-
-    if (max_data_store == MAX_DATA_STORE) {
-        INFO("data store is full, max_data_store=%d\n", max_data_store);
-        return 1;
-    }
-
-    return 0;
+    printf("%5d: %s\n", value-2048, str);
 }

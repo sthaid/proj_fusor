@@ -28,5 +28,6 @@ typedef int32_t (*mccdaq_callback_t)(uint16_t * data, int32_t max_data);
 int32_t mccdaq_init(void);
 int32_t  mccdaq_start(mccdaq_callback_t cb);
 int32_t  mccdaq_stop(void);
+int32_t mccdaq_get_restart_count(void);
 
 #endif

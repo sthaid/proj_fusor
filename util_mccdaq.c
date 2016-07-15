@@ -288,6 +288,7 @@ static void * mccdaq_producer_thread(void * cx)
             WARN("transferred_bytes = %d\n", transferred_bytes);    
         }
 
+#if 0
         // XXX fake data for unit test
         if (transferred_bytes >= 2) {
             uint16_t * d16 = data;
@@ -298,6 +299,7 @@ static void * mccdaq_producer_thread(void * cx)
             }
             d16[len/2] = random_triangular(2600,4000);
         }
+#endif
 
         // if error has occurred then
         //   restart the analog input scan, and
@@ -307,7 +309,7 @@ static void * mccdaq_producer_thread(void * cx)
             if (ret != LIBUSB_ERROR_PIPE && ret != 0) {
                 WARN("restarting, ret==%d status=0x%x\n", ret, status);
             } else {
-                WARN("restarting, ret==%d status=0x%x\n", ret, status);  // XXX DEBUG
+                DEBUG("restarting, ret==%d status=0x%x\n", ret, status); 
             }
 
             libusb_clear_halt(g_udev, LIBUSB_ENDPOINT_IN|1);

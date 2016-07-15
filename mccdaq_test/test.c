@@ -121,6 +121,11 @@ int32_t main(int argc, char ** argv)
         // get cmd_line
         fputs("> ", stdout);
         if (fgets(cmd_line, sizeof(cmd_line), stdin) == NULL) {
+            if (sigint) {
+                sigint = false;
+                printf("\n");
+                continue;
+            }
             break;
         }
 
@@ -163,6 +168,7 @@ int32_t main(int argc, char ** argv)
     }
 
     // terminate
+    INFO("terminating\n");
     return 0;
 }
 
@@ -336,9 +342,9 @@ static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
 
     // if sigint then set mode to IDLE
     if (sigint) {
+        sigint = false;
         mode = IDLE;
         mode_arg = 0;
-        sigint = false;
     }
 
     // return 0, so scanning continues

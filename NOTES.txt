@@ -38,6 +38,7 @@ Updates, and additional packages, run as root:
   apt-get install libevdev-dev
   apt-get install tk
   apt-get install vim
+  apt-get install libreadline-dev
 
 Install SDL2
 - script is here, or see copy below

@@ -40,6 +40,8 @@ SOFTWARE.
 #include <netinet/in.h>
 #include <sys/resource.h>
 #include <signal.h>
+#include <readline/readline.h>
+#include <readline/history.h>
 
 #include "util_mccdaq.h"
 #include "util_misc.h"
@@ -115,10 +117,24 @@ int32_t main(int argc, char ** argv)
     // - plot <samples>: plot raw adc data 
     // - pulsemon:       plot detected pulses
     // - help:           display this 
+    char *cmd_line = NULL;
+    char *cmd, *arg;
     while (true) {
-        char cmd_line[100], *cmd, *arg;
-
         // get cmd_line
+        free(cmd_line);
+        cmd_line = NULL;
+        if ((cmd_line = readline("> ")) == NULL) {
+            break;
+        }
+        if (sigint) {
+            sigint = false;
+            continue;
+        }
+        if (cmd_line[0] != '\0') {
+            add_history(cmd_line);
+        }
+
+#if 0
         fputs("> ", stdout);
         if (fgets(cmd_line, sizeof(cmd_line), stdin) == NULL) {
             if (sigint) {
@@ -128,6 +144,7 @@ int32_t main(int argc, char ** argv)
             }
             break;
         }
+#endif
 
         // parse cmd_line
         cmd = strtok(cmd_line, " \n");
@@ -199,7 +216,9 @@ static void sigint_handler(int sig)
 static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
 {
     #define MAX_DATA        1000000
-    #define PULSE_THRESHOLD 2500
+    //#define PULSE_THRESHOLD 2100
+    //#define PULSE_THRESHOLD 2300   // with 10k in series, base = 2048+167
+    #define PULSE_THRESHOLD (2048+350)   // 500k in series,  base = 2048+339
     #define MAX_CHANNEL     4
 
     static uint16_t data[MAX_DATA];

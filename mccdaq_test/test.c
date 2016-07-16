@@ -50,6 +50,8 @@ SOFTWARE.
 // defines
 //
 
+#define MAX_CHANNEL     8
+
 //
 // typedefs
 //
@@ -65,6 +67,8 @@ static int32_t   mode_arg;
 static bool      monitor_okay;
 static uint64_t  total_samples_rcvd; 
 static bool      sigint;
+static int32_t   pulse_count[MAX_CHANNEL];
+static uint64_t  pulse_time_start;
  
 //
 // prototypes
@@ -73,7 +77,7 @@ static bool      sigint;
 static void * monitor_thread(void * cx);
 static void sigint_handler(int sig);
 static int32_t mccdaq_callback(uint16_t * data, int32_t max_data);
-static void print_plot_str(uint16_t value);
+static void print_plot_str(uint16_t value, uint16_t pulse_threshold);
 
 // -----------------  MAIN  ------------------------------------------------
 
@@ -101,6 +105,9 @@ int32_t main(int argc, char ** argv)
         FATAL("mccdaq_start ret %d\n", ret);
     }
 
+    // init pulse_time_start
+    pulse_time_start = time(NULL);
+
     // create monitor thread, and 
     // wait for monitor thread to declare okay
     pthread_create(&thread, NULL, monitor_thread, NULL);
@@ -116,6 +123,7 @@ int32_t main(int argc, char ** argv)
     // - info:           displays info once per second
     // - plot <samples>: plot raw adc data 
     // - pulsemon:       plot detected pulses
+    // - reset:          reset pulse_count
     // - help:           display this 
     char *cmd_line = NULL;
     char *cmd, *arg;
@@ -134,18 +142,6 @@ int32_t main(int argc, char ** argv)
             add_history(cmd_line);
         }
 
-#if 0
-        fputs("> ", stdout);
-        if (fgets(cmd_line, sizeof(cmd_line), stdin) == NULL) {
-            if (sigint) {
-                sigint = false;
-                printf("\n");
-                continue;
-            }
-            break;
-        }
-#endif
-
         // parse cmd_line
         cmd = strtok(cmd_line, " \n");
         if (cmd == NULL) {
@@ -157,7 +153,7 @@ int32_t main(int argc, char ** argv)
         if (strcmp(cmd, "info") == 0) {
             mode = INFO;
         } else if (strcmp(cmd, "plot") == 0) {
-            int32_t samples = 1000;
+            int32_t samples = 30;
             if (arg) {
                 if (sscanf(arg, "%d", &samples) != 1 || samples <= 0) {
                     ERROR("'%s' is not a positive integer\n", arg);
@@ -168,11 +164,15 @@ int32_t main(int argc, char ** argv)
             mode = PLOT;
         } else if (strcmp(cmd, "pulsemon") == 0) {
             mode = PULSEMON;
+        } else if (strcmp(cmd, "reset") == 0) {
+            pulse_time_start = time(NULL);
+            bzero(pulse_count, sizeof(pulse_count));
         } else if (strcmp(cmd, "help") == 0) {
             printf("cmds:\n");
             printf("- info:           displays info once per second\n");
             printf("- plot <samples>: plot raw adc data \n");
             printf("- pulsemon:       plot detected pulses\n");
+            printf("- reset:          reset pulse_count\n");
             printf("- help:           display this\n");
         } else {
             ERROR("cmd '%s' not supported\n", cmd);
@@ -218,22 +218,16 @@ static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
     #define MAX_DATA        1000000
     //#define PULSE_THRESHOLD 2100
     //#define PULSE_THRESHOLD 2300   // with 10k in series, base = 2048+167
-    #define PULSE_THRESHOLD (2048+350)   // 500k in series,  base = 2048+339
-    #define MAX_CHANNEL     4
+    //#define PULSE_THRESHOLD (2048+350)   // 50 in series,  base = 2048+339
+    //#define PULSE_THRESHOLD (2048+200)   // 25 in series,  base = 2048+169, and oscilloscope
+    #define PULSE_THRESHOLD (2048+347)   // 25 in series,  base = 2048+339, and no scope
 
     static uint16_t data[MAX_DATA];
     static int32_t  max_data;
     static int32_t  idx;
-    static int32_t  pulse_count[MAX_CHANNEL];
     static uint64_t time_last;
-    static uint64_t time_start;
     
     DEBUG("max_data=%d\n", max_data);
-
-    // init time_start
-    if (time_start == 0) {
-        time_start = time(NULL);
-    }
 
     // keep track of total samples received
     total_samples_rcvd += max_d;
@@ -249,7 +243,7 @@ static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
                 mode = IDLE;
                 break;
             }
-            print_plot_str(d[i]);
+            print_plot_str(d[i], -1);
             mode_arg--;
         }
     }
@@ -304,7 +298,6 @@ static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
             int32_t i;
 
             // scan from start to end of pulse to determine pulse_height
-            // XXX probably needs work
             pulse_height = -1;
             for (i = pulse_start_idx; i <= pulse_end_idx; i++) {
                 if (data[i] - PULSE_THRESHOLD > pulse_height) {
@@ -320,13 +313,13 @@ static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
             }
 
             // keep track of pulse_count
-            pulse_count[pulse_channel]++;
+            __sync_fetch_and_add(&pulse_count[pulse_channel], 1);
 
             // if mode is PULSEMON then plot this pulse
             if (mode == PULSEMON) {
-                INFO("pulse_height = %d\n", pulse_height);
+                INFO("pulse_height = %d  pulse_channel = %d\n", pulse_height, pulse_channel);
                 for (i = pulse_start_idx; i <= pulse_end_idx; i++) {
-                    print_plot_str(data[i]);
+                    print_plot_str(data[i], PULSE_THRESHOLD);
                 }
                 printf("\n");
             }
@@ -343,20 +336,35 @@ static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
     // if time has incremented from last time this code block was run then ...
     uint64_t time_now = time(NULL);
     if (time_now > time_last) {
+        int32_t chan;
         // if mode equal INFO then print stats
         if (mode == INFO) {
-            printf("time=%-6"PRId64" samples=%-6d mccdaq_restarts=%-6d counts=%-6d %-6d %-6d %-6d\n",
-                   time_now - time_start,
+            int64_t duration_secs = time_now - pulse_time_start;
+
+            printf("time = %d samples = %d  mccdaq_restarts = %d\n",
+                   (int32_t)duration_secs,
                    max_data,
-                   mccdaq_get_restart_count(),  
-                   pulse_count[0], pulse_count[1], pulse_count[2], pulse_count[3]);
+                   mccdaq_get_restart_count());
+
+            printf("  counts = ");
+            for (chan = 0; chan < MAX_CHANNEL; chan++) {
+                printf("%8d ", pulse_count[chan]);
+            }
+            printf("\n");
+
+            printf("  cpm    = ");
+            for (chan = 0; chan < MAX_CHANNEL; chan++) {
+                printf("%8.2f ", pulse_count[chan] / (duration_secs / 60.0));
+            }
+            printf("\n");
+
+            printf("\n");
         }
 
         // reset for next second of data
         time_last = time_now;
         max_data = 0;
         idx = 0;
-        bzero(pulse_count, sizeof(pulse_count));
     }
 
     // if sigint then set mode to IDLE
@@ -372,15 +380,15 @@ static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
 
 // -----------------  SUPPORT ROUTINES  -----------------------------------------------
 
-static void print_plot_str(uint16_t value)
+static void print_plot_str(uint16_t value, uint16_t pulse_threshold)
 {
     static char str[106];
     int32_t     idx, i;
 
     // value                : range 0 - 4095
     // idx = value/40 + 1   : range  1 - 103
-    // plot_str:           :  0  1-51  52  53-103  104
-    //                      :  |        ctr           |
+    // plot_str:            :  0  1-51  52  53-103  104
+    //                      :  |        ^^           |
 
     memset(str, ' ', sizeof(str));
     str[0]   = '|';
@@ -398,6 +406,10 @@ static void print_plot_str(uint16_t value)
         str[i] = '*';
         if (i == idx) break;
         i += (idx > 52 ? 1 : -1);
+    }
+    str[52] = '|';
+    if (pulse_threshold != -1) {
+        str[pulse_threshold/40+1] = '|';
     }
 
     printf("%5d: %s\n", value-2048, str);

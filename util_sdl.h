@@ -101,9 +101,9 @@ typedef struct {
 #define GREEN      3
 #define YELLOW     4
 #define ORANGE     5
-#define RED        6
-#define GRAY       7
-#define PINK       8
+#define PINK       6
+#define RED        7
+#define GRAY       8
 #define WHITE      9
 #define BLACK      10
 

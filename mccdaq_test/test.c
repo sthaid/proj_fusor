@@ -125,6 +125,7 @@ int32_t main(int argc, char ** argv)
     // - pulsemon:       plot detected pulses
     // - reset:          reset pulse_count
     // - help:           display this 
+    // - quit:           terminate program
     char *cmd_line = NULL;
     char *cmd, *arg;
     while (true) {
@@ -174,6 +175,9 @@ int32_t main(int argc, char ** argv)
             printf("- pulsemon:       plot detected pulses\n");
             printf("- reset:          reset pulse_count\n");
             printf("- help:           display this\n");
+            printf("- quit:           terminate program\n");
+        } else if (strcmp(cmd, "quit") == 0) {
+            break;
         } else {
             ERROR("cmd '%s' not supported\n", cmd);
         }

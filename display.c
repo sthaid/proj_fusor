@@ -216,6 +216,9 @@ static int32_t initialize(int32_t argc, char ** argv)
     char               s[100];
     int32_t            wait_ms;
 
+    // use line bufferring
+    setlinebuf(stdout);
+
     // init core dumps
     // note - requires fs.suid_dumpable=1  in /etc/sysctl.conf if this is a suid pgm
     rl.rlim_cur = RLIM_INFINITY;

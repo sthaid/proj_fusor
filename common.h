@@ -32,7 +32,7 @@ SOFTWARE.
 #define DATAQ_ADC_CHAN_PRESSURE  3
 
 #define MAX_ADC_SAMPLES    1200
-#define MAX_HE3_CHAN       4
+#define MAX_HE3_CHAN       8
 
 #define IS_ERROR(x) ((int32_t)(x) >= ERROR_FIRST && (int32_t)(x) <= ERROR_LAST)
 #define ERROR_FIRST                   1000000 
@@ -54,7 +54,9 @@ SOFTWARE.
 typedef struct {
     float     cpm_1_sec[MAX_HE3_CHAN];
     float     cpm_10_sec[MAX_HE3_CHAN];
-    // XXX more   60, 3600
+    float     cpm_60_sec[MAX_HE3_CHAN];
+    float     cpm_600_sec[MAX_HE3_CHAN];
+    float     cpm_3600_sec[MAX_HE3_CHAN];
 } he3_t;
 
 // data_part1_s and data_part2_s are each padded to 8 byte boundary

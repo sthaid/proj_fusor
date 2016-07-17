@@ -106,6 +106,7 @@ static float convert_adc_voltage(float adc_volts);
 static float convert_adc_current(float adc_volts);
 static float convert_adc_pressure(float adc_volts, uint32_t gas_id);
 static int32_t mccdaq_callback(uint16_t * data, int32_t max_data);
+static void print_plot_str(uint16_t value, uint16_t pulse_threshold);
 
 // -----------------  MAIN & TOP LEVEL ROUTINES  -------------------------------------
 
@@ -134,6 +135,9 @@ static void init(void)
 {
     struct rlimit rl;
     struct sigaction action;
+
+    // use line bufferring
+    setlinebuf(stdout);
 
     // allow core dump
     rl.rlim_cur = RLIM_INFINITY;
@@ -421,6 +425,9 @@ static void init_data_struct(data_t * data, time_t time_now)
         for (chan = 0; chan < MAX_HE3_CHAN; chan++) {
             data->part1.he3.cpm_1_sec[chan] = ERROR_NO_VALUE;
             data->part1.he3.cpm_10_sec[chan] = ERROR_NO_VALUE;
+            data->part1.he3.cpm_60_sec[chan] = ERROR_NO_VALUE;
+            data->part1.he3.cpm_600_sec[chan] = ERROR_NO_VALUE;
+            data->part1.he3.cpm_3600_sec[chan] = ERROR_NO_VALUE;
         }
     }
     pthread_mutex_unlock(&he3_mutex);
@@ -625,36 +632,53 @@ static float convert_adc_pressure(float adc_volts, uint32_t gas_id)
 
 // -----------------  MCCDAQ CALLBACK - NEUTRON DETECTOR PULSES  ---------------------
 
-// XXX replace numbers with defines
 static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
 {
     #define MAX_DATA 1000000
-    #define MAX_C1SH 4000
+    #define MAX_PC1SH 4000
 
     static uint16_t data[MAX_DATA];
     static int32_t  max_data;
     static int32_t  idx;
-    static int32_t  largest_pulse_height;
-    static int32_t  largest_pulse_idx;
-    static int32_t  samples_1_sec;
-    static int32_t  counts_1_sec[MAX_HE3_CHAN];
-    static int32_t  counts_10_sec[MAX_HE3_CHAN];
-    static int32_t  max_c1sh;
-    static int32_t  counts_1_sec_history[MAX_C1SH][MAX_HE3_CHAN];
+    static int32_t  pulse_largest_height;
+    static int32_t  pulse_largest_idx;
+    static uint16_t pulse_threshold;
+    static int32_t  pulse_counts_1_sec[MAX_HE3_CHAN];
+    static int32_t  pulse_counts_10_sec[MAX_HE3_CHAN];
+    static int32_t  pulse_counts_60_sec[MAX_HE3_CHAN];
+    static int32_t  pulse_counts_600_sec[MAX_HE3_CHAN];
+    static int32_t  pulse_counts_3600_sec[MAX_HE3_CHAN];
+    static int32_t  pulse_counts_1_sec_history[MAX_PC1SH][MAX_HE3_CHAN];
+    static int32_t  max_pc1sh;
 
     #define RESET_FOR_NEXT_SEC \
         do { \
             max_data             = 0; \
             idx                  = 0; \
-            largest_pulse_height = 0; \
-            largest_pulse_idx    = 0; \
-            samples_1_sec        = 0; \
-            bzero(counts_1_sec, sizeof(counts_1_sec)); \
+            pulse_largest_height = 0; \
+            pulse_largest_idx    = 0; \
+            pulse_threshold      = 0; \
+            bzero(pulse_counts_1_sec, sizeof(pulse_counts_1_sec)); \
         } while (0)
 
-    #define CIRC_MAX_C1SH(x) (max_c1sh+(x) >= 0 && max_c1sh+(x) < MAX_C1SH ? max_c1sh+(x) : \
-                              max_c1sh+(x) < 0                             ? max_c1sh+(x) + MAX_C1SH  \
-                                                                           : max_c1sh+(x) - MAX_C1SH)
+    #define CIRC_MAX_PC1SH(x) (max_pc1sh+(x) >= 0 && max_pc1sh+(x) < MAX_PC1SH ? max_pc1sh+(x) : \
+                               max_pc1sh+(x) < 0                               ? max_pc1sh+(x) + MAX_PC1SH  \
+                                                                               : max_pc1sh+(x) - MAX_PC1SH)
+
+    #define PRINT_INFO(_avg_dur, _counts, _cpm) \
+        do { \
+            if (max_pc1sh < _avg_dur) { \
+                break; \
+            } \
+            printf("%4d: ", _avg_dur); \
+            for (i = 0; i < MAX_HE3_CHAN; i++) { \
+                printf("%5d ", _counts[i]); \
+            } \
+            printf(" - "); \
+            for (i = 0; i < MAX_HE3_CHAN; i++) { \
+                printf("%5.1f ", _cpm[i]); \
+            } \
+        } while (0)
 
     // if max_data too big then 
     //   print an error 
@@ -670,65 +694,101 @@ static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
     memcpy(data+max_data, d, max_d*sizeof(uint16_t));
     max_data += max_d;
 
-    // track number of samples provided by caller
-    samples_1_sec += max_d;
+    // determine pule threshold ...
+    // if there is less than 1000 samples of data available for this second then
+    //   return because we want 1000 or more samples to determine the pule_threshold
+    // else if pulse_threshold is not set then
+    //   determine the minimum he3 adc value for the 1000 samples, and
+    //   set pulse_threshold to that baseline value plus 8
+    // endif
+    if (max_data < 1000) {
+        return 0;
+    } else if (pulse_threshold == 0) {
+        int32_t i;
+        int32_t baseline = 1000000000;
+        for (i = 0; i < 1000; i++) {
+            if (data[i] < baseline) {
+                baseline = data[i];
+            }
+        }
+        pulse_threshold = baseline + 8;
+        INFO("pulse_threshold-2048=%d\n", pulse_threshold-2048);
+    }
 
-    // continue scanning data starting at idx, 
-    // stop scanning when idx is near the end
+    // search for pulses in the data
+    bool    in_a_pulse      = false;
+    int32_t pulse_start_idx = -1;
+    int32_t pulse_end_idx   = -1;
     while (true) {
-        bool    begining_of_pulse;
-        int32_t pulse_height;
-        int32_t chan;
-
-        // if idx is near the end then exit this loop
-        if (max_data - idx < 10) {  // XXX 10?
+        // terminate this loop when 
+        // - near the end of data and not processing a pulse OR
+        // - at the end of data
+        if ((!in_a_pulse && idx >= max_data-10) || 
+            (idx == max_data))
+        {
             break;
         }
 
-        // if data[idx] too big then print an error and continue
-        if (data[idx] >= 4096) {
-            ERROR("out of range data[%d] = %d, max_data=%d\n", idx, data[idx], max_data);
-            continue;
+        // print warning if data out of range
+        if (data[idx] > 4095) {
+            WARN("data[%d] = %u, is out of range\n", idx, data[idx]);
+            data[idx] = 2048;
         }
 
-        // check for the begining of a pulse at idx
-        // if no pulse then
-        //   advance idx by 1, and
-        //   continue
-        // else
-        //   inspect next values to determine pulse height
-        //   advance index to after the pulse
-        // endif
-        begining_of_pulse = (data[idx] >= 2500);  // XXX 2500 tbd
-        if (!begining_of_pulse) {
-            idx++;
-            continue;
-        } else {
-            pulse_height = data[idx] - 2500;
-            idx++;
+        // determine the pulse_start_idx and pulse_end_idx
+        if (data[idx] >= pulse_threshold && !in_a_pulse) {
+            in_a_pulse = true;
+            pulse_start_idx = idx;
+        } else if (data[idx] < pulse_threshold && in_a_pulse) {
+            in_a_pulse = false;
+            pulse_end_idx = idx - 1;
         }
 
-        // pulse_height can't be negative
-        if (pulse_height < 0) {
-            ERROR("pulse_height %d is negative\n", pulse_height);
-            continue;
-        }
-       
-        // determine channel from pulse_height
-        chan = pulse_height / ((4096 - 2500) / 4);
-        if (chan >= 4) {
-            WARN("chan being reduced from %d to 3\n", chan);
-            chan = 3;
+        // if a pulse has been located ...
+        if (pulse_end_idx != -1) {
+            int32_t pulse_height, pulse_channel, i;
+
+            // scan from start to end of pulse to determine pulse_height
+            pulse_height = -1;
+            for (i = pulse_start_idx; i <= pulse_end_idx; i++) {
+                if (data[i] - pulse_threshold > pulse_height) {
+                    pulse_height = data[i] - pulse_threshold;
+                }
+            }
+                
+            // determine pulse_channel from pulse_height
+            pulse_channel = pulse_height / ((4096 - pulse_threshold) / MAX_HE3_CHAN);
+            if (pulse_channel >= MAX_HE3_CHAN) {
+                WARN("chan being reduced from %d to %d\n", pulse_channel, MAX_HE3_CHAN-1);
+                pulse_channel = MAX_HE3_CHAN-1;
+            }
+
+            // keep track of pulse_counts_1_sec
+            pulse_counts_1_sec[pulse_channel]++;
+
+            // keep track of largest pule_height
+            if (pulse_height > pulse_largest_height) {
+                pulse_largest_height = pulse_height;
+                pulse_largest_idx = idx;
+            }
+
+            // plot pulses when pulse_chan >= 1
+            if (pulse_channel >= 1) {
+                printf("pulse: height=%d  channel=%d  threshold-2048=%d\n",
+                       pulse_height, pulse_channel, pulse_threshold-2048);
+                for (i = pulse_start_idx; i <= pulse_end_idx; i++) {
+                    print_plot_str(data[i], pulse_threshold);
+                }
+                printf("\n");
+            }
+
+            // done with this pulse
+            pulse_start_idx = -1;
+            pulse_end_idx = -1;
         }
 
-        // increment count for the channel
-        counts_1_sec[chan]++;
-
-        // keep track of largest pule_height
-        if (pulse_height > largest_pulse_height) {
-            largest_pulse_height = pulse_height;
-            largest_pulse_idx = idx;
-        }
+        // move to next data 
+        idx++;
     }
 
     // if time has incremented then
@@ -737,39 +797,46 @@ static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
     uint64_t time_now = time(NULL);
     if (time_now > he3_time) {    
         int32_t i, j, chan;
+        char time_str[MAX_TIME_STR];
 
-        // compute the moving average cpm
-        for (chan = 0; chan < 4; chan++) {
-            counts_10_sec[chan] = counts_10_sec[chan] + 
-                                  counts_1_sec[chan] -
-                                  counts_1_sec_history[CIRC_MAX_C1SH(-10)][chan];
+        // compute the moving average pulse counts 
+        for (chan = 0; chan < MAX_HE3_CHAN; chan++) {
+            pulse_counts_10_sec[chan] = pulse_counts_10_sec[chan] + 
+                                  pulse_counts_1_sec[chan] -
+                                  pulse_counts_1_sec_history[CIRC_MAX_PC1SH(-10)][chan];
+            pulse_counts_60_sec[chan] = pulse_counts_60_sec[chan] + 
+                                  pulse_counts_1_sec[chan] -
+                                  pulse_counts_1_sec_history[CIRC_MAX_PC1SH(-60)][chan];
+            pulse_counts_600_sec[chan] = pulse_counts_600_sec[chan] + 
+                                  pulse_counts_1_sec[chan] -
+                                  pulse_counts_1_sec_history[CIRC_MAX_PC1SH(-600)][chan];
+            pulse_counts_3600_sec[chan] = pulse_counts_3600_sec[chan] + 
+                                  pulse_counts_1_sec[chan] -
+                                  pulse_counts_1_sec_history[CIRC_MAX_PC1SH(-3600)][chan];
         }
-        memcpy(counts_1_sec_history[CIRC_MAX_C1SH(0)], counts_1_sec, sizeof(counts_1_sec));
-        max_c1sh++;
-
-        // debug print
-        INFO("samples_1_sec = %d\n", samples_1_sec);
-        INFO("counts_1_sec  = %5d %5d %5d %5d\n", 
-             counts_1_sec[0], counts_1_sec[1], counts_1_sec[2], counts_1_sec[3]);
-        INFO("counts_10_sec = %5d %5d %5d %5d\n", 
-             counts_10_sec[0], counts_10_sec[1], counts_10_sec[2], counts_10_sec[3]);
-        INFO("\n");
+        memcpy(pulse_counts_1_sec_history[CIRC_MAX_PC1SH(0)], 
+               pulse_counts_1_sec, 
+               sizeof(pulse_counts_1_sec));
+        max_pc1sh++;
 
         // acquire he3_mutex
         pthread_mutex_lock(&he3_mutex);
 
         // publish he3 cpm values
-        for (chan = 0; chan < 4; chan++) {
-            he3.cpm_1_sec[chan] = counts_1_sec[chan] * 60;
-            if (max_c1sh >= 10) {
-                he3.cpm_10_sec[chan] = counts_10_sec[chan] * 6;
-            } else {
-                he3.cpm_10_sec[chan] = ERROR_NO_VALUE;
-            }
+        for (chan = 0; chan < MAX_HE3_CHAN; chan++) {
+            he3.cpm_1_sec[chan] = pulse_counts_1_sec[chan] * (60.0 / 1);
+            he3.cpm_10_sec[chan] = (max_pc1sh >= 10 ? pulse_counts_10_sec[chan] * (60.0 / 10)
+                                                    : ERROR_NO_VALUE);
+            he3.cpm_60_sec[chan] = (max_pc1sh >= 60 ? pulse_counts_60_sec[chan] * (60.0 / 60)
+                                                    : ERROR_NO_VALUE);
+            he3.cpm_600_sec[chan] = (max_pc1sh >= 600 ? pulse_counts_600_sec[chan] * (60.0 / 600)
+                                                      : ERROR_NO_VALUE);
+            he3.cpm_3600_sec[chan] = (max_pc1sh >= 3600 ? pulse_counts_3600_sec[chan] * (60.0 / 3600)
+                                                        : ERROR_NO_VALUE);
         }
 
         // publish he3_adc_samples_mv 
-        j = largest_pulse_idx - 600;
+        j = pulse_largest_idx - MAX_ADC_SAMPLES/2;
         if (j < 0) {
             j = 0;
         } else if (j > max_data - MAX_ADC_SAMPLES) {
@@ -785,6 +852,19 @@ static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
         // release he3_mutex
         pthread_mutex_unlock(&he3_mutex);
 
+        // print info
+        printf("%s samples=%d  mccdaq_restarts=%d  pulse_threshold-2048=%d\n",
+               time2str(time_str, get_real_time_us(), false, true, true),
+               max_data,
+               mccdaq_get_restart_count(),
+               pulse_threshold-2048);
+        PRINT_INFO(1, pulse_counts_1_sec, he3.cpm_1_sec);
+        PRINT_INFO(10, pulse_counts_10_sec, he3.cpm_10_sec);
+        PRINT_INFO(60, pulse_counts_60_sec, he3.cpm_60_sec);
+        PRINT_INFO(600, pulse_counts_600_sec, he3.cpm_600_sec);
+        PRINT_INFO(3600, pulse_counts_3600_sec, he3.cpm_3600_sec);
+        printf("\n");
+
         // reset for the next second
         RESET_FOR_NEXT_SEC;
     }
@@ -792,3 +872,41 @@ static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
     // return 'continue-scanning' 
     return 0;
 }
+
+static void print_plot_str(uint16_t value, uint16_t pulse_threshold)
+{
+    char    str[106];
+    int32_t idx, i;
+
+    // value              : range 0 - 4095
+    // idx = value/40 + 1 : range  1 - 103
+    // plot_str:          :  0  1-51  52  53-103  104
+    //                    :  |        ^^           |
+
+    memset(str, ' ', sizeof(str)-1);
+    str[0]   = '|';
+    str[104] = '|';
+    str[105] = '\0';
+
+    if (value > 4095) {
+        printf("%5d: value is out of range\n", value-2048);
+        return;
+    }
+    if (pulse_threshold > 4095 || pulse_threshold == 0) {
+        printf("%5d: pulse_threshold is out of range\n", pulse_threshold);
+        return;
+    }
+
+    idx = value/40 + 1;
+    i = 52;
+    while (true) {
+        str[i] = '*';
+        if (i == idx) break;
+        i += (idx > 52 ? 1 : -1);
+    }
+    str[52] = '|';
+    str[pulse_threshold/40+1] = '>';
+
+    printf("%5d: %s\n", value-2048, str);
+}
+

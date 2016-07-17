@@ -364,10 +364,11 @@ static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
         if (mode == INFO) {
             int64_t duration_secs = time_now - pulse_time_start;
 
-            printf("time = %d samples = %d  mccdaq_restarts = %d\n",
+            printf("time=%d samples=%d  mccdaq_restarts=%d  pulse_threshold-2048=%d\n",
                    (int32_t)duration_secs,
                    max_data,
-                   mccdaq_get_restart_count());
+                   mccdaq_get_restart_count(),
+                   pulse_threshold-2048);
 
             printf("  counts = ");
             for (chan = 0; chan < MAX_CHANNEL; chan++) {

@@ -338,8 +338,8 @@ static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
             // keep track of pulse_count
             __sync_fetch_and_add(&pulse_count[pulse_channel], 1);
 
-            // if mode is PULSEMON then plot this pulse
-            if (mode == PULSEMON) {
+            // if mode is PULSEMON and pulsechan >= 1 then plot this pulse
+            if (mode == PULSEMON && pulse_channel >= 1) {
                 INFO("pulse_height = %d  pulse_channel = %d\n", pulse_height, pulse_channel);
                 for (i = pulse_start_idx; i <= pulse_end_idx; i++) {
                     print_plot_str(data[i], pulse_threshold);

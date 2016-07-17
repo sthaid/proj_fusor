@@ -219,17 +219,14 @@ static void sigint_handler(int sig)
 
 static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
 {
-    #define MAX_DATA        1000000
-    //#define PULSE_THRESHOLD 2100
-    //#define PULSE_THRESHOLD 2300   // with 10k in series, base = 2048+167
-    //#define PULSE_THRESHOLD (2048+350)   // 50 in series,  base = 2048+339
-    //#define PULSE_THRESHOLD (2048+200)   // 25 in series,  base = 2048+169, and oscilloscope
-    #define PULSE_THRESHOLD (2048+347)   // 25 in series,  base = 2048+339, and no scope
+    #define MAX_DATA                1000000
+    #define PULSE_THRESHOLD_NOT_SET 65535
 
     static uint16_t data[MAX_DATA];
     static int32_t  max_data;
     static int32_t  idx;
     static uint64_t time_last;
+    static uint16_t pulse_threshold = PULSE_THRESHOLD_NOT_SET;
     
     DEBUG("max_data=%d\n", max_data);
 
@@ -258,6 +255,28 @@ static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
     }
     memcpy(data+max_data, d, max_d*sizeof(uint16_t));
     max_data += max_d;
+
+    // determine pule threshold ...
+    //
+    // if there is less than 1000 samples of data available for this second then
+    //   return because we want 1000 or more samples to determine the pule_threshold
+    // else if pulse_threshold is not set then
+    //   determine the minimum he3 adc value for the 1000 samples, and
+    //   set pulse_threshold to that baseline value plus 8
+    // endif
+    if (max_data < 1000) {
+        return 0;  
+    } else if (pulse_threshold == PULSE_THRESHOLD_NOT_SET) {
+        int32_t i;
+        int32_t baseline = 1000000000;
+        for (i = 0; i < 1000; i++) {
+            if (data[i] < baseline) {
+                baseline = data[i];
+            }
+        }
+        pulse_threshold = baseline + 8;   //XXX  document where the 8 comes from
+        DEBUG("pulse_threshold-2048=%d\n", pulse_threshold-2048);
+    }
 
     // search for pulses in the data
     // - when pulse is found determine 
@@ -288,10 +307,10 @@ static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
         }
 
         // determine the pulse_start_idx and pulse_end_idx
-        if (data[idx] >= PULSE_THRESHOLD && !in_a_pulse) {
+        if (data[idx] >= pulse_threshold && !in_a_pulse) {
             in_a_pulse = true;
             pulse_start_idx = idx;
-        } else if (data[idx] < PULSE_THRESHOLD && in_a_pulse) {
+        } else if (data[idx] < pulse_threshold && in_a_pulse) {
             in_a_pulse = false;
             pulse_end_idx = idx - 1;
         }
@@ -304,13 +323,13 @@ static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
             // scan from start to end of pulse to determine pulse_height
             pulse_height = -1;
             for (i = pulse_start_idx; i <= pulse_end_idx; i++) {
-                if (data[i] - PULSE_THRESHOLD > pulse_height) {
-                    pulse_height = data[i] - PULSE_THRESHOLD;
+                if (data[i] - pulse_threshold > pulse_height) {
+                    pulse_height = data[i] - pulse_threshold;
                 }
             }
                 
             // determine pulse_channel from pulse_height
-            pulse_channel = pulse_height / ((4096 - PULSE_THRESHOLD) / MAX_CHANNEL);
+            pulse_channel = pulse_height / ((4096 - pulse_threshold) / MAX_CHANNEL);
             if (pulse_channel >= MAX_CHANNEL) {
                 WARN("chan being reduced from %d to %d\n", pulse_channel, MAX_CHANNEL-1);
                 pulse_channel = MAX_CHANNEL-1;
@@ -323,7 +342,7 @@ static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
             if (mode == PULSEMON) {
                 INFO("pulse_height = %d  pulse_channel = %d\n", pulse_height, pulse_channel);
                 for (i = pulse_start_idx; i <= pulse_end_idx; i++) {
-                    print_plot_str(data[i], PULSE_THRESHOLD);
+                    print_plot_str(data[i], pulse_threshold);
                 }
                 printf("\n");
             }
@@ -369,6 +388,7 @@ static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
         time_last = time_now;
         max_data = 0;
         idx = 0;
+        pulse_threshold = PULSE_THRESHOLD_NOT_SET;
     }
 
     // if sigint then set mode to IDLE

@@ -344,9 +344,9 @@ static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
             // if mode is PULSEMON then plot this pulse
             if (mode == PULSEMON) {
                 char time_str[MAX_TIME_STR];
-                printf("%s: pulse: height=%d  channel=%d  threshold=%d\n", 
+                printf("%s: pulse: height=%d  channel=%d  threshold-2048=%d\n", 
                        time2str(time_str, get_real_time_us(), false, true, true),
-                       pulse_height, pulse_channel, pulse_threshold);
+                       pulse_height, pulse_channel, pulse_threshold-2048);
                 for (i = pulse_start_idx; i <= pulse_end_idx; i++) {
                     print_plot_str(data[i], pulse_threshold);
                 }

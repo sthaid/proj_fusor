@@ -50,7 +50,8 @@ SOFTWARE.
 // defines
 //
 
-#define MAX_CHANNEL     8
+#define MAX_CHANNEL             8
+#define PULSE_THRESHOLD_NOT_SET 65535
 
 //
 // typedefs
@@ -87,6 +88,9 @@ int32_t main(int argc, char ** argv)
     int32_t          ret;
     int32_t          ms;
     pthread_t        thread;
+
+    // use line buffering
+    setlinebuf(stdout);
 
     // register signal handler for SIGINT
     bzero(&action, sizeof(action));
@@ -219,8 +223,7 @@ static void sigint_handler(int sig)
 
 static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
 {
-    #define MAX_DATA                1000000
-    #define PULSE_THRESHOLD_NOT_SET 65535
+    #define MAX_DATA 1000000
 
     static uint16_t data[MAX_DATA];
     static int32_t  max_data;
@@ -244,7 +247,7 @@ static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
                 mode = IDLE;
                 break;
             }
-            print_plot_str(d[i], -1);
+            print_plot_str(d[i], PULSE_THRESHOLD_NOT_SET);
             mode_arg--;
         }
     }
@@ -274,7 +277,7 @@ static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
                 baseline = data[i];
             }
         }
-        pulse_threshold = baseline + 8;   //XXX  document where the 8 comes from
+        pulse_threshold = baseline + 8;
         DEBUG("pulse_threshold-2048=%d\n", pulse_threshold-2048);
     }
 
@@ -338,9 +341,12 @@ static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
             // keep track of pulse_count
             __sync_fetch_and_add(&pulse_count[pulse_channel], 1);
 
-            // if mode is PULSEMON and pulsechan >= 1 then plot this pulse
-            if (mode == PULSEMON && pulse_channel >= 1) {
-                INFO("pulse_height = %d  pulse_channel = %d\n", pulse_height, pulse_channel);
+            // if mode is PULSEMON then plot this pulse
+            if (mode == PULSEMON) {
+                char time_str[MAX_TIME_STR];
+                printf("%s: pulse: height=%d  channel=%d  threshold=%d\n", 
+                       time2str(time_str, get_real_time_us(), false, true, true),
+                       pulse_height, pulse_channel, pulse_threshold);
                 for (i = pulse_start_idx; i <= pulse_end_idx; i++) {
                     print_plot_str(data[i], pulse_threshold);
                 }
@@ -407,21 +413,25 @@ static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
 
 static void print_plot_str(uint16_t value, uint16_t pulse_threshold)
 {
-    static char str[106];
-    int32_t     idx, i;
+    char    str[106];
+    int32_t idx, i;
 
     // value                : range 0 - 4095
     // idx = value/40 + 1   : range  1 - 103
     // plot_str:            :  0  1-51  52  53-103  104
     //                      :  |        ^^           |
 
-    memset(str, ' ', sizeof(str));
+    memset(str, ' ', sizeof(str)-1);
     str[0]   = '|';
     str[104] = '|';
     str[105] = '\0';
 
     if (value > 4095) {
         printf("%5d: value is out of range\n", value-2048);
+        return;
+    }
+    if (pulse_threshold > 4095 && pulse_threshold != PULSE_THRESHOLD_NOT_SET) {
+        printf("%5d: pulse_threshold is out of range\n", value-2048);
         return;
     }
 
@@ -433,7 +443,7 @@ static void print_plot_str(uint16_t value, uint16_t pulse_threshold)
         i += (idx > 52 ? 1 : -1);
     }
     str[52] = '|';
-    if (pulse_threshold != -1) {
+    if (pulse_threshold != PULSE_THRESHOLD_NOT_SET) {
         str[pulse_threshold/40+1] = '|';
     }
 

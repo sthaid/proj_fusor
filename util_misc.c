@@ -58,10 +58,10 @@ void logmsg(char *lvl, const char *func, char *fmt, ...)
         len--;
     }
 
-    // log to stderr
-    fprintf(stderr, "%s %s %s: %s\n",
-            time2str(time_str, get_real_time_us(), false, true, true),
-            lvl, func, msg);
+    // log to stdout 
+    printf("%s %s %s: %s\n",
+           time2str(time_str, get_real_time_us(), false, true, true),
+           lvl, func, msg);
 }
 
 // -----------------  TIME UTILS  -----------------------------------------

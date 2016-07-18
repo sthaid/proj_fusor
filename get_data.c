@@ -674,10 +674,11 @@ static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
             for (i = 0; i < MAX_HE3_CHAN; i++) { \
                 printf("%5d ", _counts[i]); \
             } \
-            printf(" - "); \
+            printf("\n      "); \
             for (i = 0; i < MAX_HE3_CHAN; i++) { \
                 printf("%5.1f ", _cpm[i]); \
             } \
+            printf("\n"); \
         } while (0)
 
     // if max_data too big then 
@@ -712,7 +713,7 @@ static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
             }
         }
         pulse_threshold = baseline + 8;
-        INFO("pulse_threshold-2048=%d\n", pulse_threshold-2048);
+        DEBUG("pulse_threshold-2048=%d\n", pulse_threshold-2048);
     }
 
     // search for pulses in the data
@@ -853,8 +854,9 @@ static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
         pthread_mutex_unlock(&he3_mutex);
 
         // print info
-        printf("%s samples=%d  mccdaq_restarts=%d  pulse_threshold-2048=%d\n",
+        printf("%s  duration=%d  samples=%d  mccdaq_restarts=%d  pulse_threshold-2048=%d\n",
                time2str(time_str, get_real_time_us(), false, true, true),
+               max_pc1sh,
                max_data,
                mccdaq_get_restart_count(),
                pulse_threshold-2048);

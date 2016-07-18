@@ -66,7 +66,7 @@ SOFTWARE.
 
 #define MAX_FILE_DATA_PART1   86400   // 1 day
 #define MAX_DATA_PART2_LENGTH 1000000
-#define MAX_GRAPH             4
+#define MAX_GRAPH             8
 
 #define FILE_DATA_PART2_OFFSET \
    ((sizeof(file_hdr_t) +  \
@@ -979,7 +979,7 @@ static int32_t display_handler(void)
         case 2:
             draw_graph2(file_idx);
             break;
-        case 3:
+        case 3: case 4: case 5: case 6: case 7:
             draw_graph3(file_idx);
             break;
         default:
@@ -1247,12 +1247,12 @@ static void draw_graph0(int32_t file_idx)
     char     cursor_str[100];
 
     // init x_time_span_sec
-    if (graph_x_scale_idx[0] < 0) {
-        graph_x_scale_idx[0] = 0;
-    } else if (graph_x_scale_idx[0] >= MAX_X_TIME_SPAN_SEC_TBL) {
-        graph_x_scale_idx[0] = MAX_X_TIME_SPAN_SEC_TBL - 1;
+    if (graph_x_scale_idx[graph_select] < 0) {
+        graph_x_scale_idx[graph_select] = 0;
+    } else if (graph_x_scale_idx[graph_select] >= MAX_X_TIME_SPAN_SEC_TBL) {
+        graph_x_scale_idx[graph_select] = MAX_X_TIME_SPAN_SEC_TBL - 1;
     }
-    x_time_span_sec = x_time_span_sec_tbl[graph_x_scale_idx[0]];
+    x_time_span_sec = x_time_span_sec_tbl[graph_x_scale_idx[graph_select]];
 
     // init x_info_str and y_info_str
     sprintf(x_info_str, "X: %d SEC (-/+)", x_time_span_sec);
@@ -1316,12 +1316,12 @@ static void draw_graph1(int32_t file_idx)
     char                  y_info_str[100];
 
     // init y_max_mv
-    if (graph_y_scale_idx[1] < 0) {
-        graph_y_scale_idx[1] = 0;
-    } else if (graph_y_scale_idx[1] >= MAX_Y_MAX_MV_TBL) {
-        graph_y_scale_idx[1] = MAX_Y_MAX_MV_TBL - 1;
+    if (graph_y_scale_idx[graph_select] < 0) {
+        graph_y_scale_idx[graph_select] = 0;
+    } else if (graph_y_scale_idx[graph_select] >= MAX_Y_MAX_MV_TBL) {
+        graph_y_scale_idx[graph_select] = MAX_Y_MAX_MV_TBL - 1;
     }
-    y_max_mv = y_max_mv_tbl[graph_y_scale_idx[1]];
+    y_max_mv = y_max_mv_tbl[graph_y_scale_idx[graph_select]];
 
     // init x_info str and y_info_str
     sprintf(x_info_str, "X: 1 SEC");
@@ -1371,12 +1371,12 @@ static void draw_graph2(int32_t file_idx)
     char                  y_info_str[100];
 
     // init y_max_mv
-    if (graph_y_scale_idx[2] < 0) {
-        graph_y_scale_idx[2] = 0;
-    } else if (graph_y_scale_idx[2] >= MAX_Y_MAX_MV_TBL) {
-        graph_y_scale_idx[2] = MAX_Y_MAX_MV_TBL - 1;
+    if (graph_y_scale_idx[graph_select] < 0) {
+        graph_y_scale_idx[graph_select] = 0;
+    } else if (graph_y_scale_idx[graph_select] >= MAX_Y_MAX_MV_TBL) {
+        graph_y_scale_idx[graph_select] = MAX_Y_MAX_MV_TBL - 1;
     }
-    y_max_mv = y_max_mv_tbl[graph_y_scale_idx[2]];
+    y_max_mv = y_max_mv_tbl[graph_y_scale_idx[graph_select]];
 
     // init x_info str and y_info_str
     sprintf(x_info_str, "X: 2.4 MS");
@@ -1412,7 +1412,7 @@ static void draw_graph3(int32_t file_idx)
         (sizeof(y_max_cpm_tbl) / sizeof(y_max_cpm_tbl[0]))
 
     float    cpm[MAX_HE3_CHAN][MAX_FILE_DATA_PART1];
-    int32_t  file_idx_start, file_idx_end, max_values, i;
+    int32_t  file_idx_start, file_idx_end, max_values, i, avg_sec;
     int32_t  x_time_span_sec;
     int32_t  x_time_span_sec_tbl[] = {60, 600, 3600, 7200, 21600, 43200, 86400};
     float    y_max_cpm;
@@ -1424,24 +1424,32 @@ static void draw_graph3(int32_t file_idx)
     char     title_str[100];
     char     cursor_str[100];
 
-    // XXX
-    int32_t avg_sec = 3600;
+    // init avg_sec;
+    avg_sec = (graph_select == 3 ? 1    : 
+               graph_select == 4 ? 10   : 
+               graph_select == 5 ? 60   :
+               graph_select == 6 ? 600  : 
+               graph_select == 7 ? 3600   
+                                 : -1);
+    if (avg_sec == -1) {
+        FATAL("invalid graph_select %d\n", graph_select);
+    }
 
     // init x_time_span_sec
-    if (graph_x_scale_idx[3] < 0) {
-        graph_x_scale_idx[3] = 0;
-    } else if (graph_x_scale_idx[3] >= MAX_X_TIME_SPAN_SEC_TBL) {
-        graph_x_scale_idx[3] = MAX_X_TIME_SPAN_SEC_TBL - 1;
+    if (graph_x_scale_idx[graph_select] < 0) {
+        graph_x_scale_idx[graph_select] = 0;
+    } else if (graph_x_scale_idx[graph_select] >= MAX_X_TIME_SPAN_SEC_TBL) {
+        graph_x_scale_idx[graph_select] = MAX_X_TIME_SPAN_SEC_TBL - 1;
     }
-    x_time_span_sec = x_time_span_sec_tbl[graph_x_scale_idx[3]];
+    x_time_span_sec = x_time_span_sec_tbl[graph_x_scale_idx[graph_select]];
 
     // init y_max_cpm
-    if (graph_y_scale_idx[3] < 0) {
-        graph_y_scale_idx[3] = 0;
-    } else if (graph_y_scale_idx[3] >= MAX_Y_MAX_CPM_TBL) {
-        graph_y_scale_idx[3] = MAX_Y_MAX_CPM_TBL - 1;
+    if (graph_y_scale_idx[graph_select] < 0) {
+        graph_y_scale_idx[graph_select] = 0;
+    } else if (graph_y_scale_idx[graph_select] >= MAX_Y_MAX_CPM_TBL) {
+        graph_y_scale_idx[graph_select] = MAX_Y_MAX_CPM_TBL - 1;
     }
-    y_max_cpm = y_max_cpm_tbl[graph_y_scale_idx[3]];
+    y_max_cpm = y_max_cpm_tbl[graph_y_scale_idx[graph_select]];
 
     // init x_info_str, y_info_str, and title_str
     sprintf(x_info_str, "X: %d SEC (-/+)", x_time_span_sec);

@@ -20,9 +20,6 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-// XXX - TODO
-// - the extra packet ?
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>

@@ -22,7 +22,6 @@ SOFTWARE.
 
 // XXX - TODO
 // - the extra packet ?
-// - pass cal tbl to callback ?
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -289,7 +288,7 @@ static void * mccdaq_producer_thread(void * cx)
         }
 
 #if 0
-        // XXX fake data for unit test
+        // fake data for unit test
         if (transferred_bytes >= 2) {
             uint16_t * d16 = data;
             int32_t    len = transferred_bytes/2;

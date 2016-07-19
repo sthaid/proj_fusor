@@ -128,8 +128,9 @@ static int32_t                  graph_y_origin;
 static int32_t                  graph_y_range;
 static rect_t                   graph_pane_global;
 static int32_t                  graph_select;
-static int32_t                  graph_x_scale_idx[MAX_GRAPH];
-static int32_t                  graph_y_scale_idx[MAX_GRAPH];
+static int32_t                  graph_x_time_span_sec;
+static int32_t                  graph_y_max_mv;
+static float                    graph_y_max_cpm;
 
 static int32_t                  test_file_secs;
 
@@ -151,10 +152,11 @@ static int32_t display_handler();
 static void draw_camera_image(rect_t * cam_pane, int32_t file_idx);
 static void draw_data_values(rect_t * data_pane, int32_t file_idx);
 static void draw_graph_init(rect_t * graph_pane);
+static void draw_graph_scale_select(char key);
 static void draw_graph0(int32_t file_idx);
 static void draw_graph1(int32_t file_idx);
 static void draw_graph2(int32_t file_idx);
-static void draw_graph3(int32_t file_idx);
+static void draw_graph34567(int32_t file_idx);
 static void draw_graph_common(char * title_str, char * x_info_str, char * y_info_str, float cursor_pos, char * cursor_str, int32_t max_graph, ...);
 static int32_t generate_test_file(void);
 static char * val2str(float val);
@@ -476,7 +478,7 @@ static int32_t initialize(int32_t argc, char ** argv)
 
 static void usage(void)
 {
-    // xxx tbd later
+    // XXX tbd later
 }
 
 // -----------------  GET LIVE DATA THREAD  ------------------------------------------
@@ -855,6 +857,7 @@ static int32_t display_handler(void)
     int32_t       file_idx;
     int32_t       event_processed_count;
     int32_t       file_max_last;
+    int32_t       tmp;
     bool          lost_connection_msg_is_displayed;
     bool          file_error_msg_is_displayed;
     bool          time_error_msg_is_displayed;
@@ -980,7 +983,7 @@ static int32_t display_handler(void)
             draw_graph2(file_idx);
             break;
         case 3: case 4: case 5: case 6: case 7:
-            draw_graph3(file_idx);
+            draw_graph34567(file_idx);
             break;
         default:
             FATAL("graph_select %d out of range\n", graph_select);
@@ -990,6 +993,7 @@ static int32_t display_handler(void)
         sdl_event_register(SDL_EVENT_KEY_ESC, SDL_EVENT_TYPE_KEY, NULL);             // quit (esc)
         sdl_event_register('?', SDL_EVENT_TYPE_KEY, NULL);                           // help
         sdl_event_register('s', SDL_EVENT_TYPE_KEY, NULL);                           // graph select
+        sdl_event_register('S', SDL_EVENT_TYPE_KEY, NULL);                           // graph select
         sdl_event_register(SDL_EVENT_KEY_LEFT_ARROW, SDL_EVENT_TYPE_KEY, NULL);      // graph cursor time
         sdl_event_register(SDL_EVENT_KEY_RIGHT_ARROW, SDL_EVENT_TYPE_KEY, NULL);
         sdl_event_register(SDL_EVENT_KEY_CTRL_LEFT_ARROW, SDL_EVENT_TYPE_KEY, NULL);
@@ -1030,7 +1034,12 @@ static int32_t display_handler(void)
                 sdl_display_text(about);
                 break;
             case 's':
-                graph_select = (graph_select + 1) % MAX_GRAPH;  
+                tmp = graph_select + 1;
+                graph_select = (tmp <= MAX_GRAPH-1 ? tmp : 0);
+                break;
+            case 'S':
+                tmp = graph_select - 1;
+                graph_select = (tmp >= 0 ? tmp : MAX_GRAPH-1);
                 break;
             case SDL_EVENT_KEY_LEFT_ARROW:
             case SDL_EVENT_KEY_CTRL_LEFT_ARROW:
@@ -1069,17 +1078,9 @@ static int32_t display_handler(void)
                 file_idx_global = file_hdr->max - 1;
                 mode = (initially_live_mode ? LIVE : PLAYBACK);
                 break;
-            case '-': 
-                graph_x_scale_idx[graph_select]--;
-                break;
-            case '+': case '=':
-                graph_x_scale_idx[graph_select]++;
-                break;
-            case '1': 
-                graph_y_scale_idx[graph_select]--;
-                break;
-            case '2':
-                graph_y_scale_idx[graph_select]++;
+            case '-': case '+': case '=':
+            case '1': case '2':
+                draw_graph_scale_select(event->event);
                 break;
             default:
                 event_processed_count--;
@@ -1227,49 +1228,121 @@ static void draw_graph_init(rect_t * graph_pane)
     graph_x_range  = 1200;
     graph_y_origin = graph_pane->h - FONT0_HEIGHT - 4;
     graph_y_range  = graph_pane->h - FONT0_HEIGHT - 4 - FONT0_HEIGHT;
+
+    graph_x_time_span_sec =  1800;             
+    graph_y_max_mv        =  10000;
+    graph_y_max_cpm       =  1000;
+}
+
+static void draw_graph_scale_select(char key)
+{
+    static int32_t  x_time_span_sec_tbl[] = {60, 600, 1800, 3600, 7200, 21600, 43200, 86400};
+    static int32_t  y_max_mv_tbl[] = {100, 1000, 2000, 5000, 10000};
+    static float    y_max_cpm_tbl[] = {0.1, 1.0, 10.0, 100.0, 1000.0, 10000.0, 100000.0};
+
+    #define REDUCE(val, tbl) \
+        do { \
+            int32_t i; \
+            for (i = 1; i < sizeof(tbl)/sizeof(tbl[0]); i++) { \
+                if (val == tbl[i]) { \
+                    val = tbl[i-1]; \
+                    break; \
+                } \
+            } \
+        } while (0)
+
+    #define INCREASE(val, tbl) \
+        do { \
+            int32_t i; \
+            for (i = sizeof(tbl)/sizeof(tbl[0])-2; i >= 0; i--) { \
+                if (val == tbl[i]) { \
+                    val = tbl[i+1]; \
+                    break; \
+                } \
+            } \
+        } while (0)
+
+    switch (key) {
+    case '-': case '+': case '=':
+        // maintain graph_x_time_span_sec for graphs 0,3,4,5,6,7
+        if (graph_select == 0  || 
+            graph_select == 3  || 
+            graph_select == 4  || 
+            graph_select == 5  || 
+            graph_select == 6  || 
+            graph_select == 7)
+        {
+            if (key == '-') {
+                REDUCE(graph_x_time_span_sec, x_time_span_sec_tbl);
+            } else {
+                INCREASE(graph_x_time_span_sec, x_time_span_sec_tbl);
+            }
+            break;
+        }
+        break;
+    case '1': case '2':
+        // maintain graph_y_max_mv for graphs 1,2
+        if (graph_select == 1 ||
+            graph_select == 2)
+        {
+            if (key == '1') {
+                REDUCE(graph_y_max_mv, y_max_mv_tbl);
+            } else {
+                INCREASE(graph_y_max_mv, y_max_mv_tbl);
+            }
+            break;
+        }
+
+        // maintain graph_y_max_cpm for graphs 3,4,5,6,7
+        if (graph_select == 3  || 
+            graph_select == 4  || 
+            graph_select == 5  || 
+            graph_select == 6  || 
+            graph_select == 7)
+        {
+            if (key == '1') {
+                REDUCE(graph_y_max_cpm, y_max_cpm_tbl);
+            } else {
+                INCREASE(graph_y_max_cpm, y_max_cpm_tbl);
+            }
+            break;
+        }
+        break;
+    default:
+        FATAL("invalid key 0x%x\n", key);
+        break;
+    }
 }
 
 static void draw_graph0(int32_t file_idx)
 {
-    #define MAX_X_TIME_SPAN_SEC_TBL \
-        (sizeof(x_time_span_sec_tbl) / sizeof(x_time_span_sec_tbl[0]))
-
     float    voltage_mean_kv_values[MAX_FILE_DATA_PART1];
     float    current_ma_values[MAX_FILE_DATA_PART1];
     float    pressure_d2_mtorr_values[MAX_FILE_DATA_PART1];
     float    neutron_cpm_values[MAX_FILE_DATA_PART1];
-    int32_t  file_idx_start, file_idx_end, x_time_span_sec, max_values, i;
-    int32_t  x_time_span_sec_tbl[] = {60, 600, 3600, 7200, 21600, 43200, 86400};
+    int32_t  file_idx_start, file_idx_end, max_values, i;
     uint64_t cursor_time_us;
     float    cursor_pos;
     char     x_info_str[100];
     char     y_info_str[100];
     char     cursor_str[100];
 
-    // init x_time_span_sec
-    if (graph_x_scale_idx[graph_select] < 0) {
-        graph_x_scale_idx[graph_select] = 0;
-    } else if (graph_x_scale_idx[graph_select] >= MAX_X_TIME_SPAN_SEC_TBL) {
-        graph_x_scale_idx[graph_select] = MAX_X_TIME_SPAN_SEC_TBL - 1;
-    }
-    x_time_span_sec = x_time_span_sec_tbl[graph_x_scale_idx[graph_select]];
-
     // init x_info_str and y_info_str
-    sprintf(x_info_str, "X: %d SEC (-/+)", x_time_span_sec);
+    sprintf(x_info_str, "X: %d SEC (-/+)", graph_x_time_span_sec);
     sprintf(y_info_str, "%s", "");
 
     // init file_idx_start & file_idx_end
     if (mode == LIVE) {
         file_idx_end   = file_idx;
-        file_idx_start = file_idx_end - (x_time_span_sec - 1);
+        file_idx_start = file_idx_end - (graph_x_time_span_sec - 1);
     } else {
-        file_idx_start = file_idx - x_time_span_sec / 2;
-        file_idx_end   = file_idx_start + x_time_span_sec - 1;
+        file_idx_start = file_idx - graph_x_time_span_sec / 2;
+        file_idx_end   = file_idx_start + graph_x_time_span_sec - 1;
     }
 
     // init cursor position and string
     cursor_time_us = file_data_part1[file_idx].time * 1000000;
-    cursor_pos = (float)(file_idx - file_idx_start) / (x_time_span_sec - 1);
+    cursor_pos = (float)(file_idx - file_idx_start) / (graph_x_time_span_sec - 1);
     time2str(cursor_str, cursor_time_us, false, false, false);
 
     // init arrays of the values to graph
@@ -1302,12 +1375,8 @@ static void draw_graph0(int32_t file_idx)
 
 static void draw_graph1(int32_t file_idx)
 {
-    #define MAX_Y_MAX_MV_TBL (sizeof(y_max_mv_tbl)/sizeof(y_max_mv_tbl[0]))
-
     struct data_part1_s * dp1;
     struct data_part2_s * dp2;
-    int32_t               y_max_mv;
-    int32_t               y_max_mv_tbl[] = {100, 1000, 2000, 5000, 10000};
     float                 voltage_adc_samples_mv_values[MAX_ADC_SAMPLES];
     float                 current_adc_samples_mv_values[MAX_ADC_SAMPLES];
     float                 pressure_adc_samples_mv_values[MAX_ADC_SAMPLES];
@@ -1315,17 +1384,9 @@ static void draw_graph1(int32_t file_idx)
     char                  x_info_str[100];
     char                  y_info_str[100];
 
-    // init y_max_mv
-    if (graph_y_scale_idx[graph_select] < 0) {
-        graph_y_scale_idx[graph_select] = 0;
-    } else if (graph_y_scale_idx[graph_select] >= MAX_Y_MAX_MV_TBL) {
-        graph_y_scale_idx[graph_select] = MAX_Y_MAX_MV_TBL - 1;
-    }
-    y_max_mv = y_max_mv_tbl[graph_y_scale_idx[graph_select]];
-
     // init x_info str and y_info_str
     sprintf(x_info_str, "X: 1 SEC");
-    sprintf(y_info_str, "Y: %d MV (1/2)", y_max_mv);
+    sprintf(y_info_str, "Y: %d MV (1/2)", graph_y_max_mv);
 
     // init pointer to dp1, and read dp2
     dp1 = &file_data_part1[file_idx];
@@ -1352,35 +1413,23 @@ static void draw_graph1(int32_t file_idx)
     // draw the graph
     draw_graph_common(
         "ADC SAMPLES", x_info_str, y_info_str, -1, NULL, 3,
-        "VOLTAGE ", RED,   (double)y_max_mv, MAX_ADC_SAMPLES, voltage_adc_samples_mv_values,
-        "CURRENT ", GREEN, (double)y_max_mv, MAX_ADC_SAMPLES, current_adc_samples_mv_values,
-        "PRESSURE", BLUE,  (double)y_max_mv, MAX_ADC_SAMPLES, pressure_adc_samples_mv_values);
+        "VOLTAGE ", RED,   (double)graph_y_max_mv, MAX_ADC_SAMPLES, voltage_adc_samples_mv_values,
+        "CURRENT ", GREEN, (double)graph_y_max_mv, MAX_ADC_SAMPLES, current_adc_samples_mv_values,
+        "PRESSURE", BLUE,  (double)graph_y_max_mv, MAX_ADC_SAMPLES, pressure_adc_samples_mv_values);
 }
 
 static void draw_graph2(int32_t file_idx)
 {
-    #define MAX_Y_MAX_MV_TBL (sizeof(y_max_mv_tbl)/sizeof(y_max_mv_tbl[0]))
-
     struct data_part1_s * dp1;
     struct data_part2_s * dp2;
-    int32_t               y_max_mv;
-    int32_t               y_max_mv_tbl[] = {100, 1000, 2000, 5000, 10000};
     float                 he3_adc_samples_mv_values[MAX_ADC_SAMPLES];
     int32_t               i;
     char                  x_info_str[100];
     char                  y_info_str[100];
 
-    // init y_max_mv
-    if (graph_y_scale_idx[graph_select] < 0) {
-        graph_y_scale_idx[graph_select] = 0;
-    } else if (graph_y_scale_idx[graph_select] >= MAX_Y_MAX_MV_TBL) {
-        graph_y_scale_idx[graph_select] = MAX_Y_MAX_MV_TBL - 1;
-    }
-    y_max_mv = y_max_mv_tbl[graph_y_scale_idx[graph_select]];
-
     // init x_info str and y_info_str
     sprintf(x_info_str, "X: 2.4 MS");
-    sprintf(y_info_str, "Y: %d MV (1/2)", y_max_mv);
+    sprintf(y_info_str, "Y: %d MV (1/2)", graph_y_max_mv);
 
     // init pointer to dp1, and read dp2
     dp1 = &file_data_part1[file_idx];
@@ -1401,22 +1450,13 @@ static void draw_graph2(int32_t file_idx)
     // draw the graph
     draw_graph_common(
         "ADC SAMPLES", x_info_str, y_info_str, -1, NULL, 1,
-        "HE3 ", PURPLE, (double)y_max_mv, MAX_ADC_SAMPLES, he3_adc_samples_mv_values);
+        "HE3 ", PURPLE, (double)graph_y_max_mv, MAX_ADC_SAMPLES, he3_adc_samples_mv_values);
 }
 
-static void draw_graph3(int32_t file_idx)
+static void draw_graph34567(int32_t file_idx)
 {
-    #define MAX_X_TIME_SPAN_SEC_TBL \
-        (sizeof(x_time_span_sec_tbl) / sizeof(x_time_span_sec_tbl[0]))
-    #define MAX_Y_MAX_CPM_TBL \
-        (sizeof(y_max_cpm_tbl) / sizeof(y_max_cpm_tbl[0]))
-
     float    cpm[MAX_HE3_CHAN][MAX_FILE_DATA_PART1];
     int32_t  file_idx_start, file_idx_end, max_values, i, avg_sec;
-    int32_t  x_time_span_sec;
-    int32_t  x_time_span_sec_tbl[] = {60, 600, 3600, 7200, 21600, 43200, 86400};
-    float    y_max_cpm;
-    float    y_max_cpm_tbl[] = {0.1, 1.0, 10.0, 100.0, 1000.0};
     uint64_t cursor_time_us;
     float    cursor_pos;
     char     x_info_str[100];
@@ -1435,39 +1475,23 @@ static void draw_graph3(int32_t file_idx)
         FATAL("invalid graph_select %d\n", graph_select);
     }
 
-    // init x_time_span_sec
-    if (graph_x_scale_idx[graph_select] < 0) {
-        graph_x_scale_idx[graph_select] = 0;
-    } else if (graph_x_scale_idx[graph_select] >= MAX_X_TIME_SPAN_SEC_TBL) {
-        graph_x_scale_idx[graph_select] = MAX_X_TIME_SPAN_SEC_TBL - 1;
-    }
-    x_time_span_sec = x_time_span_sec_tbl[graph_x_scale_idx[graph_select]];
-
-    // init y_max_cpm
-    if (graph_y_scale_idx[graph_select] < 0) {
-        graph_y_scale_idx[graph_select] = 0;
-    } else if (graph_y_scale_idx[graph_select] >= MAX_Y_MAX_CPM_TBL) {
-        graph_y_scale_idx[graph_select] = MAX_Y_MAX_CPM_TBL - 1;
-    }
-    y_max_cpm = y_max_cpm_tbl[graph_y_scale_idx[graph_select]];
-
     // init x_info_str, y_info_str, and title_str
-    sprintf(x_info_str, "X: %d SEC (-/+)", x_time_span_sec);
-    sprintf(y_info_str, "Y: %0.1f CPM (1/2)", y_max_cpm);
+    sprintf(x_info_str, "X: %d SEC (-/+)", graph_x_time_span_sec);
+    sprintf(y_info_str, "Y: %0.1f CPM (1/2)", graph_y_max_cpm);
     sprintf(title_str, "CPM %d SEC AVG", avg_sec);
 
     // init file_idx_start & file_idx_end
     if (mode == LIVE) {
         file_idx_end   = file_idx;
-        file_idx_start = file_idx_end - (x_time_span_sec - 1);
+        file_idx_start = file_idx_end - (graph_x_time_span_sec - 1);
     } else {
-        file_idx_start = file_idx - x_time_span_sec / 2;
-        file_idx_end   = file_idx_start + x_time_span_sec - 1;
+        file_idx_start = file_idx - graph_x_time_span_sec / 2;
+        file_idx_end   = file_idx_start + graph_x_time_span_sec - 1;
     }
 
     // init cursor position and string
     cursor_time_us = file_data_part1[file_idx].time * 1000000;
-    cursor_pos = (float)(file_idx - file_idx_start) / (x_time_span_sec - 1);
+    cursor_pos = (float)(file_idx - file_idx_start) / (graph_x_time_span_sec - 1);
     time2str(cursor_str, cursor_time_us, false, false, false);
 
     // init arrays of the values to graph
@@ -1508,14 +1532,14 @@ static void draw_graph3(int32_t file_idx)
     i = file_idx - file_idx_start;
     draw_graph_common(
         title_str, x_info_str, y_info_str, cursor_pos, cursor_str, 8,
-        val2str2(cpm[0][i], "CPM"), PURPLE,     y_max_cpm,    max_values, cpm[0],
-        val2str2(cpm[1][i], "CPM"), BLUE,       y_max_cpm,    max_values, cpm[1],
-        val2str2(cpm[2][i], "CPM"), LIGHT_BLUE, y_max_cpm,    max_values, cpm[2],
-        val2str2(cpm[3][i], "CPM"), GREEN,      y_max_cpm,    max_values, cpm[3],
-        val2str2(cpm[4][i], "CPM"), YELLOW,     y_max_cpm,    max_values, cpm[4],
-        val2str2(cpm[5][i], "CPM"), ORANGE,     y_max_cpm,    max_values, cpm[5],
-        val2str2(cpm[6][i], "CPM"), PINK,       y_max_cpm,    max_values, cpm[6],
-        val2str2(cpm[7][i], "CPM"), RED,        y_max_cpm,    max_values, cpm[7]);
+        val2str2(cpm[0][i], "CPM"), PURPLE,     graph_y_max_cpm,    max_values, cpm[0],
+        val2str2(cpm[1][i], "CPM"), BLUE,       graph_y_max_cpm,    max_values, cpm[1],
+        val2str2(cpm[2][i], "CPM"), LIGHT_BLUE, graph_y_max_cpm,    max_values, cpm[2],
+        val2str2(cpm[3][i], "CPM"), GREEN,      graph_y_max_cpm,    max_values, cpm[3],
+        val2str2(cpm[4][i], "CPM"), YELLOW,     graph_y_max_cpm,    max_values, cpm[4],
+        val2str2(cpm[5][i], "CPM"), ORANGE,     graph_y_max_cpm,    max_values, cpm[5],
+        val2str2(cpm[6][i], "CPM"), PINK,       graph_y_max_cpm,    max_values, cpm[6],
+        val2str2(cpm[7][i], "CPM"), RED,        graph_y_max_cpm,    max_values, cpm[7]);
 }
 
 static void draw_graph_common(char * title_str, char * x_info_str, char * y_info_str, float cursor_pos, char * cursor_str, int32_t max_graph, ...)
@@ -1693,7 +1717,7 @@ static void draw_graph_common(char * title_str, char * x_info_str, char * y_info
     }
 
     // draw graph select control
-    sdl_render_text(&graph_pane_global, 0, -3, 0, "(s)", BLACK, WHITE);
+    sdl_render_text(&graph_pane_global, 0, -5, 0, "(s/S)", BLACK, WHITE);
 }
 
 // -----------------  GENERATE TEST FILE----------------------------------------------

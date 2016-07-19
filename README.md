@@ -20,15 +20,20 @@ http://en.wikipedia.org/wiki/Fusor
 * Collects image data from a Webcam, intended for viewing the hot plasma at the center of the vacuum chamber.
 
 * Collects analog data for:
-  * High Voltage Power Supply RMS voltage
-  * High Voltage Power Supply Max voltage
-  * High Voltage Power Supply Min voltage
-  * High Voltage Power Supply current
+  * High Voltage Power Supply Voltage
+  * High Voltage Power Supply Current
   * Gas Pressure
+  * Neutron Counts Per Minute
 
-* Analog values are displayed numerically and graphed.
+* Display data includes:
+  * Image
+  * Analog Values
+  * Various Graphs
 
-* Image and Analog Vales are recorded to a file.
+* Data is recorded to a binary file so it can be viewed again later.
 
 * Print Screen
 
+# ADDITIONAL INFO
+
+Refer to NOTES files

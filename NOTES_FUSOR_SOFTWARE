@@ -1,0 +1,110 @@
+===============================================
+TITLE: INTRODUCTION
+===============================================
+
+This software is comprised of 2 programs:
+- get_data:  reads analog data and transmits the data to the display program via internet
+- display:   received the data values from the get_data program, 
+             reads image from webcam,
+             displays the webcam image, analog values, and graph of analog values
+             records the data to file so it can be displayed later
+
+These 2 programs could be run on the same computer, using the loopback network interface;
+however it is best to run them on seperate computers for the following reasons:
+- ADC Ground Loops - When the Raspberry Pi, that has the ADC converters attached, is powered
+  by an AC supply then an AC ripple is seen on the ADC data. To avoid this I power this
+  Raspberry PI by a rechargeable battery, and don't connect a display.
+- The High Speed ADC converter being used to analyze the pulses from the HE3 Proportional
+  Counter does not work well when the Webcam is attached to the same Raspberry PI.
+
+Hardware Diagram of my system ...
+
+        voltage
+                 \ -------
+        current -- |ADC-1|           
+                 / ------- \       ----------                -----------  monitor
+        pressure            --usb--|  RPI   |- - - wifi - - -| RPI     |/
+                            --usb--|  Data  |               /| Display |\
+                   ------- /       ----------         --usb- -----------  -- usb-- keyboard & mouse
+  scaler --- R ----|ADC-2|             |              |           |
+                   -------             |           webcam         |
+                                     Battery                    AC Pwr  
+                                     Power                      Adapter
+
+    RPI-Data and RPI-Display:  Raspberry PI 3. The get_data program is run on RPI-Data; and
+        the display program is run on RPI-Display.
+
+    ADC-1: Dataq Instruments DI-149. Specs: 10 kHz max sample rate, differential inputs.
+
+    ADC-2: Measurement Computing USB-204.  Specs 500 kHz max sample rate. SE Analog inputs.
+        This needs to be high sample rate because the pulses from the scaler are only
+        about 2 us wide.
+
+    voltage, current:  sensor outputs from HV power supply 
+        (** NOT THE ACTUAL HIGH VOLTAGE FROM THE SUPPLY **)
+
+    pressure:  analog output voltage from Kurt J Lesker 275i Pirani Gauge
+
+    battery:  USB Battery Pack for Raspberry Pi - 10000mAh - 2 x 5V outputs
+        https://www.adafruit.com/product/1566
+
+    scaler:  Ludlum 2929 Dual channel scaler.  This scaler has an Amp Out BNC connector.
+
+    R:  Connecting the scaler to ADC-2 presents a problem because the scaler (Ludlum 2929) Amp Out 
+        connection provides voltages that can be as high is 22 volts, and the pulse width is 
+        about 2 us, which is the same as the ADC-2 sample rate. So, the scaler amp out pulses
+        need to be shorter and wider. After trying a few approaches that yielded unexpected 
+        results I found that a 25K ohn series resisitor provides the desired result.
+
+The software is available from https://github.com/sthaid/proj_fusor.git. 
+Source code files are:
+- display.c          - the display prgram
+- get_data.c         - the get_data progam
+Utilities
+- util_cam.c         - acquire streaming jpeg from webcam
+- util_jpeg_decode.c - convert jpeg to yuy2 pixel format
+- util_dataq.c       - interface to the Dataq Instruments DI-149 
+- util_mccdaq.c      - interface to the Measurement Computing USB-204
+- util_misc.c        - logging, time, etc
+- util_sdl.c         - simplified interface to Simple Direct Media Layer
+- util_sdl_predefined_displays.c
+
+The get_data program acquires data from the 2 ADC devices, analyzes the data and
+fromats a data_t (see common.h). Once the display program establishes a connection
+to the get_data program, then the data_t is sent to the display program once per
+second. Note that the data_t has placeholders for the webcam jpeg buff, but the
+jpeg buff is filled in by the display program when it receives the data_t.
+
+XXXXXXXXXXXXX
+
+
+
+
+
+
+
+
+
+
+===============================================
+TITLE: BUILD THE SOFTWARE
+===============================================
+
+First install and configure the Raspberry Pi computers.
+
+To build ...
+  git clone https://github.com/sthaid/proj_fusor.git
+  cd proj_fusor
+  make
+
+To automatically start get_data, edit /etc/rc.local and add the
+following:
+  # Start get_data
+  if [ -x /home/<user_id>/proj_fusor/get_data ]
+  then
+    su <user_id> -c "cd /home/<user_id>/proj_fusor; ./get_data </dev/null &>>get_data.log &"
+  fi
+
+===============================================
+TITLE: RUNNING THE SOFTWARE
+===============================================

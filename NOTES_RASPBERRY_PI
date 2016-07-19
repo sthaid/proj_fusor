@@ -1,16 +1,3 @@
-XXX update doc
-
-- sudo vi /etc/rc.local, and add the following so that the get_data
-  will automatically start when the Raspberry Pi is rebooted
-    # Start get_data
-    if [ -x /home/haid/proj_fusor/get_data ]
-    then
-      su haid -c "cd /home/haid/proj_fusor; ./get_data </dev/null &>>get_data.log &"
-    fi
-
-XXX also describe how to build ge_data
-
-
 ================================
 TITLE: INSTALL RASPBERRY PI 3
 ================================
@@ -76,7 +63,7 @@ Enable core dumps for suid processes
 Install support software for the Measurement Computing USB 204 ADC
 - The procedure outlined below is from http://www.mccdaq.com/TechTips/TechTip-9.aspx
 - Procedure ...
-    # make a director
+    # make a directory
     mkdir mccdaq
     cd mccdaq/
   

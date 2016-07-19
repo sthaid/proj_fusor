@@ -84,6 +84,7 @@ static enum state             g_state;
 static bool                   g_producer_thread_running;
 static bool                   g_consumer_thread_running;
 static int32_t                g_restart_count;
+static int32_t                g_usb_max_packet_size;
 
 //
 // protoytpes
@@ -98,7 +99,6 @@ static void * mccdaq_consumer_thread(void * cx);
 int32_t mccdaq_init(void)
 {
     int32_t   ret;
-    int32_t   usb_max_packet_size;
 
     // init usb library
     ret = libusb_init(NULL);
@@ -114,10 +114,10 @@ int32_t mccdaq_init(void)
     }
 
     // print the usb packet size, should be 64 
-    usb_max_packet_size = usb_get_max_packet_size(g_udev,0);
-    INFO("usb_max_packet_size = %d\n", usb_max_packet_size);
-    if (usb_max_packet_size != 64) {
-        FATAL("usb_max_packet_size = %d\n", usb_max_packet_size);
+    g_usb_max_packet_size = usb_get_max_packet_size(g_udev,0);
+    INFO("usb_max_packet_size = %d\n", g_usb_max_packet_size);
+    if (g_usb_max_packet_size != 64) {
+        FATAL("usb_max_packet_size = %d\n", g_usb_max_packet_size);
     }
 
     // get the calibration date, and print
@@ -256,6 +256,12 @@ static void * mccdaq_producer_thread(void * cx)
     // start the analog input scan
     usbAInScanStart_USB20X(g_udev, 0, FREQUENCY, 1<<CHANNEL, OPTIONS, 0, 0);
 
+    // note that the code in the following loop is copied from the
+    // usbAInScanRead_USB20X routine in mccdaq/mcc-libusb/usb-20X.c;
+    // this is done because the usbAInScanRead_USB20X routine does not
+    // return error status; also the usbAInScanRead_USB20X routine does
+    // not return the actual number of scans transferred
+
     // loop, performing usb buld transfers
     while (true) {
         // if state is STOPPING then
@@ -287,18 +293,18 @@ static void * mccdaq_producer_thread(void * cx)
             WARN("transferred_bytes = %d\n", transferred_bytes);    
         }
 
-#if 0
-        // fake data for unit test
-        if (transferred_bytes >= 2) {
-            uint16_t * d16 = data;
-            int32_t    len = transferred_bytes/2;
-            int32_t    i;
-            for (i = 0; i < len; i++) {
-                d16[i] = 2050;
-            }
-            d16[len/2] = random_triangular(2600,4000);
+        // if length is a multiple of usb_max_packet_size the device will send a zero byte packet.
+        // refer to usbAInScanRead_USB20X routine in mccdaq/mcc-libusb/usb-20X.c
+        if (((length % g_usb_max_packet_size) == 0) && !(status & AIN_SCAN_RUNNING)) {
+            uint8_t value[64];
+            int32_t xfered;
+            libusb_bulk_transfer(g_udev, 
+                                 LIBUSB_ENDPOINT_IN|1, 
+                                 value, 
+                                 2, 
+                                 &xfered, 
+                                 100);
         }
-#endif
 
         // if error has occurred then
         //   restart the analog input scan, and

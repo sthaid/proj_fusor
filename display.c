@@ -230,8 +230,8 @@ static int32_t initialize(int32_t argc, char ** argv)
     setrlimit(RLIMIT_CORE, &rl);
 
     // check size of data struct on 64bit linux and rpi
-    INFO("sizeof data_t=%zd part1=%zd part2=%zd\n",
-         sizeof(data_t), sizeof(struct data_part1_s), sizeof(struct data_part2_s));
+    DEBUG("sizeof data_t=%zd part1=%zd part2=%zd\n",
+           sizeof(data_t), sizeof(struct data_part1_s), sizeof(struct data_part2_s));
 
     // init globals that are not 0
     mode = LIVE;
@@ -478,7 +478,19 @@ static int32_t initialize(int32_t argc, char ** argv)
 
 static void usage(void)
 {
-    // XXX tbd later
+    printf("\n"
+           "usage: display [options]\n"
+           "\n"
+           "   where options include:\n"
+           "       -h          : help\n"
+           "       -v          : version\n"
+           "       -g WxH      : window width and height, default 1920x1080\n"
+           "       -s name     : server name\n"
+           "       -p filename : playback file\n"
+           "       -x          : don't capture cam data in live mode\n"
+           "       -t secs     : generate test data file, secs long\n" 
+           "\n"
+                    );
 }
 
 // -----------------  GET LIVE DATA THREAD  ------------------------------------------

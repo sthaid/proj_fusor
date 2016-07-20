@@ -145,8 +145,8 @@ static void init(void)
     setrlimit(RLIMIT_CORE, &rl);
 
     // print size of data part1 and part2
-    INFO("sizeof data_t=%zd part1=%zd part2=%zd\n",
-         sizeof(data_t), sizeof(struct data_part1_s), sizeof(struct data_part2_s));
+    DATA("sizeof data_t=%zd part1=%zd part2=%zd\n",
+          sizeof(data_t), sizeof(struct data_part1_s), sizeof(struct data_part2_s));
 
     // register signal handler for SIGINT, and SIGTERM
     bzero(&action, sizeof(action));

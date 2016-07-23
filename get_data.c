@@ -661,9 +661,7 @@ static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
             bzero(pulse_counts_1_sec, sizeof(pulse_counts_1_sec)); \
         } while (0)
 
-    #define CIRC_MAX_PC1SH(x) (max_pc1sh+(x) >= 0 && max_pc1sh+(x) < MAX_PC1SH ? max_pc1sh+(x) : \
-                               max_pc1sh+(x) < 0                               ? max_pc1sh+(x) + MAX_PC1SH  \
-                                                                               : max_pc1sh+(x) - MAX_PC1SH)
+    #define CIRC_MAX_PC1SH(x) ((max_pc1sh + (x) + MAX_PC1SH) % MAX_PC1SH)
 
     #define PRINT_INFO(_avg_dur, _counts, _cpm) \
         do { \

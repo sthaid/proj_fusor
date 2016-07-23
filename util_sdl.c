@@ -232,7 +232,7 @@ static void sdl_exit_handler(void)
     SDL_Quit();
 }
 
-void sdl_get_state(int32_t * win_width, int32_t * win_height, bool * win_minimized)
+void sdl_get_state(uint32_t * win_width, uint32_t * win_height, bool * win_minimized)
 {
     if (win_width) {
         *win_width = sdl_win_width;

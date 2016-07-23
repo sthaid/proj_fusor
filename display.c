@@ -84,7 +84,7 @@ SOFTWARE.
 //#define JPEG_BUFF_SAMPLE_CREATE_ENABLE
 #define JPEG_BUFF_SAMPLE_FILENAME "jpeg_buff_sample.bin"
 
-#define NEUTRON_CPM(_file_idx) (file_data_part1[_file_idx].he3.cpm_3600_sec[0])
+#define NEUTRON_CPM(_file_idx) (file_data_part1[_file_idx].he3.cpm_10_sec[0])
 
 //
 // typedefs
@@ -893,6 +893,8 @@ static int32_t display_handler(void)
         ERROR("sdl_init %dx%d failed\n", win_width, win_height);
         return -1;
     }
+
+    sdl_get_state(&win_width, &win_height, NULL);
 
     sdl_init_pane(&title_pane_full, &title_pane, 
                   0, 0, 

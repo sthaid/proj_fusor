@@ -1,0 +1,33 @@
+#!/bin/bash
+
+url="http://www.libsdl.org"
+sdl="SDL2-2.0.3"
+sdl_url="${url}/release/${sdl}.tar.gz"
+image="SDL2_image-2.0.0"
+image_url="${url}/projects/SDL_image/release/${image}.tar.gz"
+mixer="SDL2_mixer-2.0.0"
+mixer_url="${url}/projects/SDL_mixer/release/${mixer}.tar.gz"
+ttf="SDL2_ttf-2.0.12"
+ttf_url="${url}/projects/SDL_ttf/release/${ttf}.tar.gz"
+
+get_build_install () {
+  cd ~/sdl2
+  wget -N $1
+  tar -xzf $2.tar.gz
+  cd $2
+  ./configure $3 | tee configure.out
+  make 
+  sudo make install
+}
+
+mkdir ~/sdl2
+if [ $? -ne 0 ]; then
+  echo "failed to create sdl2 build directory"
+  exit
+fi
+
+get_build_install $sdl_url    $sdl    "--host=armv7l-raspberry-linux-gnueabihf"
+get_build_install $image_url  $image
+get_build_install $mixer_url  $mixer
+get_build_install $ttf_url    $ttf
+

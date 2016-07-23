@@ -35,7 +35,9 @@ get_data: $(OBJ_GET_DATA)
 	sudo chmod 4777 $@
 
 display: $(OBJ_DISPLAY) 
-	$(CC) -pthread -lrt -lm -lpng -ljpeg -lSDL2 -lSDL2_ttf -lSDL2_mixer -o $@ $(OBJ_DISPLAY)
+	$(CC) -pthread -lrt -lm -lpng -ljpeg -lSDL2 -lSDL2_ttf -lSDL2_mixer \
+              -Wl,-rpath -Wl,/usr/local/lib \
+              -o $@ $(OBJ_DISPLAY)
 	sudo chown root:root $@
 	sudo chmod 4777 $@
 

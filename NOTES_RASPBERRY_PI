@@ -1,5 +1,5 @@
 ================================
-TITLE: INSTALL RASPBERRY PI 3
+INSTALL RASPBERRY PI 3
 ================================
 
 Notes:
@@ -8,59 +8,116 @@ Notes:
   . press shift when booting
   . add to config   init=/bin/sh
   . mount -o remount,rw /
+- default login=pi  password=raspberry
 
 Install from NOOBS flash card
+- select language and keyboard at bottom of display
+- install raspbian
+- boot
+
+Menu -> RaspberryPi Configuration -> Localization
+- Locale, TZ, Keyboard
+- Reboot and verify TZ and keyboard are okay
+
+Enable Wifi
+- left click on network icon
+- select wifi network and password
 
 Configure using raspi-config
-- disable X windows, use console login screen
-- Note - X windows can be broght up later using 'startx'
+- Boot Options -> Console
+- Reboot
+
+Root Account Password
+- set root password
 
 Add user account 
-- create .bashrc, .bash_profile, .vimrc, .ssh
-- add sudo access
+- adduser
+- add sudo access for this user
+- scp files to the home directory
+  - .bashrc, .bash_profile, .vimrc, .ssh, bin
+- verify can login via ssh to this account
 
-Updates, and additional packages, run as root:
+Updates, and install additional packages:
   apt-get update
-  apt-get install libudev-dev
-  apt-get install libevdev-dev
-  apt-get install tk
-  apt-get install vim
-  apt-get install libreadline-dev
+  apt-get dist-upgrade
+  reboot
+  apt-get install libudev-dev libevdev-dev libreadline-dev libjpeg-dev
+  apt-get install libfreetype6-dev
+  apt-get install vim tk cscope
 
-Install SDL2
-- script is here, or see copy below
-    https://gist.github.com/blacktm/8268a468f933eba46f80
-- description of problem getting keybd events
-    https://forums.libsdl.org/viewtopic.php?t=10483&sid=38991cf938c103990a18f389312e0f42
+Tweaks:
+- Enable core dumps for suid processes:
+    - add te following to /etc/sysctl.conf
+          fs.suid_dumpable=1
+- Apply USB Patch to make webcam work 
+    - add the folloing to /boot/cmdline.txt
+          dwc_otg.fiq_fsm_enable=0
+    - see https://github.com/raspberrypi/linux/issues/618 for information
+    - this seems to fix a webcam failure that occurs when closing and reopening the /dev/video0
+- reboot
 
-To Run SDL2 Program 
-- export LD_LIBRARY_PATH=/usr/local/lib
-     The following note is from the SDL build output:
-          If you ever happen to want to link against installed libraries
-          in a given directory, LIBDIR, you must either use libtool, and
-          specify the full pathname of the library, or use the `-LLIBDIR'
-          flag during linking and do at least one of the following:
-             - add LIBDIR to the `LD_LIBRARY_PATH' environment variable
-               during execution
-             - add LIBDIR to the `LD_RUN_PATH' environment variable
-               during linking
-             - use the `-Wl,-rpath -Wl,LIBDIR' linker flag
-             - have your system administrator add LIBDIR to `/etc/ld.so.conf'
-      See any operating system documentation about shared libraries for
-      more information, such as the ld(1) and ld.so(8) manual pages.
-- run as root
+Install SDL2 - use this script
+    #!/bin/bash
 
-Apply USB Patch
-- add the folloing to /boot/cmdline.txt, and reboot
-      dwc_otg.fiq_fsm_enable=0
-- see https://github.com/raspberrypi/linux/issues/618 for information
-- this seems to fix a webcam failure that occurs when closing and reopening the /dev/video0
+    url="http://www.libsdl.org"
+    sdl="SDL2-2.0.3"
+    sdl_url="${url}/release/${sdl}.tar.gz"
+    image="SDL2_image-2.0.0"
+    image_url="${url}/projects/SDL_image/release/${image}.tar.gz"
+    mixer="SDL2_mixer-2.0.0"
+    mixer_url="${url}/projects/SDL_mixer/release/${mixer}.tar.gz"
+    ttf="SDL2_ttf-2.0.12"
+    ttf_url="${url}/projects/SDL_ttf/release/${ttf}.tar.gz"
 
-Enable core dumps for suid processes
-- add te following to /etc/sysctl.conf, and reboot
-      fs.suid_dumpable=1
+    get_build_install () {
+      cd ~/sdl2
+      wget -N $1
+      tar -xzf $2.tar.gz
+      cd $2
+      ./configure $3 | tee configure.out
+      make
+      sudo make install
+    }
+
+    mkdir ~/sdl2
+    if [ $? -ne 0 ]; then
+      echo "failed to create sdl2 build directory"
+      exit
+    fi
+
+    get_build_install $sdl_url    $sdl    "--host=armv7l-raspberry-linux-gnueabihf"
+    get_build_install $image_url  $image
+    get_build_install $mixer_url  $mixer
+    get_build_install $ttf_url    $ttf
+
+Configure GIT
+    git config --global user.name "First Last"
+    git config --global user.email user@gmail.com
+    git config --global credential.helper cache
+    git config --global credential.helper 'cache --timeout=3600'
+
+Build and install fusor software
+- update /etc/hosts, add the following
+     192.168.1.60   home
+     192.168.1.117  rpi_data
+     192.168.1.11   rpi_display
+- get the software
+    git clone https://github.com/sthaid/proj_fusor.git
+- build
+    cd proj_fusor
+    make display     
+    make get_data
+- if this computer is for the get_data program then add the
+  followint to /etc/rc.local to automatically start the get_data program
+    # Start get_data
+    if [ -x /home/<user_id>/proj_fusor/get_data ]
+    then
+      su <user_id> -c "cd /home/<user_id>/proj_fusor; ./get_data </dev/null &>>get_data.log &"
+    fi
+- refer to NOTES_FUSOR_SOFTWARE for usage
 
 Install support software for the Measurement Computing USB 204 ADC
+on the Raspberry Pi that will be running the get_data program.
 - The procedure outlined below is from http://www.mccdaq.com/TechTips/TechTip-9.aspx
 - Procedure ...
     # make a directory
@@ -109,75 +166,7 @@ Install support software for the Measurement Computing USB 204 ADC
     ./test-usb20X
 
 ================================
-TITLE: BUILD AND INSTALL SDL2 ON RASPBERRY PI
-https://gist.github.com/blacktm/8268a468f933eba46f80
-================================
-
-#!/bin/bash
-
-# --------------------------------------------------------
-# Installs SDL2 from source on the Raspberry Pi (Raspbian)
-#
-# Run from the web:
-#   bash <(curl -s raw_script_url_here)
-# --------------------------------------------------------
-
-bold="\033[1m"
-normal="\033[0m"
-
-# Welcome message
-echo -e "\n${bold}This will install SDL2 from source."
-echo -e "It will take about an hour to compile on the Raspberry Pi.${normal}"
-
-# Prompt to continue
-read -p "  Continue? (y/n) " ans
-if [[ $ans != "y" ]]; then
-  echo -e "\nQuitting...\n"
-  exit
-fi
-echo
-
-# Time the install process
-START_TIME=$SECONDS
-
-# Setting up SDL2 variables
-url="http://www.libsdl.org"
-
-sdl="SDL2-2.0.3"
-sdl_url="${url}/release/${sdl}.tar.gz"
-
-image="SDL2_image-2.0.0"
-image_url="${url}/projects/SDL_image/release/${image}.tar.gz"
-
-mixer="SDL2_mixer-2.0.0"
-mixer_url="${url}/projects/SDL_mixer/release/${mixer}.tar.gz"
-
-ttf="SDL2_ttf-2.0.12"
-ttf_url="${url}/projects/SDL_ttf/release/${ttf}.tar.gz"
-
-get () {
-  cd /tmp
-  wget -N $1
-  tar -xzf $2.tar.gz
-  cd $2
-  ./configure && make && sudo make install
-  rm /tmp/$2.tar.gz
-  rm -rf /tmp/$2
-}
-
-get ${sdl_url} ${sdl}
-get ${image_url} ${image}
-get ${mixer_url} ${mixer}
-
-sudo apt-get install -y libfreetype6-dev  # ttf dependency
-get ${ttf_url} ${ttf}
-
-# Print the time elapsed
-ELAPSED_TIME=$(($SECONDS - $START_TIME))
-echo -e "\n${bold}Finished in $(($ELAPSED_TIME/60/60)) hr, $(($ELAPSED_TIME/60%60)) min, and $(($ELAPSED_TIME%60)) sec${normal}\n"
-
-================================
-TITLE: SAMPLES of .bashrc, .bash_profile, .vimrc
+EXAMPLES of .bashrc, .bash_profile, .vimrc
 ================================
 
 ---- .bashrc ---
@@ -213,7 +202,7 @@ fi
 export PATH=$PATH:.:$HOME/bin
 export GIT_EXTERNAL_DIFF=~/bin/git_external_diff
 export LD_LIBRARY_PATH=/usr/local/lib
-export PS1='[HOME \u@\h \W]\$ '
+export PS1='[RPI_DISPLAY \u@\h \W]\$ '
 
 --- .vimrc ---
 
@@ -227,16 +216,33 @@ colors default
 syntax on
 set hlsearch
 
-=================================
-TITLE: GRAPHICS ACCELERATOR
-=================================
- 
-** Not needed to run the fusor instrumentation program. **
+================================
+NOTES - FOR INFORMATION ONLY
+================================
 
-To test graphics accelerator:
-- need to configure advanced gpu driver using raspi-config
-- sudo apt-get install mesa-utils
-- glxgears
-- should see about 60 FPS and no graphics glitches
-- note: I did see a hang with graphics accel enabled, when resising terminal
-        window;  so suggest don't use X windows
+GRAPHICS ACCELERATOR
+  To test graphics accelerator:
+  - need to configure advanced gpu driver using raspi-config
+  - sudo apt-get install mesa-utils
+    - glxgears
+  - should see about 60 FPS and no graphics glitches
+  - note: I did see a hang with graphics accel enabled, when resising terminal
+          window;  so suggest don't use X windows
+
+SDL2 LIBRARY PATH INFO
+  The following note is from the SDL build output:
+      If you ever happen to want to link against installed libraries
+      in a given directory, LIBDIR, you must either use libtool, and
+      specify the full pathname of the library, or use the `-LLIBDIR'
+      flag during linking and do at least one of the following:
+         - add LIBDIR to the `LD_LIBRARY_PATH' environment variable
+           during execution
+         - add LIBDIR to the `LD_RUN_PATH' environment variable
+           during linking
+         - use the `-Wl,-rpath -Wl,LIBDIR' linker flag
+         - have your system administrator add LIBDIR to `/etc/ld.so.conf'
+  See any operating system documentation about shared libraries for
+  more information, such as the ld(1) and ld.so(8) manual pages.
+
+SDL2 PROBLEM GETTING KEYBOARD EVENTS
+  https://forums.libsdl.org/viewtopic.php?t=10483&sid=38991cf938c103990a18f389312e0f42

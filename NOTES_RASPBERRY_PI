@@ -95,6 +95,7 @@ Configure GIT
     git config --global user.email user@gmail.com
     git config --global credential.helper cache
     git config --global credential.helper 'cache --timeout=3600'
+    git config --global core.editor "vim"
 
 Build and install fusor software
 - update /etc/hosts, add the following

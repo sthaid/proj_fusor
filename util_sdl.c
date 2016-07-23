@@ -126,6 +126,14 @@ int32_t sdl_init(uint32_t w, uint32_t h, char * screenshot_prefix)
     // save copy of screenshot_prefix
     strcpy(sdl_screenshot_prefix, screenshot_prefix);
 
+    // display available and current video drivers
+    int num, i;
+    num = SDL_GetNumVideoDrivers();
+    INFO("Available Video Drivers: ");
+    for (i = 0; i < num; i++) {
+        INFO("   %s\n",  SDL_GetVideoDriver(i));
+    }
+
     // initialize Simple DirectMedia Layer  (SDL)
     if (SDL_Init(SDL_INIT_VIDEO|SDL_INIT_AUDIO) < 0) {
         ERROR("SDL_Init failed\n");

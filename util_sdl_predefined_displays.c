@@ -58,7 +58,7 @@ void sdl_display_get_string(int32_t count, ...)
     char          str[200];
     int32_t       i;
     sdl_event_t * event;
-    int32_t       win_width, win_height;
+    uint32_t      win_width, win_height;
 
     int32_t       field_select;
     bool          shift;
@@ -211,7 +211,7 @@ void sdl_display_text(char * text)
     int32_t        max_texture_alloced = 0;
     int32_t        text_y = 0;
     int32_t        pixels_per_row = sdl_font_char_height(0);
-    int32_t        win_width, win_height;
+    uint32_t       win_width, win_height;
 
     // create a texture for each line of text
     //
@@ -356,7 +356,7 @@ void  sdl_display_choose_from_list(char * title_str, char ** choice, int32_t max
     int32_t        text_y = 0;
     bool           done = false;
     int32_t        pixels_per_row = sdl_font_char_height(0) + 2;
-    int32_t        win_width, win_height;
+    uint32_t       win_width, win_height;
 
     // preset return
     *selection = -1;
@@ -506,7 +506,7 @@ void sdl_display_error(char * err_str0, char * err_str1, char * err_str2)
     sdl_event_t * event;
     int32_t       row, col;
     bool          done = false;
-    int32_t       win_width, win_height;
+    uint32_t      win_width, win_height;
 
     // loop until done
     while (!done) {

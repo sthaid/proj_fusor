@@ -90,6 +90,12 @@ Install SDL2 - use this script
     get_build_install $mixer_url  $mixer
     get_build_install $ttf_url    $ttf
 
+Configure GIT
+    git config --global user.name "First Last"
+    git config --global user.email user@gmail.com
+    git config --global credential.helper cache
+    git config --global credential.helper 'cache --timeout=3600'
+
 Build and install fusor software
 - update /etc/hosts, add the following
      192.168.1.60   home

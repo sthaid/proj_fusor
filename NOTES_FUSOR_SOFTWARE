@@ -1,5 +1,5 @@
 ===============================================
-TITLE: INTRODUCTION
+INTRODUCTION
 ===============================================
 
 This software is comprised of 2 programs:
@@ -96,27 +96,7 @@ pulse outputs have been tested using background radiation events. The webcam has
 been tested.
 
 ===============================================
-TITLE: BUILD THE SOFTWARE
-===============================================
-
-First install and configure the Raspberry Pi computers as described in the
-NOTES_RASPBERRY_PI file.
-
-To build ...
-  git clone https://github.com/sthaid/proj_fusor.git
-  cd proj_fusor
-  make
-
-To automatically start get_data when the RPI-Data boots, edit /etc/rc.local and add the
-following:
-  # Start get_data
-  if [ -x /home/<user_id>/proj_fusor/get_data ]
-  then
-    su <user_id> -c "cd /home/<user_id>/proj_fusor; ./get_data </dev/null &>>get_data.log &"
-  fi
-
-===============================================
-TITLE: RUNNING THE SOFTWARE
+RUNNING THE SOFTWARE
 ===============================================
 
 Get_data program should start when the battery power is applied to the RPI-Data, assuming
@@ -140,37 +120,4 @@ The cmd line options for the display program are:
 -p filename : playback file
 -x          : don't capture cam data in live mode
 -t secs     : generate test data file, secs long
-
-===============================================
-TITLE: BUGS  
-===============================================
-
--------- BUG 1 --------
-
-The get_data program crashes after running for 8001 seconds duration. Snip of output from the
-get_data.log file is shown below
-
-07/18/16 23:01:17.019  duration=8001  samples=476880  mccdaq_restarts=2  pulse_threshold-2048=346
-   1:     0     0     0     0     0     0     0     0
-        0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0
-  10:     0     0     0     0     0     0     0     0
-        0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0
-  60:     1     0     0     0     0     0     0     0
-        1.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0
- 600:     1     0     0     0     0     0     0     0
-        0.1   0.0   0.0   0.0   0.0   0.0   0.0   0.0
-3600:     1     0     0     0     0     0     0     0
-        0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0
-
-07/18/16 23:01:17.019 ERROR dataq_get_adc_samples: adc data not available
-07/18/16 23:01:17.019 ERROR dataq_get_adc_samples: adc data not available
-07/18/16 23:01:17.019 ERROR dataq_get_adc_samples: adc data not available
-07/18/16 23:01:18.000 ERROR dataq_get_adc: adc data not available
-07/18/16 23:01:18.005 ERROR dataq_get_adc: adc data not available
-07/18/16 23:01:18.005 ERROR dataq_get_adc: adc data not available
-07/18/16 23:01:18.013  duration=8002  samples=475984  mccdaq_restarts=1  pulse_threshold-2048=347
-   1:     0     0     0     0     0     0     0     0
-        0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0
-
-
 

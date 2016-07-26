@@ -683,6 +683,7 @@ try_to_connect_again:
         // if live mode then update file_idx_global
         if (mode == LIVE) {
             file_idx_global = file_hdr->max - 1;
+            __sync_synchronize();
         }
 
 #ifdef JPEG_BUFF_SAMPLE_CREATE_ENABLE
@@ -733,6 +734,7 @@ connection_failed:
     // if live mode then update file_idx_global
     if (mode == LIVE) {
         file_idx_global = file_hdr->max - 1;
+        __sync_synchronize();
     }
 
     // sleep 1 sec, 
@@ -808,6 +810,7 @@ static int32_t write_data_to_file(data_t * data)
 
     // update the file_hdr (also memory mapped)
     file_hdr->max++;
+    __sync_synchronize();
 
     // return success
     return 0;
@@ -914,7 +917,9 @@ static int32_t display_handler(void)
     // loop until quit
     while (!quit) {
         // get the file_idx, and verify
+        __sync_synchronize();
         file_idx = file_idx_global;
+        __sync_synchronize();
         if (file_idx < 0 ||
             file_idx >= file_hdr->max ||
             file_data_part1[file_idx].magic != MAGIC_DATA_PART1) 

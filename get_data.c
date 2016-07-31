@@ -52,6 +52,8 @@ SOFTWARE.
 // defines
 //
 
+#define MAX_PULSE_HEIGHT 100    // 488 mv
+
 #define GAS_ID_D2 0
 #define GAS_ID_N2 1
 
@@ -756,7 +758,7 @@ static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
             }
                 
             // determine pulse_channel from pulse_height
-            pulse_channel = pulse_height / ((4096 - pulse_threshold) / MAX_HE3_CHAN);
+            pulse_channel = pulse_height / (MAX_PULSE_HEIGHT / MAX_HE3_CHAN);
             if (pulse_channel >= MAX_HE3_CHAN) {
                 WARN("chan being reduced from %d to %d\n", pulse_channel, MAX_HE3_CHAN-1);
                 pulse_channel = MAX_HE3_CHAN-1;

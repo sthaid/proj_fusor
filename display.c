@@ -66,7 +66,7 @@ SOFTWARE.
 
 #define MAX_FILE_DATA_PART1   86400   // 1 day
 #define MAX_DATA_PART2_LENGTH 1000000
-#define MAX_GRAPH             8
+#define MAX_GRAPH             9
 
 #define FILE_DATA_PART2_OFFSET \
    ((sizeof(file_hdr_t) +  \
@@ -514,6 +514,7 @@ static void * get_live_data_thread(void * cx)
         he3_novalue.cpm_60_sec[chan] = ERROR_NO_VALUE;
         he3_novalue.cpm_600_sec[chan] = ERROR_NO_VALUE;
         he3_novalue.cpm_3600_sec[chan] = ERROR_NO_VALUE;
+        he3_novalue.cpm_14400_sec[chan] = ERROR_NO_VALUE;
     }
 
     dp1                                           = &data_novalue.part1;
@@ -1001,7 +1002,7 @@ static int32_t display_handler(void)
         case 2:
             draw_graph2(file_idx);
             break;
-        case 3: case 4: case 5: case 6: case 7:
+        case 3: case 4: case 5: case 6: case 7: case 8:
             draw_graph34567(file_idx);
             break;
         default:
@@ -1256,8 +1257,11 @@ static void draw_graph_init(rect_t * graph_pane)
 static void draw_graph_scale_select(char key)
 {
     static int32_t  x_time_span_sec_tbl[] = {60, 600, 1800, 3600, 7200, 21600, 43200, 86400};
-    static int32_t  y_max_mv_tbl[] = {100, 1000, 2000, 5000, 10000};
-    static float    y_max_cpm_tbl[] = {0.1, 1.0, 10.0, 100.0, 1000.0, 10000.0, 100000.0};
+    static int32_t  y_max_mv_tbl[] = {100, 200, 500, 1000, 2000, 5000, 10000};
+    static float    y_max_cpm_tbl[] = {1.0, 2.0, 5.0, 
+                                       10.0, 20.0, 50.0, 
+                                       100.0, 200.0, 500.0, 
+                                       1000.0, 2000.0, 5000.0 };
 
     #define REDUCE(val, tbl) \
         do { \
@@ -1445,10 +1449,7 @@ static void draw_graph2(int32_t file_idx)
     int32_t               i;
     char                  x_info_str[100];
     char                  y_info_str[100];
-
-    // init x_info str and y_info_str
-    sprintf(x_info_str, "X: 2.4 MS");
-    sprintf(y_info_str, "Y: %d MV (1/2)", graph_y_max_mv);
+    int32_t               baseline_mv;
 
     // init pointer to dp1, and read dp2
     dp1 = &file_data_part1[file_idx];
@@ -1459,10 +1460,27 @@ static void draw_graph2(int32_t file_idx)
         return;
     }
 
+    // determine baseline value
+    baseline_mv = 10000;
+    for (i = 0; i < MAX_ADC_SAMPLES; i++) {
+        if (dp1->data_part2_he3_adc_samples_mv_valid &&
+            dp2->he3_adc_samples_mv[i] < baseline_mv) 
+        {
+            baseline_mv = dp2->he3_adc_samples_mv[i];
+        }
+    }
+    if (baseline_mv == 10000) {
+        baseline_mv = 0;
+    }
+
+    // init x_info str and y_info_str
+    sprintf(x_info_str, "X: 2.4 MS");
+    sprintf(y_info_str, "Y: %d MV (1/2) BASE=%d MV", graph_y_max_mv, baseline_mv);
+
     // init arrays of the values to graph
     for (i = 0; i < MAX_ADC_SAMPLES; i++) {
         he3_adc_samples_mv_values[i] = dp1->data_part2_he3_adc_samples_mv_valid 
-                                       ? dp2->he3_adc_samples_mv[i]
+                                       ? dp2->he3_adc_samples_mv[i] - baseline_mv 
                                        : ERROR_NO_VALUE;
     }
 
@@ -1488,7 +1506,8 @@ static void draw_graph34567(int32_t file_idx)
                graph_select == 4 ? 10   : 
                graph_select == 5 ? 60   :
                graph_select == 6 ? 600  : 
-               graph_select == 7 ? 3600   
+               graph_select == 7 ? 3600 :
+               graph_select == 8 ? 14400   
                                  : -1);
     if (avg_sec == -1) {
         FATAL("invalid graph_select %d\n", graph_select);
@@ -1534,6 +1553,9 @@ static void draw_graph34567(int32_t file_idx)
             break;
         case 3600:
             he3_cpm = file_data_part1[i].he3.cpm_3600_sec;
+            break;
+        case 14400:
+            he3_cpm = file_data_part1[i].he3.cpm_14400_sec;
             break;
         default:
             FATAL("avg_sec %d is invalid\n", avg_sec);

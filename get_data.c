@@ -430,6 +430,7 @@ static void init_data_struct(data_t * data, time_t time_now)
             data->part1.he3.cpm_60_sec[chan] = ERROR_NO_VALUE;
             data->part1.he3.cpm_600_sec[chan] = ERROR_NO_VALUE;
             data->part1.he3.cpm_3600_sec[chan] = ERROR_NO_VALUE;
+            data->part1.he3.cpm_14400_sec[chan] = ERROR_NO_VALUE;
         }
     }
     pthread_mutex_unlock(&he3_mutex);
@@ -637,7 +638,7 @@ static float convert_adc_pressure(float adc_volts, uint32_t gas_id)
 static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
 {
     #define MAX_DATA 1000000
-    #define MAX_PC1SH 4000
+    #define MAX_PC1SH 15000
 
     static uint16_t data[MAX_DATA];
     static int32_t  max_data;
@@ -650,6 +651,7 @@ static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
     static int32_t  pulse_counts_60_sec[MAX_HE3_CHAN];
     static int32_t  pulse_counts_600_sec[MAX_HE3_CHAN];
     static int32_t  pulse_counts_3600_sec[MAX_HE3_CHAN];
+    static int32_t  pulse_counts_14400_sec[MAX_HE3_CHAN];
     static int32_t  pulse_counts_1_sec_history[MAX_PC1SH][MAX_HE3_CHAN];
     static int32_t  max_pc1sh;
 
@@ -814,6 +816,9 @@ static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
             pulse_counts_3600_sec[chan] = pulse_counts_3600_sec[chan] + 
                                   pulse_counts_1_sec[chan] -
                                   pulse_counts_1_sec_history[CIRC_MAX_PC1SH(-3600)][chan];
+            pulse_counts_14400_sec[chan] = pulse_counts_14400_sec[chan] + 
+                                  pulse_counts_1_sec[chan] -
+                                  pulse_counts_1_sec_history[CIRC_MAX_PC1SH(-14400)][chan];
         }
         memcpy(pulse_counts_1_sec_history[CIRC_MAX_PC1SH(0)], 
                pulse_counts_1_sec, 
@@ -834,6 +839,8 @@ static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
                                                       : ERROR_NO_VALUE);
             he3.cpm_3600_sec[chan] = (max_pc1sh >= 3600 ? pulse_counts_3600_sec[chan] * (60.0 / 3600)
                                                         : ERROR_NO_VALUE);
+            he3.cpm_14400_sec[chan] = (max_pc1sh >= 14400 ? pulse_counts_14400_sec[chan] * (60.0 / 14400)
+                                                          : ERROR_NO_VALUE);
         }
 
         // publish he3_adc_samples_mv 
@@ -865,6 +872,7 @@ static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
         PRINT_INFO(60, pulse_counts_60_sec, he3.cpm_60_sec);
         PRINT_INFO(600, pulse_counts_600_sec, he3.cpm_600_sec);
         PRINT_INFO(3600, pulse_counts_3600_sec, he3.cpm_3600_sec);
+        PRINT_INFO(14400, pulse_counts_14400_sec, he3.cpm_14400_sec);
         printf("\n");
 
         // reset for the next second

@@ -25,9 +25,6 @@ Fusor Data Acquisition - This program acquires, displays, and\n\
 records camera and analog sensor values which are used in\n\
 Farnsworth Fusor demonstration.\n\
 \n\
-Refer to www.fusor.net, \"The Open Source Fusor Research Consortium\"\n\
-for information pertaining to Nuclear Fusor Technology\n\
-\n\
 Author: Steven Haid      StevenHaid@gmail.com\n\
 \n\
 Source Code: https://github.com/sthaid/proj_fusor.git\n\

@@ -48,18 +48,19 @@ SOFTWARE.
 #define SDL_EVENT_KEY_CTRL_RIGHT_ARROW 139
 #define SDL_EVENT_KEY_ALT_LEFT_ARROW   140
 #define SDL_EVENT_KEY_ALT_RIGHT_ARROW  141
-#define SDL_EVENT_KEY_SHIFT            142
-#define SDL_EVENT_KEY_UNSHIFT          143
+#define SDL_EVENT_KEY_CTRL_ESC         142
+#define SDL_EVENT_KEY_SHIFT            143
+#define SDL_EVENT_KEY_UNSHIFT          144
 // - window
-#define SDL_EVENT_WIN_SIZE_CHANGE      145
-#define SDL_EVENT_WIN_MINIMIZED        146
-#define SDL_EVENT_WIN_RESTORED         147
+#define SDL_EVENT_WIN_SIZE_CHANGE      160
+#define SDL_EVENT_WIN_MINIMIZED        161
+#define SDL_EVENT_WIN_RESTORED         162
 // - screenshot
-#define SDL_EVENT_SCREENSHOT_TAKEN     149
+#define SDL_EVENT_SCREENSHOT_TAKEN     170
 // - quit
-#define SDL_EVENT_QUIT                 150
+#define SDL_EVENT_QUIT                 180
 // - available to be defined by users
-#define SDL_EVENT_USER_START           160  
+#define SDL_EVENT_USER_START           200  
 #define SDL_EVENT_USER_END             999  
 // - max event
 #define SDL_EVENT_MAX                  1000

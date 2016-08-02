@@ -66,7 +66,7 @@ SOFTWARE.
 
 #define MAX_FILE_DATA_PART1   86400   // 1 day
 #define MAX_DATA_PART2_LENGTH 1000000
-#define MAX_GRAPH             9
+#define MAX_GRAPH             15
 
 #define FILE_DATA_PART2_OFFSET \
    ((sizeof(file_hdr_t) +  \
@@ -84,7 +84,12 @@ SOFTWARE.
 //#define JPEG_BUFF_SAMPLE_CREATE_ENABLE
 #define JPEG_BUFF_SAMPLE_FILENAME "jpeg_buff_sample.bin"
 
-#define NEUTRON_CPM(_file_idx) (file_data_part1[_file_idx].he3.cpm_10_sec[0])
+#define NEUTRON_CPM(_file_idx) (file_data_part1[_file_idx].he3.cpm_10_sec[2] + \
+                                file_data_part1[_file_idx].he3.cpm_10_sec[3] + \
+                                file_data_part1[_file_idx].he3.cpm_10_sec[4] + \
+                                file_data_part1[_file_idx].he3.cpm_10_sec[5] + \
+                                file_data_part1[_file_idx].he3.cpm_10_sec[6] + \
+                                file_data_part1[_file_idx].he3.cpm_10_sec[7])
 
 //
 // typedefs
@@ -156,7 +161,8 @@ static void draw_graph_scale_select(char key);
 static void draw_graph0(int32_t file_idx);
 static void draw_graph1(int32_t file_idx);
 static void draw_graph2(int32_t file_idx);
-static void draw_graph345678(int32_t file_idx);
+static void draw_graph3to8(int32_t file_idx);
+static void draw_graph9to14(int32_t file_idx);
 static void draw_graph_common(char * title_str, char * x_info_str, char * y_info_str, float cursor_pos, char * cursor_str, int32_t max_graph, ...);
 static int32_t generate_test_file(void);
 static char * val2str(float val);
@@ -981,9 +987,9 @@ static int32_t display_handler(void)
             screenshot_msg_is_displayed = false;
         }
 
-        sdl_render_text(&title_pane, 0, -5, 0, "(ESC)", WHITE, BLACK);
+        sdl_render_text(&title_pane, 0, -10, 0, "(CTRL-ESC)", WHITE, BLACK);
 
-        sdl_render_text(&title_pane, 0, -11, 0, "(?)", WHITE, BLACK);
+        sdl_render_text(&title_pane, 0, -14, 0, "(?)", WHITE, BLACK);
         
         // draw the camera image,
         draw_camera_image(&cam_pane, file_idx);
@@ -1003,14 +1009,17 @@ static int32_t display_handler(void)
             draw_graph2(file_idx);
             break;
         case 3: case 4: case 5: case 6: case 7: case 8:
-            draw_graph345678(file_idx);
+            draw_graph3to8(file_idx);
+            break;
+        case 9: case 10: case 11: case 12: case 13: case 14:
+            draw_graph9to14(file_idx);
             break;
         default:
             FATAL("graph_select %d out of range\n", graph_select);
         }
 
         // register for events   
-        sdl_event_register(SDL_EVENT_KEY_ESC, SDL_EVENT_TYPE_KEY, NULL);             // quit (esc)
+        sdl_event_register(SDL_EVENT_KEY_CTRL_ESC, SDL_EVENT_TYPE_KEY, NULL);        // quit (alt-esc)
         sdl_event_register('?', SDL_EVENT_TYPE_KEY, NULL);                           // help
         sdl_event_register('s', SDL_EVENT_TYPE_KEY, NULL);                           // graph select
         sdl_event_register('S', SDL_EVENT_TYPE_KEY, NULL);                           // graph select
@@ -1044,7 +1053,7 @@ static int32_t display_handler(void)
             event_processed_count++;
             event = sdl_poll_event();
             switch (event->event) {
-            case SDL_EVENT_QUIT: case SDL_EVENT_KEY_ESC: 
+            case SDL_EVENT_QUIT: case SDL_EVENT_KEY_CTRL_ESC: 
                 quit = true;
                 break;
             case SDL_EVENT_SCREENSHOT_TAKEN:
@@ -1287,14 +1296,10 @@ static void draw_graph_scale_select(char key)
 
     switch (key) {
     case '-': case '+': case '=':
-        // maintain graph_x_time_span_sec for graphs 0,3,4,5,6,7
+        // maintain graph_x_time_span_sec for graphs 0,3-8,9-14
         if (graph_select == 0  || 
-            graph_select == 3  || 
-            graph_select == 4  || 
-            graph_select == 5  || 
-            graph_select == 6  || 
-            graph_select == 7  ||
-            graph_select == 8)
+            (graph_select >= 3 && graph_select <= 8) ||
+            (graph_select >= 9 && graph_select <= 14))
         {
             if (key == '-') {
                 REDUCE(graph_x_time_span_sec, x_time_span_sec_tbl);
@@ -1317,13 +1322,10 @@ static void draw_graph_scale_select(char key)
             break;
         }
 
-        // maintain graph_y_max_cpm for graphs 3,4,5,6,7
-        if (graph_select == 3  || 
-            graph_select == 4  || 
-            graph_select == 5  || 
-            graph_select == 6  || 
-            graph_select == 7  ||
-            graph_select == 8)
+        // maintain graph_y_max_cpm for graphs 3-8, 9-14
+        if (graph_select == 0  || 
+            (graph_select >= 3 && graph_select <= 8) ||
+            (graph_select >= 9 && graph_select <= 14))
         {
             if (key == '1') {
                 REDUCE(graph_y_max_cpm, y_max_cpm_tbl);
@@ -1392,10 +1394,10 @@ static void draw_graph0(int32_t file_idx)
     i = file_idx - file_idx_start;
     draw_graph_common(
         "SUMMARY", x_info_str, y_info_str, cursor_pos, cursor_str, 4, 
-        val2str2(voltage_mean_kv_values[i], "KV   "),   RED,    30.0,    max_values, voltage_mean_kv_values,
-        val2str2(current_ma_values[i], "MA   "),        GREEN,  30.0,    max_values, current_ma_values,
-        val2str2(pressure_d2_mtorr_values[i], "MTORR"), BLUE,   30.0,    max_values, pressure_d2_mtorr_values,
-        val2str2(neutron_cpm_values[i], "CPM  "),       PURPLE, 10000.0, max_values, neutron_cpm_values);
+        val2str2(voltage_mean_kv_values[i], "KV   "),   RED,    30.0,   max_values, voltage_mean_kv_values,
+        val2str2(current_ma_values[i], "MA   "),        GREEN,  30.0,   max_values, current_ma_values,
+        val2str2(pressure_d2_mtorr_values[i], "MTORR"), BLUE,   30.0,   max_values, pressure_d2_mtorr_values,
+        val2str2(neutron_cpm_values[i], "CPM  "),       PURPLE, 500.0,  max_values, neutron_cpm_values);
 }
 
 static void draw_graph1(int32_t file_idx)
@@ -1492,7 +1494,7 @@ static void draw_graph2(int32_t file_idx)
         "HE3 ", PURPLE, (double)graph_y_max_mv, MAX_ADC_SAMPLES, he3_adc_samples_mv_values);
 }
 
-static void draw_graph345678(int32_t file_idx)
+static void draw_graph3to8(int32_t file_idx)
 {
     float    cpm[MAX_HE3_CHAN][MAX_FILE_DATA_PART1];
     int32_t  file_idx_start, file_idx_end, max_values, i, avg_sec;
@@ -1583,6 +1585,90 @@ static void draw_graph345678(int32_t file_idx)
         val2str2(cpm[5][i], "CPM"), ORANGE,     graph_y_max_cpm,    max_values, cpm[5],
         val2str2(cpm[6][i], "CPM"), PINK,       graph_y_max_cpm,    max_values, cpm[6],
         val2str2(cpm[7][i], "CPM"), RED,        graph_y_max_cpm,    max_values, cpm[7]);
+}
+
+static void draw_graph9to14(int32_t file_idx)
+{
+    float    cpm[MAX_FILE_DATA_PART1];
+    int32_t  file_idx_start, file_idx_end, max_values, i, avg_sec;
+    uint64_t cursor_time_us;
+    float    cursor_pos;
+    char     x_info_str[100];
+    char     y_info_str[100];
+    char     title_str[100];
+    char     cursor_str[100];
+
+    // init avg_sec;
+    avg_sec = (graph_select ==  9 ? 1    : 
+               graph_select == 10 ? 10   : 
+               graph_select == 11 ? 60   :
+               graph_select == 12 ? 600  : 
+               graph_select == 13 ? 3600 :
+               graph_select == 14 ? 14400   
+                                  : -1);
+    if (avg_sec == -1) {
+        FATAL("invalid graph_select %d\n", graph_select);
+    }
+
+    // init x_info_str, y_info_str, and title_str
+    sprintf(x_info_str, "X: %d SEC (-/+)", graph_x_time_span_sec);
+    sprintf(y_info_str, "Y: %0.1f CPM (1/2)", graph_y_max_cpm);
+    sprintf(title_str, "NEUTRON CPM %d SEC AVG", avg_sec);
+
+    // init file_idx_start & file_idx_end
+    if (mode == LIVE) {
+        file_idx_end   = file_idx;
+        file_idx_start = file_idx_end - (graph_x_time_span_sec - 1);
+    } else {
+        file_idx_start = file_idx - graph_x_time_span_sec / 2;
+        file_idx_end   = file_idx_start + graph_x_time_span_sec - 1;
+    }
+
+    // init cursor position and string
+    cursor_time_us = file_data_part1[file_idx].time * 1000000;
+    cursor_pos = (float)(file_idx - file_idx_start) / (graph_x_time_span_sec - 1);
+    time2str(cursor_str, cursor_time_us, false, false, false);
+
+    // init arrays of the values to graph
+    max_values = 0;
+    for (i = file_idx_start; i <= file_idx_end; i++) {
+        float * he3_cpm;
+        switch (avg_sec) {
+        case 1:
+            he3_cpm = file_data_part1[i].he3.cpm_1_sec;
+            break;
+        case 10:
+            he3_cpm = file_data_part1[i].he3.cpm_10_sec;
+            break;
+        case 60:
+            he3_cpm = file_data_part1[i].he3.cpm_60_sec;
+            break;
+        case 600:
+            he3_cpm = file_data_part1[i].he3.cpm_600_sec;
+            break;
+        case 3600:
+            he3_cpm = file_data_part1[i].he3.cpm_3600_sec;
+            break;
+        case 14400:
+            he3_cpm = file_data_part1[i].he3.cpm_14400_sec;
+            break;
+        default:
+            FATAL("avg_sec %d is invalid\n", avg_sec);
+            break;
+        }
+        if (i >= 0 && i < file_hdr->max && he3_cpm[0] != ERROR_NO_VALUE) {
+            cpm[max_values] = he3_cpm[2] + he3_cpm[3] + he3_cpm[4] + he3_cpm[5] + he3_cpm[6] + he3_cpm[7];
+        } else {
+            cpm[max_values] = ERROR_NO_VALUE;
+        }
+        max_values++;
+    }
+
+    // draw the graph
+    i = file_idx - file_idx_start;
+    draw_graph_common(
+        title_str, x_info_str, y_info_str, cursor_pos, cursor_str, 1,
+        val2str2(cpm[i], "CPM"), RED, graph_y_max_cpm, max_values, cpm);
 }
 
 static void draw_graph_common(char * title_str, char * x_info_str, char * y_info_str, float cursor_pos, char * cursor_str, int32_t max_graph, ...)

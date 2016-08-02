@@ -574,6 +574,8 @@ sdl_event_t * sdl_poll_event(void)
                     possible_event = SDL_EVENT_KEY_CTRL_LEFT_ARROW;
                 } else if (possible_event == SDL_EVENT_KEY_RIGHT_ARROW) {
                     possible_event = SDL_EVENT_KEY_CTRL_RIGHT_ARROW;
+                } else if (possible_event == SDL_EVENT_KEY_ESC) {
+                    possible_event = SDL_EVENT_KEY_CTRL_ESC;
                 }
             } else if (alt) {
                 if (possible_event == SDL_EVENT_KEY_LEFT_ARROW) {

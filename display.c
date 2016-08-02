@@ -156,7 +156,7 @@ static void draw_graph_scale_select(char key);
 static void draw_graph0(int32_t file_idx);
 static void draw_graph1(int32_t file_idx);
 static void draw_graph2(int32_t file_idx);
-static void draw_graph34567(int32_t file_idx);
+static void draw_graph345678(int32_t file_idx);
 static void draw_graph_common(char * title_str, char * x_info_str, char * y_info_str, float cursor_pos, char * cursor_str, int32_t max_graph, ...);
 static int32_t generate_test_file(void);
 static char * val2str(float val);
@@ -1003,7 +1003,7 @@ static int32_t display_handler(void)
             draw_graph2(file_idx);
             break;
         case 3: case 4: case 5: case 6: case 7: case 8:
-            draw_graph34567(file_idx);
+            draw_graph345678(file_idx);
             break;
         default:
             FATAL("graph_select %d out of range\n", graph_select);
@@ -1067,7 +1067,7 @@ static int32_t display_handler(void)
                 int32_t x = file_idx_global;
                 x -= (event->event == SDL_EVENT_KEY_LEFT_ARROW      ? 1 :
                       event->event == SDL_EVENT_KEY_CTRL_LEFT_ARROW ? 10
-                                                                    : 60);
+                                                                    : 600);
                 if (x < 0) {
                     x = 0;
                 }
@@ -1293,7 +1293,8 @@ static void draw_graph_scale_select(char key)
             graph_select == 4  || 
             graph_select == 5  || 
             graph_select == 6  || 
-            graph_select == 7)
+            graph_select == 7  ||
+            graph_select == 8)
         {
             if (key == '-') {
                 REDUCE(graph_x_time_span_sec, x_time_span_sec_tbl);
@@ -1321,7 +1322,8 @@ static void draw_graph_scale_select(char key)
             graph_select == 4  || 
             graph_select == 5  || 
             graph_select == 6  || 
-            graph_select == 7)
+            graph_select == 7  ||
+            graph_select == 8)
         {
             if (key == '1') {
                 REDUCE(graph_y_max_cpm, y_max_cpm_tbl);
@@ -1490,7 +1492,7 @@ static void draw_graph2(int32_t file_idx)
         "HE3 ", PURPLE, (double)graph_y_max_mv, MAX_ADC_SAMPLES, he3_adc_samples_mv_values);
 }
 
-static void draw_graph34567(int32_t file_idx)
+static void draw_graph345678(int32_t file_idx)
 {
     float    cpm[MAX_HE3_CHAN][MAX_FILE_DATA_PART1];
     int32_t  file_idx_start, file_idx_end, max_values, i, avg_sec;

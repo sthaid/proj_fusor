@@ -91,6 +91,7 @@ static pthread_mutex_t he3_mutex = PTHREAD_MUTEX_INITIALIZER;
 static uint64_t        he3_time;
 static he3_t           he3;
 static int16_t         he3_adc_samples_mv[MAX_ADC_SAMPLES];
+static int16_t         he3_adc_samples_baseline_mv;
 
 //
 // prototypes
@@ -456,6 +457,7 @@ static void init_data_struct(data_t * data, time_t time_now)
     ret4 = (he3_time == time_now ? 0 : -1);
     if (ret4 == 0) {
         memcpy(data->part2.he3_adc_samples_mv, he3_adc_samples_mv, MAX_ADC_SAMPLES*sizeof(uint16_t));
+        data->part2.he3_adc_samples_baseline_mv = he3_adc_samples_baseline_mv;
     }
     pthread_mutex_unlock(&he3_mutex);
 
@@ -645,6 +647,7 @@ static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
     static int32_t  idx;
     static int32_t  pulse_largest_height;
     static int32_t  pulse_largest_idx;
+    static uint16_t pulse_largest_baseline;
     static uint16_t pulse_threshold;
     static int32_t  pulse_counts_1_sec[MAX_HE3_CHAN];
     static int32_t  pulse_counts_10_sec[MAX_HE3_CHAN];
@@ -657,11 +660,12 @@ static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
 
     #define RESET_FOR_NEXT_SEC \
         do { \
-            max_data             = 0; \
-            idx                  = 0; \
-            pulse_largest_height = 0; \
-            pulse_largest_idx    = 0; \
-            pulse_threshold      = 0; \
+            max_data               = 0; \
+            idx                    = 0; \
+            pulse_largest_height   = 0; \
+            pulse_largest_idx      = 0; \
+            pulse_largest_baseline = 0; \
+            pulse_threshold        = 0; \
             bzero(pulse_counts_1_sec, sizeof(pulse_counts_1_sec)); \
         } while (0)
 
@@ -714,7 +718,7 @@ static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
                 baseline = data[i];
             }
         }
-        pulse_threshold = baseline + 8;
+        pulse_threshold = baseline + 15;  //XXX
         DEBUG("pulse_threshold-2048=%d\n", pulse_threshold-2048);
     }
 
@@ -773,13 +777,18 @@ static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
             if (pulse_height > pulse_largest_height) {
                 pulse_largest_height = pulse_height;
                 pulse_largest_idx = idx;
+                pulse_largest_baseline = pulse_threshold - 15;  // XXX
             }
 
             // plot pulses when pulse_chan >= 1
             if (pulse_channel >= 1) {
                 printf("pulse: height=%d  channel=%d  threshold-2048=%d\n",
                        pulse_height, pulse_channel, pulse_threshold-2048);
-                for (i = pulse_start_idx; i <= pulse_end_idx; i++) {
+                int32_t pule_end_idx_extended = pulse_end_idx + 4;
+                if (pule_end_idx_extended >= max_data) {
+                    pule_end_idx_extended = max_data-1;
+                }
+                for (i = pulse_start_idx; i <= pule_end_idx_extended; i++) {
                     print_plot_str(data[i], pulse_threshold);
                 }
                 printf("\n");
@@ -853,6 +862,11 @@ static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
         for (i = 0; i < MAX_ADC_SAMPLES; i++,j++) {
             he3_adc_samples_mv[i] = data[j] * 1000 / 205 - 10000;
         }
+        if (pulse_largest_baseline) {
+            he3_adc_samples_baseline_mv = pulse_largest_baseline * 1000 / 205 - 10000;
+        } else {
+            he3_adc_samples_baseline_mv = he3_adc_samples_mv[0];
+        }
 
         // save the time associated with the new he3 data
         he3_time = time_now;
@@ -883,6 +897,7 @@ static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
     return 0;
 }
 
+// AAA better plot
 static void print_plot_str(uint16_t value, uint16_t pulse_threshold)
 {
     char    str[106];

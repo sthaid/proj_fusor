@@ -1453,7 +1453,6 @@ static void draw_graph2(int32_t file_idx)
     int32_t               i;
     char                  x_info_str[100];
     char                  y_info_str[100];
-    int32_t               baseline_mv;
 
     // init pointer to dp1, and read dp2
     dp1 = &file_data_part1[file_idx];
@@ -1464,27 +1463,14 @@ static void draw_graph2(int32_t file_idx)
         return;
     }
 
-    // determine baseline value
-    baseline_mv = 10000;
-    for (i = 0; i < MAX_ADC_SAMPLES; i++) {
-        if (dp1->data_part2_he3_adc_samples_mv_valid &&
-            dp2->he3_adc_samples_mv[i] < baseline_mv) 
-        {
-            baseline_mv = dp2->he3_adc_samples_mv[i];
-        }
-    }
-    if (baseline_mv == 10000) {
-        baseline_mv = 0;
-    }
-
     // init x_info str and y_info_str
     sprintf(x_info_str, "X: 2.4 MS");
-    sprintf(y_info_str, "Y: %d MV (1/2) BASE=%d MV", graph_y_max_mv, baseline_mv);
+    sprintf(y_info_str, "Y: %d MV (1/2) BASE=%d MV", graph_y_max_mv, dp2->he3_adc_samples_baseline_mv);
 
     // init arrays of the values to graph
     for (i = 0; i < MAX_ADC_SAMPLES; i++) {
         he3_adc_samples_mv_values[i] = dp1->data_part2_he3_adc_samples_mv_valid 
-                                       ? dp2->he3_adc_samples_mv[i] - baseline_mv 
+                                       ? dp2->he3_adc_samples_mv[i] - dp2->he3_adc_samples_baseline_mv 
                                        : ERROR_NO_VALUE;
     }
 

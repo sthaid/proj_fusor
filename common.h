@@ -89,8 +89,8 @@ typedef struct {
         int16_t  current_adc_samples_mv[MAX_ADC_SAMPLES];
         int16_t  pressure_adc_samples_mv[MAX_ADC_SAMPLES];
         int16_t  he3_adc_samples_mv[MAX_ADC_SAMPLES];        // scan rate is 500000 samples/sec
+        int32_t  he3_adc_samples_baseline_mv;
         uint32_t jpeg_buff_len;
-        uint8_t  pad[4];
         uint8_t  jpeg_buff[0];
     } part2;
 } data_t;

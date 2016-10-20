@@ -719,7 +719,7 @@ static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
             }
         }
         pulse_threshold = baseline + 15;  //XXX
-        DEBUG("pulse_threshold-2048=%d\n", pulse_threshold-2048);
+        DEBUG("pulse_threshold=%d\n", pulse_threshold-2048);
     }
 
     // search for pulses in the data
@@ -753,7 +753,7 @@ static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
 
         // if a pulse has been located ...
         if (pulse_end_idx != -1) {
-            int32_t pulse_height, pulse_channel, i;
+            int32_t pulse_height, pulse_channel, pulse_channel_orig, i;
 
             // scan from start to end of pulse to determine pulse_height
             pulse_height = -1;
@@ -765,8 +765,9 @@ static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
                 
             // determine pulse_channel from pulse_height
             pulse_channel = pulse_height / (MAX_PULSE_HEIGHT / MAX_HE3_CHAN);
+            pulse_channel_orig = pulse_channel;
             if (pulse_channel >= MAX_HE3_CHAN) {
-                WARN("chan being reduced from %d to %d\n", pulse_channel, MAX_HE3_CHAN-1);
+                DEBUG("chan being reduced from %d to %d\n", pulse_channel, MAX_HE3_CHAN-1);
                 pulse_channel = MAX_HE3_CHAN-1;
             }
 
@@ -780,19 +781,21 @@ static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
                 pulse_largest_baseline = pulse_threshold - 15;  // XXX
             }
 
-            // plot pulses when pulse_chan >= 1
-            if (pulse_channel >= 1) {
-                printf("pulse: height=%d  channel=%d  threshold-2048=%d\n",
-                       pulse_height, pulse_channel, pulse_threshold-2048);
-                int32_t pule_end_idx_extended = pulse_end_idx + 4;
-                if (pule_end_idx_extended >= max_data) {
-                    pule_end_idx_extended = max_data-1;
-                }
-                for (i = pulse_start_idx; i <= pule_end_idx_extended; i++) {
-                    print_plot_str(data[i], pulse_threshold);
-                }
-                printf("\n");
+            // plot all pulses
+            printf("pulse: height=%d  threshold=%d  channel=%d %d\n",
+                   pulse_height, pulse_threshold-2048, pulse_channel, pulse_channel_orig);
+            int32_t pulse_start_idx_extended = pulse_start_idx - 2;
+            int32_t pulse_end_idx_extended = pulse_end_idx + 2;
+            if (pulse_start_idx_extended < 0) {
+                pulse_end_idx_extended = 0;
             }
+            if (pulse_end_idx_extended >= max_data) {
+                pulse_end_idx_extended = max_data-1;
+            }
+            for (i = pulse_start_idx_extended; i <= pulse_end_idx_extended; i++) {
+                print_plot_str(data[i], pulse_threshold);
+            }
+            printf("\n");
 
             // done with this pulse
             pulse_start_idx = -1;
@@ -875,7 +878,7 @@ static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
         pthread_mutex_unlock(&he3_mutex);
 
         // print info
-        printf("%s  duration=%d  samples=%d  mccdaq_restarts=%d  pulse_threshold-2048=%d\n",
+        printf("%s  duration=%d  samples=%d  mccdaq_restarts=%d  pulse_threshold=%d\n",
                time2str(time_str, get_real_time_us(), false, true, true),
                max_pc1sh,
                max_data,
@@ -897,40 +900,48 @@ static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
     return 0;
 }
 
-// AAA better plot
 static void print_plot_str(uint16_t value, uint16_t pulse_threshold)
 {
-    char    str[106];
+    char    str[110];
     int32_t idx, i;
 
-    // value              : range 0 - 4095
-    // idx = value/40 + 1 : range  1 - 103
-    // plot_str:          :  0  1-51  52  53-103  104
-    //                    :  |        ^^           |
-
-    memset(str, ' ', sizeof(str)-1);
-    str[0]   = '|';
-    str[104] = '|';
-    str[105] = '\0';
+    // value                     : expected range 2048 - 4095
+    // idx = (value - 2048) / 20 : range  0 - 102
 
     if (value > 4095) {
         printf("%5d: value is out of range\n", value-2048);
         return;
     }
-    if (pulse_threshold > 4095 || pulse_threshold == 0) {
+    if (pulse_threshold > 4095) {
         printf("%5d: pulse_threshold is out of range\n", pulse_threshold);
         return;
     }
 
-    idx = value/40 + 1;
-    i = 52;
-    while (true) {
-        str[i] = '*';
-        if (i == idx) break;
-        i += (idx > 52 ? 1 : -1);
+    if (value < 2048) {
+        value = 2048;
     }
-    str[52] = '|';
-    str[pulse_threshold/40+1] = '>';
+    if (pulse_threshold < 2048) {
+        pulse_threshold = 2048;
+    }
+
+    bzero(str, sizeof(str));
+
+    idx = (value - 2048) / 20;
+    for (i = 0; i <= idx; i++) {
+        str[i] = '*';
+    }
+
+    idx = (pulse_threshold - 2048) / 20;
+    if (str[idx] == '*') {
+        str[idx] = '+';
+    } else {
+        str[idx] = '|';
+        for (i = 0; i < idx; i++) {
+            if (str[i] == '\0') {
+                str[i] = ' ';
+            }
+        }
+    }
 
     printf("%5d: %s\n", value-2048, str);
 }

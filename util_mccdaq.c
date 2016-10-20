@@ -20,6 +20,8 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
+#define MCCDAQ_TEST
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -36,11 +38,42 @@ SOFTWARE.
 #include <fcntl.h>
 #include <pthread.h>
 #include <math.h>
-#include <libusb/pmd.h>
-#include <libusb/usb-20X.h>
 
 #include "util_mccdaq.h"
 #include "util_misc.h"
+
+#ifndef MCCDAQ_TEST
+#include <libusb/pmd.h>
+#include <libusb/usb-20X.h>
+#else
+// from libusb ...
+enum libusb_error { 
+  LIBUSB_SUCCESS = 0, LIBUSB_ERROR_IO = -1, LIBUSB_ERROR_INVALID_PARAM = -2, LIBUSB_ERROR_ACCESS = -3, 
+  LIBUSB_ERROR_NO_DEVICE = -4, LIBUSB_ERROR_NOT_FOUND = -5, LIBUSB_ERROR_BUSY = -6, LIBUSB_ERROR_TIMEOUT = -7, 
+  LIBUSB_ERROR_OVERFLOW = -8, LIBUSB_ERROR_PIPE = -9, LIBUSB_ERROR_INTERRUPTED = -10, LIBUSB_ERROR_NO_MEM = -11, 
+  LIBUSB_ERROR_NOT_SUPPORTED = -12, LIBUSB_ERROR_OTHER = -99 };
+enum libusb_endpoint_direction { LIBUSB_ENDPOINT_IN = 0x80, LIBUSB_ENDPOINT_OUT = 0x00 };
+typedef struct libusb_device_handle libusb_device_handle;
+int libusb_init (void ** cx);
+int libusb_bulk_transfer (struct libusb_device_handle *dev_handle, unsigned char endpoint, 
+       unsigned char *data, int length, int *transferred, unsigned int timeout);
+int libusb_clear_halt (libusb_device_handle *dev, unsigned char endpoint);
+// from mccdaq library ...
+#define NCHAN_USB20X      8  // max number of A/D channels in the device
+#define USB204_PID   (0x0114)
+#define AIN_SCAN_RUNNING   (0x1 << 1)
+#define AIN_SCAN_OVERRUN   (0x1 << 2)
+libusb_device_handle* usb_device_find_USB_MCC(int productId, char *serialID);
+int usb_get_max_packet_size(libusb_device_handle* udev, int endpointNum);
+void usbCalDate_USB20X(libusb_device_handle *udev, struct tm *date);
+void usbBuildGainTable_USB20X(libusb_device_handle *udev, float table[NCHAN_USB20X][2]);
+void cleanup_USB20X(libusb_device_handle *udev);
+void usbAInScanStart_USB20X(libusb_device_handle *udev, uint32_t count, double frequency, 
+        uint8_t channels, uint8_t options, uint8_t trigger_source, uint8_t trigger_mode);
+uint16_t usbStatus_USB20X(libusb_device_handle *udev);
+void usbAInScanStop_USB20X(libusb_device_handle *udev);
+void usbAInScanClearFIFO_USB20X(libusb_device_handle *udev);
+#endif
 
 //
 // defines
@@ -400,3 +433,105 @@ static void * mccdaq_consumer_thread(void * cx)
 
     return NULL;
 }
+
+// -----------------  MCCDAQ TEST ---------------------------------------
+
+// unit test - simple simulation of the MCCDAQ ADC device
+
+#ifdef MCCDAQ_TEST
+
+int libusb_init (void ** cx)
+{
+    return LIBUSB_SUCCESS;
+}
+
+int libusb_bulk_transfer (struct libusb_device_handle *dev_handle, unsigned char endpoint,
+       unsigned char *data_arg, int length, int *transferred, unsigned int timeout)
+{
+    uint64_t us;
+    int32_t i;
+    uint16_t *data = (uint16_t*)data_arg;
+    uint32_t max_data = length / 2;
+
+    static uint64_t count;
+
+    // special case 2 byte length
+    if (length == 2) {
+        *transferred = 2;
+        return LIBUSB_SUCCESS;
+    }
+
+    // init the simulated return data
+    // XXX better simulation of changing baseline
+    for (i = 0; i < max_data; i++) {
+        data[i] = 2048+200+15;
+    }
+    if ((count++ % 25) == 0) {
+        data[max_data/2]   = 3000;
+        data[max_data/2+1] = 2600;
+        data[max_data/2+2] = 2150;
+        data[max_data/2+3] = 2200;
+    }
+
+    // set transferred length 
+    *transferred = length;
+
+    // delay 
+    us = max_data * 1000000L / FREQUENCY;
+    DEBUG("SLEEP %ld, MAX_DATA = %d\n", us, max_data);
+    usleep(us);
+
+    // return success
+    return 0;
+}
+
+int libusb_clear_halt (libusb_device_handle *dev, unsigned char endpoint)
+{
+    return 0;
+}
+
+libusb_device_handle* usb_device_find_USB_MCC(int productId, char *serialID)
+{
+    static int32_t  x;
+    return (libusb_device_handle*)&x;
+}
+
+int usb_get_max_packet_size(libusb_device_handle* udev, int endpointNum)
+{
+    return 64;
+}
+
+void usbCalDate_USB20X(libusb_device_handle *udev, struct tm *date)
+{
+    time_t t;
+    t = time(NULL);
+    *date = *localtime(&t);
+}
+
+void usbBuildGainTable_USB20X(libusb_device_handle *udev, float table[NCHAN_USB20X][2])
+{
+}
+
+void cleanup_USB20X(libusb_device_handle *udev)
+{
+}
+
+void usbAInScanStart_USB20X(libusb_device_handle *udev, uint32_t count, double frequency,
+        uint8_t channels, uint8_t options, uint8_t trigger_source, uint8_t trigger_mode)
+{
+}
+
+uint16_t usbStatus_USB20X(libusb_device_handle *udev)
+{
+    return AIN_SCAN_RUNNING;
+}
+
+void usbAInScanStop_USB20X(libusb_device_handle *udev)
+{
+}
+
+void usbAInScanClearFIFO_USB20X(libusb_device_handle *udev)
+{
+}
+
+#endif

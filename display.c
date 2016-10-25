@@ -66,7 +66,7 @@ SOFTWARE.
 
 #define MAX_FILE_DATA_PART1   86400   // 1 day
 #define MAX_DATA_PART2_LENGTH 1000000
-#define MAX_GRAPH             11
+#define MAX_GRAPH             7 
 
 #define FILE_DATA_PART2_OFFSET \
    ((sizeof(file_hdr_t) +  \
@@ -166,7 +166,6 @@ static void draw_graph0(int32_t file_idx);
 static void draw_graph1(int32_t file_idx);
 static void draw_graph2(int32_t file_idx);
 static void draw_graph3to6(int32_t file_idx);
-static void draw_graph7to10(int32_t file_idx);
 static void draw_graph_common(char * title_str, char * x_info_str, char * y_info_str, float cursor_pos, char * cursor_str, int32_t max_graph, ...);
 static int32_t generate_test_file(void);
 static char * val2str(float val);
@@ -1013,9 +1012,6 @@ static int32_t display_handler(void)
         case 3: case 4: case 5: case 6: 
             draw_graph3to6(file_idx);
             break;
-        case 7: case 8: case 9: case 10:
-            draw_graph7to10(file_idx);
-            break;
         default:
             FATAL("graph_select %d out of range\n", graph_select);
         }
@@ -1528,27 +1524,31 @@ static void draw_graph3to6(int32_t file_idx)
         int32_t chan;
         float * he3_cpm;
 
-        switch (avg_sec) {
-        case 1:
-            he3_cpm = file_data_part1[i].he3.cpm_1_sec;
-            break;
-        case 10:
-            he3_cpm = file_data_part1[i].he3.cpm_10_sec;
-            break;
-        case 60:
-            he3_cpm = file_data_part1[i].he3.cpm_60_sec;
-            break;
-        case 600:
-            he3_cpm = file_data_part1[i].he3.cpm_600_sec;
-            break;
-        default:
-            FATAL("avg_sec %d is invalid\n", avg_sec);
-            break;
-        }
-        for (chan = 0; chan < MAX_HE3_CHAN; chan++) {
-            cpm[chan][max_values] = (i >= 0 && i < file_hdr->max)
-                                    ? he3_cpm[chan]
-                                    : ERROR_NO_VALUE;
+        if (i < 0 || i >= file_hdr->max) {
+            for (chan = 0; chan < MAX_HE3_CHAN; chan++) {
+                cpm[chan][max_values] = ERROR_NO_VALUE;
+            }
+        } else {
+            switch (avg_sec) {
+            case 1:
+                he3_cpm = file_data_part1[i].he3.cpm_1_sec;
+                break;
+            case 10:
+                he3_cpm = file_data_part1[i].he3.cpm_10_sec;
+                break;
+            case 60:
+                he3_cpm = file_data_part1[i].he3.cpm_60_sec;
+                break;
+            case 600:
+                he3_cpm = file_data_part1[i].he3.cpm_600_sec;
+                break;
+            default:
+                FATAL("avg_sec %d is invalid\n", avg_sec);
+                break;
+            }
+            for (chan = 0; chan < MAX_HE3_CHAN; chan++) {
+                cpm[chan][max_values] = he3_cpm[chan];
+            }
         }
         max_values++;
     }
@@ -1565,82 +1565,6 @@ static void draw_graph3to6(int32_t file_idx)
         val2str2(cpm[5][i], "CPM"), ORANGE,     graph_y_max_cpm,    max_values, cpm[5],
         val2str2(cpm[6][i], "CPM"), PINK,       graph_y_max_cpm,    max_values, cpm[6],
         val2str2(cpm[7][i], "CPM"), RED,        graph_y_max_cpm,    max_values, cpm[7]);
-}
-
-static void draw_graph7to10(int32_t file_idx)
-{
-    float    cpm[MAX_FILE_DATA_PART1];
-    int32_t  file_idx_start, file_idx_end, max_values, i, avg_sec;
-    uint64_t cursor_time_us;
-    float    cursor_pos;
-    char     x_info_str[100];
-    char     y_info_str[100];
-    char     title_str[100];
-    char     cursor_str[100];
-
-    // init avg_sec;
-    avg_sec = (graph_select ==  7 ? 1   : 
-               graph_select ==  8 ? 10  : 
-               graph_select ==  9 ? 60  :
-               graph_select == 10 ? 600 
-                                  : -1);
-    if (avg_sec == -1) {
-        FATAL("invalid graph_select %d\n", graph_select);
-    }
-
-    // init x_info_str, y_info_str, and title_str
-    sprintf(x_info_str, "X: %d SEC (-/+)", graph_x_time_span_sec);
-    sprintf(y_info_str, "Y: %0.1f CPM (1/2)", graph_y_max_cpm);
-    sprintf(title_str, "NEUTRON CPM %d SEC AVG", avg_sec);
-
-    // init file_idx_start & file_idx_end
-    if (mode == LIVE) {
-        file_idx_end   = file_idx;
-        file_idx_start = file_idx_end - (graph_x_time_span_sec - 1);
-    } else {
-        file_idx_start = file_idx - graph_x_time_span_sec / 2;
-        file_idx_end   = file_idx_start + graph_x_time_span_sec - 1;
-    }
-
-    // init cursor position and string
-    cursor_time_us = file_data_part1[file_idx].time * 1000000;
-    cursor_pos = (float)(file_idx - file_idx_start) / (graph_x_time_span_sec - 1);
-    time2str(cursor_str, cursor_time_us, false, false, false);
-
-    // init arrays of the values to graph
-    max_values = 0;
-    for (i = file_idx_start; i <= file_idx_end; i++) {
-        float * he3_cpm;
-        switch (avg_sec) {
-        case 1:
-            he3_cpm = file_data_part1[i].he3.cpm_1_sec;
-            break;
-        case 10:
-            he3_cpm = file_data_part1[i].he3.cpm_10_sec;
-            break;
-        case 60:
-            he3_cpm = file_data_part1[i].he3.cpm_60_sec;
-            break;
-        case 600:
-            he3_cpm = file_data_part1[i].he3.cpm_600_sec;
-            break;
-        default:
-            FATAL("avg_sec %d is invalid\n", avg_sec);
-            break;
-        }
-        if (i >= 0 && i < file_hdr->max && he3_cpm[0] != ERROR_NO_VALUE) {
-            cpm[max_values] = he3_cpm[2] + he3_cpm[3] + he3_cpm[4] + he3_cpm[5] + he3_cpm[6] + he3_cpm[7];
-        } else {
-            cpm[max_values] = ERROR_NO_VALUE;
-        }
-        max_values++;
-    }
-
-    // draw the graph
-    i = file_idx - file_idx_start;
-    draw_graph_common(
-        title_str, x_info_str, y_info_str, cursor_pos, cursor_str, 1,
-        val2str2(cpm[i], "CPM"), RED, graph_y_max_cpm, max_values, cpm);
 }
 
 static void draw_graph_common(char * title_str, char * x_info_str, char * y_info_str, float cursor_pos, char * cursor_str, int32_t max_graph, ...)

@@ -22,7 +22,7 @@ OBJ_DISPLAY=$(SRC_DISPLAY:.c=.o)
 
 DEP=$(SRC_GET_DATA:.c=.d) $(SRC_DISPLAY:.c=.d)
 
-MCCDAQ_TEST=true
+MCCDAQ_TEST=
 
 #
 # build rules

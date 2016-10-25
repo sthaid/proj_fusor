@@ -20,7 +20,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-#define MCCDAQ_TEST
+//#define MCCDAQ_TEST
 
 #include <stdio.h>
 #include <stdlib.h>

@@ -161,8 +161,8 @@ static void draw_graph_scale_select(char key);
 static void draw_graph0(int32_t file_idx);
 static void draw_graph1(int32_t file_idx);
 static void draw_graph2(int32_t file_idx);
-static void draw_graph3to8(int32_t file_idx);
-static void draw_graph9to14(int32_t file_idx);
+static void draw_graph3to6(int32_t file_idx);
+static void draw_graph7to10(int32_t file_idx);
 static void draw_graph_common(char * title_str, char * x_info_str, char * y_info_str, float cursor_pos, char * cursor_str, int32_t max_graph, ...);
 static int32_t generate_test_file(void);
 static char * val2str(float val);
@@ -519,8 +519,6 @@ static void * get_live_data_thread(void * cx)
         he3_novalue.cpm_10_sec[chan] = ERROR_NO_VALUE;
         he3_novalue.cpm_60_sec[chan] = ERROR_NO_VALUE;
         he3_novalue.cpm_600_sec[chan] = ERROR_NO_VALUE;
-        he3_novalue.cpm_3600_sec[chan] = ERROR_NO_VALUE;
-        he3_novalue.cpm_14400_sec[chan] = ERROR_NO_VALUE;
     }
 
     dp1                                           = &data_novalue.part1;
@@ -1008,11 +1006,11 @@ static int32_t display_handler(void)
         case 2:
             draw_graph2(file_idx);
             break;
-        case 3: case 4: case 5: case 6: case 7: case 8:
-            draw_graph3to8(file_idx);
+        case 3: case 4: case 5: case 6: 
+            draw_graph3to6(file_idx);
             break;
-        case 9: case 10: case 11: case 12: case 13: case 14:
-            draw_graph9to14(file_idx);
+        case 7: case 8: case 9: case 10:
+            draw_graph7to10(file_idx);
             break;
         default:
             FATAL("graph_select %d out of range\n", graph_select);
@@ -1480,7 +1478,7 @@ static void draw_graph2(int32_t file_idx)
         "HE3 ", PURPLE, (double)graph_y_max_mv, MAX_ADC_SAMPLES, he3_adc_samples_mv_values);
 }
 
-static void draw_graph3to8(int32_t file_idx)
+static void draw_graph3to6(int32_t file_idx)
 {
     float    cpm[MAX_HE3_CHAN][MAX_FILE_DATA_PART1];
     int32_t  file_idx_start, file_idx_end, max_values, i, avg_sec;
@@ -1492,12 +1490,10 @@ static void draw_graph3to8(int32_t file_idx)
     char     cursor_str[100];
 
     // init avg_sec;
-    avg_sec = (graph_select == 3 ? 1    : 
-               graph_select == 4 ? 10   : 
-               graph_select == 5 ? 60   :
-               graph_select == 6 ? 600  : 
-               graph_select == 7 ? 3600 :
-               graph_select == 8 ? 14400   
+    avg_sec = (graph_select == 3 ? 1   : 
+               graph_select == 4 ? 10  : 
+               graph_select == 5 ? 60  :
+               graph_select == 6 ? 600  
                                  : -1);
     if (avg_sec == -1) {
         FATAL("invalid graph_select %d\n", graph_select);
@@ -1541,12 +1537,6 @@ static void draw_graph3to8(int32_t file_idx)
         case 600:
             he3_cpm = file_data_part1[i].he3.cpm_600_sec;
             break;
-        case 3600:
-            he3_cpm = file_data_part1[i].he3.cpm_3600_sec;
-            break;
-        case 14400:
-            he3_cpm = file_data_part1[i].he3.cpm_14400_sec;
-            break;
         default:
             FATAL("avg_sec %d is invalid\n", avg_sec);
             break;
@@ -1573,7 +1563,7 @@ static void draw_graph3to8(int32_t file_idx)
         val2str2(cpm[7][i], "CPM"), RED,        graph_y_max_cpm,    max_values, cpm[7]);
 }
 
-static void draw_graph9to14(int32_t file_idx)
+static void draw_graph7to10(int32_t file_idx)
 {
     float    cpm[MAX_FILE_DATA_PART1];
     int32_t  file_idx_start, file_idx_end, max_values, i, avg_sec;
@@ -1585,12 +1575,10 @@ static void draw_graph9to14(int32_t file_idx)
     char     cursor_str[100];
 
     // init avg_sec;
-    avg_sec = (graph_select ==  9 ? 1    : 
-               graph_select == 10 ? 10   : 
-               graph_select == 11 ? 60   :
-               graph_select == 12 ? 600  : 
-               graph_select == 13 ? 3600 :
-               graph_select == 14 ? 14400   
+    avg_sec = (graph_select ==  7 ? 1   : 
+               graph_select ==  8 ? 10  : 
+               graph_select ==  9 ? 60  :
+               graph_select == 10 ? 600 
                                   : -1);
     if (avg_sec == -1) {
         FATAL("invalid graph_select %d\n", graph_select);
@@ -1631,12 +1619,6 @@ static void draw_graph9to14(int32_t file_idx)
             break;
         case 600:
             he3_cpm = file_data_part1[i].he3.cpm_600_sec;
-            break;
-        case 3600:
-            he3_cpm = file_data_part1[i].he3.cpm_3600_sec;
-            break;
-        case 14400:
-            he3_cpm = file_data_part1[i].he3.cpm_14400_sec;
             break;
         default:
             FATAL("avg_sec %d is invalid\n", avg_sec);

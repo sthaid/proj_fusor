@@ -56,8 +56,6 @@ typedef struct {
     float     cpm_10_sec[MAX_HE3_CHAN];
     float     cpm_60_sec[MAX_HE3_CHAN];
     float     cpm_600_sec[MAX_HE3_CHAN];
-    float     cpm_3600_sec[MAX_HE3_CHAN];
-    float     cpm_14400_sec[MAX_HE3_CHAN];
 } he3_t;
 
 // data_part1_s and data_part2_s are each padded to 8 byte boundary

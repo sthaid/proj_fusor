@@ -440,8 +440,22 @@ static void * mccdaq_consumer_thread(void * cx)
 
 #ifdef MCCDAQ_TEST
 
+#define MAX_SIM_DATA 10000
+
+static uint16_t g_sim_data[MAX_SIM_DATA];
+
 int libusb_init (void ** cx)
 {
+    uint16_t value = 2400;
+    int32_t i;
+
+    for (i = 0; i < MAX_SIM_DATA; i++) {
+        g_sim_data[i] = value;
+        if ((i % 25) == 24) {
+            value = value + (i < MAX_SIM_DATA/2 ? 1 : -1);
+        }
+    }
+        
     return LIBUSB_SUCCESS;
 }
 
@@ -449,11 +463,15 @@ int libusb_bulk_transfer (struct libusb_device_handle *dev_handle, unsigned char
        unsigned char *data_arg, int length, int *transferred, unsigned int timeout)
 {
     uint64_t us;
-    int32_t i;
     uint16_t *data = (uint16_t*)data_arg;
     uint32_t max_data = length / 2;
 
     static uint64_t count;
+
+    // validate length and max_data
+    if (length <= 0 || (length & 1) || max_data > MAX_SIM_DATA) {
+        FATAL("invalid length %d, max_data %d\n", length, max_data);
+    }
 
     // special case 2 byte length
     if (length == 2) {
@@ -462,16 +480,21 @@ int libusb_bulk_transfer (struct libusb_device_handle *dev_handle, unsigned char
     }
 
     // init the simulated return data
-    // XXX better simulation of changing baseline
-    for (i = 0; i < max_data; i++) {
-        data[i] = 2048+200+15;
+    memcpy(data, g_sim_data, length);
+    if (((count % 25) == 0) && (max_data > 20)) {
+        if ((count/25) & 1) {
+            data[0]   = 3000;
+            data[1] = 2600;
+            data[2] = 2150;
+            data[3] = 2300;
+        } else {
+            data[max_data/2+0] = 3000;
+            data[max_data/2+1] = 2600;
+            data[max_data/2+2] = 2150;
+            data[max_data/2+3] = 2300;
+        }
     }
-    if ((count++ % 25) == 0) {
-        data[max_data/2]   = 3000;
-        data[max_data/2+1] = 2600;
-        data[max_data/2+2] = 2150;
-        data[max_data/2+3] = 2200;
-    }
+    count++;
 
     // set transferred length 
     *transferred = length;

@@ -682,7 +682,7 @@ static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
             printf("\n"); \
         } while (0)
 
-    #define PULSE_THRESHOLD (baseline + 15)
+    #define PULSE_THRESHOLD (baseline + 12)
 
     // if max_data too big then 
     //   print an error 

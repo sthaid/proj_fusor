@@ -491,6 +491,8 @@ static void init_data_struct(data_t * data, time_t time_now)
 
 static float convert_adc_voltage(float adc_volts)
 {
+    #define TUNE_KV   1.43
+
     // My fusor's voltage divider is made up of a 1G Ohm resistor, and
     // a 100K Ohm resistor. In parallel with the 100K Ohm resistor are
     // the panel meter and the dataq adc input, which have resistances of
@@ -507,18 +509,20 @@ static float convert_adc_voltage(float adc_volts)
     //
     // Vhv = Vadc * (1G / 94.34K) / 1000      (killo-volts)
 
-    return adc_volts * (1E9 / 94.34E3 / 1000.);    // kV
+    return adc_volts * (1E9 / 94.34E3 / 1000.) + TUNE_KV;    // kV
 }
 
 static float convert_adc_current(float adc_volts)
 {
+    #define TUNE_MA   0.14
+
     // My fusor's current measurement resistor is 100 Ohm.
 
     // I = Vadc / 100            (amps)
     //
     // I = Vadc / 100 * 1000     (milli-amps)
 
-    return adc_volts * 10.;    // mA
+    return adc_volts * 10. + TUNE_MA;    // mA
 }
 
 // -----------------  CONVERT ADC PRESSURE GAUGE  ----------------------------
@@ -652,9 +656,8 @@ static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
     static int32_t  pulse_counts_1_sec_history[MAX_PC1SH][MAX_HE3_CHAN];
     static int32_t  max_pc1sh;
 
-    // TUNING DEFINES
-    #define MAX_PULSE_HEIGHT 1712            // baseline is 339;  339+1712 ~= 2048
-    #define PULSE_THRESHOLD (baseline + 10)
+    #define TUNE_MAX_PULSE_HEIGHT 1712            // baseline is 339;  339+1712 ~= 2048
+    #define TUNE_PULSE_THRESHOLD  10
 
     #define RESET_FOR_NEXT_SEC \
         do { \
@@ -750,10 +753,10 @@ static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
         }
 
         // determine the pulse_start_idx and pulse_end_idx
-        if (data[idx] >= PULSE_THRESHOLD && pulse_start_idx == -1) {
+        if (data[idx] >= (baseline + TUNE_PULSE_THRESHOLD) && pulse_start_idx == -1) {
             pulse_start_idx = idx;
         } else if (pulse_start_idx != -1) {
-            if (data[idx] < PULSE_THRESHOLD) {
+            if (data[idx] < (baseline + TUNE_PULSE_THRESHOLD)) {
                 pulse_end_idx = idx - 1;
             } else if (idx - pulse_start_idx >= 10) {
                 WARN("discarding a possible pulse because it's too long, pulse_start_idx=%d\n",
@@ -769,7 +772,7 @@ static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
 
             // scan from start to end of pulse to determine pulse_height,
             // where pulse_height is the height above the pulse threshold
-            // XXX or should baseline be PULSE_THRESHOLD 
+            // XXX or should baseline be baseline+TUNE_PULSE_THRESHOLD 
             pulse_height = -1;
             for (i = pulse_start_idx; i <= pulse_end_idx; i++) {
                 if (data[i] - baseline > pulse_height) {
@@ -778,7 +781,7 @@ static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
             }
                 
             // determine pulse_channel from pulse_height
-            pulse_channel = pulse_height / (MAX_PULSE_HEIGHT / MAX_HE3_CHAN);
+            pulse_channel = pulse_height / (TUNE_MAX_PULSE_HEIGHT / MAX_HE3_CHAN);
             pulse_channel_orig = pulse_channel;
             if (pulse_channel >= MAX_HE3_CHAN) {
                 DEBUG("chan being reduced from %d to %d\n", pulse_channel, MAX_HE3_CHAN-1);

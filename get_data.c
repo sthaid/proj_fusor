@@ -652,7 +652,9 @@ static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
     static int32_t  pulse_counts_1_sec_history[MAX_PC1SH][MAX_HE3_CHAN];
     static int32_t  max_pc1sh;
 
-    #define MAX_PULSE_HEIGHT 96     // 488 mv - note: best is this is multiple of MAX_HE3_CHAN
+    // TUNING DEFINES
+    #define MAX_PULSE_HEIGHT 1712            // baseline is 339;  339+1712 ~= 2048
+    #define PULSE_THRESHOLD (baseline + 10)
 
     #define RESET_FOR_NEXT_SEC \
         do { \
@@ -681,8 +683,6 @@ static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
             } \
             printf("\n"); \
         } while (0)
-
-    #define PULSE_THRESHOLD (baseline + 12)
 
     // if max_data too big then 
     //   print an error 
@@ -769,10 +769,11 @@ static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
 
             // scan from start to end of pulse to determine pulse_height,
             // where pulse_height is the height above the pulse threshold
+            // XXX or should baseline be PULSE_THRESHOLD 
             pulse_height = -1;
             for (i = pulse_start_idx; i <= pulse_end_idx; i++) {
-                if (data[i] - PULSE_THRESHOLD > pulse_height) {
-                    pulse_height = data[i] - PULSE_THRESHOLD;
+                if (data[i] - baseline > pulse_height) {
+                    pulse_height = data[i] - baseline;
                 }
             }
                 
@@ -795,8 +796,12 @@ static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
             }
 
             // plot the pulse
-            INFO("PULSE height=%d baseline=%d threshold=%d channel=%d channel_orig=%d\n",
-                   pulse_height, baseline-2048, PULSE_THRESHOLD-2048, pulse_channel, pulse_channel_orig);
+            INFO("PULSE height=%d height_mv=%d baseline=%d channel=%d channel_orig=%d\n",
+                   pulse_height, 
+                   pulse_height * 1000 / 205,
+                   baseline-2048, 
+                   pulse_channel, 
+                   pulse_channel_orig);
             int32_t pulse_start_idx_extended = pulse_start_idx - 1;
             int32_t pulse_end_idx_extended = pulse_end_idx + 4;
             if (pulse_start_idx_extended < 0) {

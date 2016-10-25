@@ -84,7 +84,11 @@ SOFTWARE.
 //#define JPEG_BUFF_SAMPLE_CREATE_ENABLE
 #define JPEG_BUFF_SAMPLE_FILENAME "jpeg_buff_sample.bin"
 
-#define NEUTRON_CPM(_file_idx) (file_data_part1[_file_idx].he3.cpm_10_sec[2] + \
+// all channels are summed to get neutron cpm
+// XXX perhaps should change NEUTRON_CPM calculation later
+#define NEUTRON_CPM(_file_idx) (file_data_part1[_file_idx].he3.cpm_10_sec[0] + \
+                                file_data_part1[_file_idx].he3.cpm_10_sec[1] + \
+                                file_data_part1[_file_idx].he3.cpm_10_sec[2] + \
                                 file_data_part1[_file_idx].he3.cpm_10_sec[3] + \
                                 file_data_part1[_file_idx].he3.cpm_10_sec[4] + \
                                 file_data_part1[_file_idx].he3.cpm_10_sec[5] + \

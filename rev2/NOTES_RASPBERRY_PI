@@ -1,0 +1,249 @@
+================================
+INSTALL RASPBERRY PI 3
+================================
+
+Notes:
+- to reinstall: press shift when booting
+- to repair
+  . press shift when booting
+  . add to config   init=/bin/sh
+  . mount -o remount,rw /
+- default login=pi  password=raspberry
+
+Install from NOOBS flash card
+- select language and keyboard at bottom of display
+- install raspbian
+- boot
+
+Menu -> RaspberryPi Configuration -> Localization
+- Locale, TZ, Keyboard
+- Reboot and verify TZ and keyboard are okay
+
+Enable Wifi
+- left click on network icon
+- select wifi network and password
+
+Configure using raspi-config
+- Boot Options -> Console
+- Reboot
+
+Root Account Password
+- set root password
+
+Add user account 
+- adduser
+- add sudo access for this user
+- scp files to the home directory
+  - .bashrc, .bash_profile, .vimrc, .ssh, bin
+- verify can login via ssh to this account
+
+Updates, and install additional packages:
+  apt-get update
+  apt-get dist-upgrade
+  reboot
+  apt-get install libudev-dev libevdev-dev libreadline-dev libjpeg-dev
+  apt-get install libfreetype6-dev
+  apt-get install vim tk cscope
+
+Tweaks:
+- Enable core dumps for suid processes:
+    - add te following to /etc/sysctl.conf
+          fs.suid_dumpable=1
+- Apply USB Patch to make webcam work 
+    - add the folloing to /boot/cmdline.txt
+          dwc_otg.fiq_fsm_enable=0
+    - see https://github.com/raspberrypi/linux/issues/618 for information
+    - this seems to fix a webcam failure that occurs when closing and reopening the /dev/video0
+- reboot
+
+Install SDL2 - use this script
+    #!/bin/bash
+
+    url="http://www.libsdl.org"
+    sdl="SDL2-2.0.3"
+    sdl_url="${url}/release/${sdl}.tar.gz"
+    image="SDL2_image-2.0.0"
+    image_url="${url}/projects/SDL_image/release/${image}.tar.gz"
+    mixer="SDL2_mixer-2.0.0"
+    mixer_url="${url}/projects/SDL_mixer/release/${mixer}.tar.gz"
+    ttf="SDL2_ttf-2.0.12"
+    ttf_url="${url}/projects/SDL_ttf/release/${ttf}.tar.gz"
+
+    get_build_install () {
+      cd ~/sdl2
+      wget -N $1
+      tar -xzf $2.tar.gz
+      cd $2
+      ./configure $3 | tee configure.out
+      make
+      sudo make install
+    }
+
+    mkdir ~/sdl2
+    if [ $? -ne 0 ]; then
+      echo "failed to create sdl2 build directory"
+      exit
+    fi
+
+    get_build_install $sdl_url    $sdl    "--host=armv7l-raspberry-linux-gnueabihf"
+    get_build_install $image_url  $image
+    get_build_install $mixer_url  $mixer
+    get_build_install $ttf_url    $ttf
+
+Configure GIT
+    git config --global user.name "First Last"
+    git config --global user.email user@gmail.com
+    git config --global credential.helper cache
+    git config --global credential.helper 'cache --timeout=3600'
+    git config --global core.editor "vim"
+
+Build and install fusor software
+- update /etc/hosts, add the following
+     192.168.1.60   home
+     192.168.1.117  rpi_data
+     192.168.1.11   rpi_display
+- get the software
+    git clone https://github.com/sthaid/proj_fusor.git
+- build
+    cd proj_fusor
+    make display     
+    make get_data
+- if this computer is for the get_data program then add the
+  followint to /etc/rc.local to automatically start the get_data program
+    # Start get_data
+    if [ -x /home/<user_id>/proj_fusor/get_data ]
+    then
+      su <user_id> -c "cd /home/<user_id>/proj_fusor; ./get_data </dev/null &>>get_data.log &"
+    fi
+- refer to NOTES_FUSOR_SOFTWARE for usage
+
+Install support software for the Measurement Computing USB 204 ADC
+on the Raspberry Pi that will be running the get_data program.
+- The procedure outlined below is from http://www.mccdaq.com/TechTips/TechTip-9.aspx
+- Procedure ...
+    # make a directory
+    mkdir mccdaq
+    cd mccdaq/
+  
+    # Download MCC Drivers and test apps are contained in the MCCLIBHID.1.61.tgz 
+    sudo apt-get install ftp
+    ftp lx10.tx.ncsu.edu   (anonymous  <your-email-address>)
+      cd pub/Linux/drivers
+      get 61-mcc.rules
+      cd USB
+      get MCCLIBUSB.tgz
+      exit
+  
+    # Install libusb, a C library that provides generic access to USB devices:
+    sudo apt-get install libusb-1.0-0 libusb-1.0-0-dev
+  
+    # Copy the mcc USB rules file to the /etc/udev/rules.d directory, renaming it to 99-mcc.rules 
+    # (preventing an issue with the standard naming on the Raspberry Pi): 
+    sudo cp 61-mcc.rules /etc/udev/rules.d/99-mcc.rules
+  
+    # Clone the hidapi GIT repository to the home/pi directory, and
+    # build & install
+    sudo apt-get install libudev-dev libfox-1.6-dev autotools-dev autoconf automake libtool
+    git clone git://github.com/signal11/hidapi.git
+    cd hidapi
+    ./bootstrap
+    ./configure 
+    make
+    sudo make install
+  
+    # reboot
+    sudo reboot
+  
+    # install MCC Linux software
+    cd mccdaq/
+    tar zxvf MCCLIBUSB.tgz
+    cd mcc-libusb
+    make
+    sudo make install
+    sudo ldconfig
+  
+    # run the test app
+    cd mcc-libusb
+    ./test-usb20X
+
+================================
+EXAMPLES of .bashrc, .bash_profile, .vimrc
+================================
+
+---- .bashrc ---
+
+# .bashrc
+
+# Source global definitions
+if [ -f /etc/bashrc ]; then
+	. /etc/bashrc
+fi
+
+# update ulimit for core dump
+ulimit -c unlimited
+
+# General Command aliases
+alias ls='ls -l --color=always --group-directories-first --human-readable'
+alias bashrc='source ~/.bashrc'
+alias bash_profile='source ~/.bash_profile'
+
+# cd aliases
+alias pf='cd ~/proj_fusor'
+
+--- .bash_profile ---
+
+# .bash_profile
+
+# Get the aliases and functions
+if [ -f ~/.bashrc ]; then
+	. ~/.bashrc
+fi
+
+# User specific environment and startup programs
+export PATH=$PATH:.:$HOME/bin
+export GIT_EXTERNAL_DIFF=~/bin/git_external_diff
+export LD_LIBRARY_PATH=/usr/local/lib
+export PS1='[RPI_DISPLAY \u@\h \W]\$ '
+
+--- .vimrc ---
+
+" use 4 spaces for tab indent
+set expandtab
+set tabstop=8
+set softtabstop=4
+set shiftwidth=4
+set background=dark
+colors default
+syntax on
+set hlsearch
+
+================================
+NOTES - FOR INFORMATION ONLY
+================================
+
+GRAPHICS ACCELERATOR
+  To test graphics accelerator:
+  - need to configure advanced gpu driver using raspi-config
+  - sudo apt-get install mesa-utils
+    - glxgears
+  - should see about 60 FPS and no graphics glitches
+  - note: I did see a hang with graphics accel enabled, when resising terminal
+          window;  so suggest don't use X windows
+
+SDL2 LIBRARY PATH INFO
+  The following note is from the SDL build output:
+      If you ever happen to want to link against installed libraries
+      in a given directory, LIBDIR, you must either use libtool, and
+      specify the full pathname of the library, or use the `-LLIBDIR'
+      flag during linking and do at least one of the following:
+         - add LIBDIR to the `LD_LIBRARY_PATH' environment variable
+           during execution
+         - add LIBDIR to the `LD_RUN_PATH' environment variable
+           during linking
+         - use the `-Wl,-rpath -Wl,LIBDIR' linker flag
+         - have your system administrator add LIBDIR to `/etc/ld.so.conf'
+  See any operating system documentation about shared libraries for
+  more information, such as the ld(1) and ld.so(8) manual pages.
+
+SDL2 PROBLEM GETTING KEYBOARD EVENTS
+  https://forums.libsdl.org/viewtopic.php?t=10483&sid=38991cf938c103990a18f389312e0f42

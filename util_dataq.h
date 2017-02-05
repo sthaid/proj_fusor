@@ -30,6 +30,6 @@ int32_t dataq_get_adc(int32_t adc_chan,
                       int16_t * mean_mv, int16_t * sdev_mv,
                       int16_t * min_mv, int16_t * max_mv);
 
-int32_t dataq_get_adc_samples(int32_t adc_chan, int16_t * samples_mv, int32_t count);
+int32_t dataq_get_adc_data(int32_t adc_chan, int16_t * samples_mv, int32_t count);
 
 #endif

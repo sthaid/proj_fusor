@@ -19,6 +19,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
+//XXX ctrl-esc not working
 
 #define _FILE_OFFSET_BITS 64
 
@@ -238,9 +239,13 @@ static int32_t initialize(int32_t argc, char ** argv)
     rl.rlim_max = RLIM_INFINITY;
     setrlimit(RLIMIT_CORE, &rl);
 
-    // check size of data struct on 64bit linux and rpi
+    // print size of data part1 and part2, and validate sizes are multiple of 8
     DEBUG("sizeof data_t=%zd part1=%zd part2=%zd\n",
-           sizeof(data_t), sizeof(struct data_part1_s), sizeof(struct data_part2_s));
+          sizeof(data_t), sizeof(struct data_part1_s), sizeof(struct data_part2_s));
+    if ((sizeof(struct data_part1_s) % 8) || (sizeof(struct data_part2_s) % 8)) {
+        FATAL("sizeof data_t=%zd part1=%zd part2=%zd\n",
+              sizeof(data_t), sizeof(struct data_part1_s), sizeof(struct data_part2_s));
+    }
 
     // init globals that are not 0
     mode = LIVE;

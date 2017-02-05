@@ -22,7 +22,7 @@ OBJ_DISPLAY=$(SRC_DISPLAY:.c=.o)
 
 DEP=$(SRC_GET_DATA:.c=.d) $(SRC_DISPLAY:.c=.d)
 
-MCCDAQ_TEST=
+MCCDAQ_TEST=true
 
 #
 # build rules
@@ -37,6 +37,7 @@ get_data: $(OBJ_GET_DATA)
 	sudo chown root:root $@
 	sudo chmod 4777 $@
 else
+CFLAGS += -DMCCDAQ_TEST
 get_data: $(OBJ_GET_DATA) 
 	$(CC) -pthread -lrt -lm -o $@ $(OBJ_GET_DATA) 
 endif

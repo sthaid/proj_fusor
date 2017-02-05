@@ -85,11 +85,11 @@ static uint64_t        jpeg_buff_us;
 static pthread_mutex_t jpeg_mutex = PTHREAD_MUTEX_INITIALIZER;
 #endif
 
-static pthread_mutex_t he3_mutex = PTHREAD_MUTEX_INITIALIZER;
-static uint64_t        he3_time;
-static he3_t           he3;
-static int16_t         he3_adc_samples_mv[MAX_ADC_SAMPLES];
-static int32_t         he3_adc_samples_baseline_mv;
+static pthread_mutex_t neutron_mutex = PTHREAD_MUTEX_INITIALIZER;
+static uint64_t        neutron_time;
+static float           neutron_cps;
+static int16_t         neutron_adc_data[MAX_ADC_DATA];
+static uint32_t        max_neutron_adc_data;
 
 //
 // prototypes
@@ -145,9 +145,13 @@ static void init(void)
     rl.rlim_max = RLIM_INFINITY;
     setrlimit(RLIMIT_CORE, &rl);
 
-    // print size of data part1 and part2
+    // print size of data part1 and part2, and validate sizes are multiple of 8
     DEBUG("sizeof data_t=%zd part1=%zd part2=%zd\n",
           sizeof(data_t), sizeof(struct data_part1_s), sizeof(struct data_part2_s));
+    if ((sizeof(struct data_part1_s) % 8) || (sizeof(struct data_part2_s) % 8)) {
+        FATAL("sizeof data_t=%zd part1=%zd part2=%zd\n",
+              sizeof(data_t), sizeof(struct data_part1_s), sizeof(struct data_part2_s));
+    }
 
     // register signal handler for SIGINT, and SIGTERM
     bzero(&action, sizeof(action));
@@ -366,8 +370,8 @@ exit_thread:
 
 static void init_data_struct(data_t * data, time_t time_now)
 {
-    int16_t mean_mv, min_mv, max_mv;
-    int32_t ret, wait_ms, chan;
+    int16_t mean_mv, max_mv;
+    int32_t ret, wait_ms;
     bool    ret1, ret2, ret3, ret4;
 
     // 
@@ -385,14 +389,10 @@ static void init_data_struct(data_t * data, time_t time_now)
     data->part1.time  = time_now;
 
     // data part1 voltage_min_kv, voltage_max_kv, and voltage_mean_kv
-    ret = dataq_get_adc(DATAQ_ADC_CHAN_VOLTAGE, NULL, &mean_mv, NULL, &min_mv, &max_mv);
+    ret = dataq_get_adc(DATAQ_ADC_CHAN_VOLTAGE, NULL, &mean_mv, NULL, NULL, NULL);         
     if (ret == 0) {
-        data->part1.voltage_min_kv  = convert_adc_voltage(min_mv/1000.);
-        data->part1.voltage_max_kv  = convert_adc_voltage(max_mv/1000.);
         data->part1.voltage_mean_kv = convert_adc_voltage(mean_mv/1000.);
     } else {
-        data->part1.voltage_min_kv  = ERROR_NO_VALUE;
-        data->part1.voltage_max_kv  = ERROR_NO_VALUE;
         data->part1.voltage_mean_kv = ERROR_NO_VALUE;
     }
 
@@ -404,33 +404,26 @@ static void init_data_struct(data_t * data, time_t time_now)
         data->part1.current_ma = ERROR_NO_VALUE;
     }
 
-    // data part1 pressure_xx_mtorr
+    // data part1 pressure_d2_mtorr
     ret = dataq_get_adc(DATAQ_ADC_CHAN_PRESSURE, NULL, NULL, NULL, NULL, &max_mv);
     if (ret == 0) {
         data->part1.pressure_d2_mtorr = convert_adc_pressure(max_mv/1000., GAS_ID_D2);
-        data->part1.pressure_n2_mtorr = convert_adc_pressure(max_mv/1000., GAS_ID_N2);
     } else {
         data->part1.pressure_d2_mtorr = ERROR_NO_VALUE;
-        data->part1.pressure_n2_mtorr = ERROR_NO_VALUE;
     }
 
-    // wait for up to 250 ms for he3 data to be available for time_now;  
-    // if he3 data avail then copy it into data part1 and part2
-    for (wait_ms = 0; he3_time != time_now && wait_ms < 250; wait_ms++) {
+    // wait for up to 250 ms for neutron data to be available for time_now;  
+    // if neutron data avail then copy it into data part1 and part2
+    for (wait_ms = 0; neutron_time != time_now && wait_ms < 250; wait_ms++) {
         usleep(1000);
     }
-    pthread_mutex_lock(&he3_mutex);
-    if (he3_time == time_now) {
-        data->part1.he3 = he3;
+    pthread_mutex_lock(&neutron_mutex);
+    if (neutron_time == time_now) {
+        data->part1.neutron_cps = neutron_cps;
     } else {
-        for (chan = 0; chan < MAX_HE3_CHAN; chan++) {
-            data->part1.he3.cpm_1_sec[chan] = ERROR_NO_VALUE;
-            data->part1.he3.cpm_10_sec[chan] = ERROR_NO_VALUE;
-            data->part1.he3.cpm_60_sec[chan] = ERROR_NO_VALUE;
-            data->part1.he3.cpm_600_sec[chan] = ERROR_NO_VALUE;
-        }
+        data->part1.neutron_cps = ERROR_NO_VALUE;
     }
-    pthread_mutex_unlock(&he3_mutex);
+    pthread_mutex_unlock(&neutron_mutex);
 
     //
     // data part2
@@ -439,23 +432,23 @@ static void init_data_struct(data_t * data, time_t time_now)
     // data part2: magic
     data->part2.magic = MAGIC_DATA_PART2;
 
-    // data part2: adc_samples
-    ret1 = dataq_get_adc_samples(DATAQ_ADC_CHAN_VOLTAGE, 
-                                 data->part2.voltage_adc_samples_mv,
-                                 MAX_ADC_SAMPLES);
-    ret2 = dataq_get_adc_samples(DATAQ_ADC_CHAN_CURRENT, 
-                                 data->part2.current_adc_samples_mv,
-                                 MAX_ADC_SAMPLES);
-    ret3 = dataq_get_adc_samples(DATAQ_ADC_CHAN_PRESSURE, 
-                                 data->part2.pressure_adc_samples_mv,
-                                 MAX_ADC_SAMPLES);
-    pthread_mutex_lock(&he3_mutex);
-    ret4 = (he3_time == time_now ? 0 : -1);
+    // data part2: adc_data
+    ret1 = dataq_get_adc_data(DATAQ_ADC_CHAN_VOLTAGE, 
+                              data->part2.voltage_adc_data,
+                              MAX_ADC_DATA);
+    ret2 = dataq_get_adc_data(DATAQ_ADC_CHAN_CURRENT, 
+                              data->part2.current_adc_data,
+                              MAX_ADC_DATA);
+    ret3 = dataq_get_adc_data(DATAQ_ADC_CHAN_PRESSURE, 
+                              data->part2.pressure_adc_data,
+                              MAX_ADC_DATA);
+    pthread_mutex_lock(&neutron_mutex);
+    ret4 = (neutron_time == time_now ? 0 : -1);
     if (ret4 == 0) {
-        memcpy(data->part2.he3_adc_samples_mv, he3_adc_samples_mv, MAX_ADC_SAMPLES*sizeof(uint16_t));
-        data->part2.he3_adc_samples_baseline_mv = he3_adc_samples_baseline_mv;
+        memcpy(data->part2.neutron_adc_data, neutron_adc_data, max_neutron_adc_data*sizeof(int16_t));
     }
-    pthread_mutex_unlock(&he3_mutex);
+    data->part2.max_neutron_adc_data = max_neutron_adc_data;
+    pthread_mutex_unlock(&neutron_mutex);
 
 #ifdef CAM_ENABLE
     // data part2: jpeg_buff
@@ -471,13 +464,13 @@ static void init_data_struct(data_t * data, time_t time_now)
     // data part1 (continued)
     //
 
-    data->part1.data_part2_offset                        = 0;   // for display pgm
-    data->part1.data_part2_length                        = sizeof(struct data_part2_s) + data->part2.jpeg_buff_len;
-    data->part1.data_part2_jpeg_buff_valid               = (data->part2.jpeg_buff_len != 0);
-    data->part1.data_part2_voltage_adc_samples_mv_valid  = (ret1 == 0);
-    data->part1.data_part2_current_adc_samples_mv_valid  = (ret2 == 0);
-    data->part1.data_part2_pressure_adc_samples_mv_valid = (ret3 == 0);
-    data->part1.data_part2_he3_adc_samples_mv_valid      = (ret4 == 0);
+    data->part1.data_part2_offset                  = 0;   // for display pgm
+    data->part1.data_part2_length                  = sizeof(struct data_part2_s) + data->part2.jpeg_buff_len;
+    data->part1.data_part2_jpeg_buff_valid         = (data->part2.jpeg_buff_len != 0);
+    data->part1.data_part2_voltage_adc_data_valid  = (ret1 == 0);
+    data->part1.data_part2_current_adc_data_valid  = (ret2 == 0);
+    data->part1.data_part2_pressure_adc_data_valid = (ret3 == 0);
+    data->part1.data_part2_neutron_adc_data_valid  = (ret4 == 0);
 }
 
 // -----------------  CONVERT ADC HV VOLTAGE & CURRENT  ------------------------------
@@ -640,51 +633,24 @@ static float convert_adc_pressure(float adc_volts, uint32_t gas_id)
 static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
 {
     #define MAX_DATA 1000000
-    #define MAX_PC1SH 15000
 
+    #define MAX_PC1SH 15000
     static uint16_t data[MAX_DATA];
     static int32_t  max_data;
     static int32_t  idx;
     static int32_t  baseline;
-    static int32_t  pulse_largest_height;
-    static int32_t  pulse_largest_idx;
-    static int32_t  pulse_largest_baseline;
-    static int32_t  pulse_counts_1_sec[MAX_HE3_CHAN];
-    static int32_t  pulse_counts_10_sec[MAX_HE3_CHAN];
-    static int32_t  pulse_counts_60_sec[MAX_HE3_CHAN];
-    static int32_t  pulse_counts_600_sec[MAX_HE3_CHAN];
-    static int32_t  pulse_counts_1_sec_history[MAX_PC1SH][MAX_HE3_CHAN];
-    static int32_t  max_pc1sh;
+    static int32_t  pulse_count;
+    static int16_t  local_neutron_adc_data[MAX_ADC_DATA];
+    static uint32_t local_max_neutron_adc_data;
 
-    #define TUNE_MAX_PULSE_HEIGHT 1712            // baseline is 339;  339+1712 ~= 2048
     #define TUNE_PULSE_THRESHOLD  10
 
     #define RESET_FOR_NEXT_SEC \
         do { \
-            max_data               = 0; \
-            idx                    = 0; \
-            pulse_largest_height   = 0; \
-            pulse_largest_idx      = 0; \
-            pulse_largest_baseline = 0; \
-            bzero(pulse_counts_1_sec, sizeof(pulse_counts_1_sec)); \
-        } while (0)
-
-    #define CIRC_MAX_PC1SH(x) ((max_pc1sh + (x) + MAX_PC1SH) % MAX_PC1SH)
-
-    #define PRINT_INFO(_avg_dur, _counts, _cpm) \
-        do { \
-            if (max_pc1sh < _avg_dur) { \
-                break; \
-            } \
-            printf("%4d: ", _avg_dur); \
-            for (i = 0; i < MAX_HE3_CHAN; i++) { \
-                printf("%5d ", _counts[i]); \
-            } \
-            printf("\n      "); \
-            for (i = 0; i < MAX_HE3_CHAN; i++) { \
-                printf("%5.1f ", _cpm[i]); \
-            } \
-            printf("\n"); \
+            max_data = 0; \
+            idx = 0; \
+            pulse_count = 0; \
+            local_max_neutron_adc_data= 0; \
         } while (0)
 
     // if max_data too big then 
@@ -729,21 +695,23 @@ static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
         // update baseline ...
         // if data[idx] is close to baseline then
         //   baseline is okay
-        // else if data[idx+20] is close to baseline then
+        // else if data[idx+10] is close to baseline then
         //   baseline is okay
-        // else data[idx] and the preceding 3 data values are almost the same then
+        // else if data[idx] and the preceding 3 data values are almost the same then
         //   set baseline to data[idx]
         // endif
-        if (data[idx] >= baseline-1 && data[idx] <= baseline+1) {
-            ;  // okay
-        } else if (idx+10 < max_data && data[idx+10] >= baseline-1 && data[idx+10] <= baseline+1) {
-            ;  // okay
-        } else if ((idx >= 3) &&
-                   (data[idx-1] >= data[idx]-1 && data[idx-1] <= data[idx]+1) &&
-                   (data[idx-2] >= data[idx]-1 && data[idx-2] <= data[idx]+1) &&
-                   (data[idx-3] >= data[idx]-1 && data[idx-3] <= data[idx]+1))
-        {
-            baseline = data[idx];
+        if (pulse_start_idx == -1) {
+            if (data[idx] >= baseline-1 && data[idx] <= baseline+1) {
+                ;  // okay
+            } else if (idx+10 < max_data && data[idx+10] >= baseline-1 && data[idx+10] <= baseline+1) {
+                ;  // okay
+            } else if ((idx >= 3) &&
+                       (data[idx-1] >= data[idx]-1 && data[idx-1] <= data[idx]+1) &&
+                       (data[idx-2] >= data[idx]-1 && data[idx-2] <= data[idx]+1) &&
+                       (data[idx-3] >= data[idx]-1 && data[idx-3] <= data[idx]+1))
+            {
+                baseline = data[idx];
+            }
         }
 
         // if baseline has not yet determined then continue
@@ -767,46 +735,51 @@ static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
         }
 
         // if a pulse has been located ...
+        // - increment pulse_count
+        // - save copy of the pulse in local_neutron_adc_data (50 samples with pulse in center)
+        // - determine the pulse_height
+        // - print the pulse to the log file
+        // endif
         if (pulse_end_idx != -1) {
-            int32_t pulse_height, pulse_channel, pulse_channel_orig, i;
+            int32_t pulse_height, i;
+            int32_t pulse_start_idx_extended, pulse_end_idx_extended;
+
+            // keep track of pulse_count
+            pulse_count++;
+
+            // add the pulse to local_neutron_adc_data, 
+            // XXX perhaps put markr on then end
+            pulse_start_idx_extended = pulse_start_idx - 23;
+            if (pulse_start_idx_extended < 0) {
+                pulse_start_idx_extended = 0;
+            }
+            pulse_end_idx_extended = pulse_start_idx_extended + 49;
+            if (pulse_end_idx_extended >= max_data) {
+                pulse_end_idx_extended = max_data - 1;
+                pulse_start_idx_extended = pulse_end_idx_extended - 49;
+            }
+            for (i = pulse_start_idx_extended; i <= pulse_end_idx_extended; i++) {
+                if (local_max_neutron_adc_data >= MAX_ADC_DATA) {
+                    break;
+                }
+                local_neutron_adc_data[local_max_neutron_adc_data++] = 
+                    (data[i] - baseline) * 1000 / 205;    // mv above baseline
+            }
 
             // scan from start to end of pulse to determine pulse_height,
-            // where pulse_height is the height above the pulse threshold
-            // XXX or should baseline be baseline+TUNE_PULSE_THRESHOLD 
+            // where pulse_height is the height above the baseline
             pulse_height = -1;
             for (i = pulse_start_idx; i <= pulse_end_idx; i++) {
                 if (data[i] - baseline > pulse_height) {
                     pulse_height = data[i] - baseline;
                 }
             }
-                
-            // determine pulse_channel from pulse_height
-            pulse_channel = pulse_height / (TUNE_MAX_PULSE_HEIGHT / MAX_HE3_CHAN);
-            pulse_channel_orig = pulse_channel;
-            if (pulse_channel >= MAX_HE3_CHAN) {
-                DEBUG("chan being reduced from %d to %d\n", pulse_channel, MAX_HE3_CHAN-1);
-                pulse_channel = MAX_HE3_CHAN-1;
-            }
 
-            // keep track of pulse_counts_1_sec
-            pulse_counts_1_sec[pulse_channel]++;
-
-            // keep track of largest pulse information
-            if (pulse_height > pulse_largest_height) {
-                pulse_largest_height = pulse_height;
-                pulse_largest_idx = idx;
-                pulse_largest_baseline = baseline;
-            }
-
-            // plot the pulse
-            INFO("PULSE height=%d height_mv=%d baseline=%d channel=%d channel_orig=%d\n",
-                   pulse_height, 
-                   pulse_height * 1000 / 205,
-                   baseline-2048, 
-                   pulse_channel, 
-                   pulse_channel_orig);
-            int32_t pulse_start_idx_extended = pulse_start_idx - 1;
-            int32_t pulse_end_idx_extended = pulse_end_idx + 4;
+            // plot the pulse 
+            printf("PULSE:  height = %d   baseline = %d\n",
+                   pulse_height, baseline-2048);
+            pulse_start_idx_extended = pulse_start_idx - 1;
+            pulse_end_idx_extended = pulse_end_idx + 4;
             if (pulse_start_idx_extended < 0) {
                 pulse_end_idx_extended = 0;
             }
@@ -828,75 +801,61 @@ static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
     }
 
     // if time has incremented then
-    //   publish new he3 data
+    //   - publish new neutron data
+    //   - print to log file
+    //   - reset variables for the next second 
     // endif
     uint64_t time_now = time(NULL);
-    if (time_now > he3_time) {    
-        int32_t i, j, chan;
+    if (time_now > neutron_time) {    
+        char voltage_str[100], current_str[100], pressure_str[100];
+        int16_t mean_mv, max_mv;
 
-        // compute the moving average pulse counts 
-        for (chan = 0; chan < MAX_HE3_CHAN; chan++) {
-            pulse_counts_10_sec[chan] = pulse_counts_10_sec[chan] + 
-                                  pulse_counts_1_sec[chan] -
-                                  pulse_counts_1_sec_history[CIRC_MAX_PC1SH(-10)][chan];
-            pulse_counts_60_sec[chan] = pulse_counts_60_sec[chan] + 
-                                  pulse_counts_1_sec[chan] -
-                                  pulse_counts_1_sec_history[CIRC_MAX_PC1SH(-60)][chan];
-            pulse_counts_600_sec[chan] = pulse_counts_600_sec[chan] + 
-                                  pulse_counts_1_sec[chan] -
-                                  pulse_counts_1_sec_history[CIRC_MAX_PC1SH(-600)][chan];
-        }
-        memcpy(pulse_counts_1_sec_history[CIRC_MAX_PC1SH(0)], 
-               pulse_counts_1_sec, 
-               sizeof(pulse_counts_1_sec));
-        max_pc1sh++;
+        // publish new neutron data
+        pthread_mutex_lock(&neutron_mutex);
+        neutron_time = time_now;
+        neutron_cps = pulse_count;
+        memcpy(neutron_adc_data, local_neutron_adc_data, local_max_neutron_adc_data*sizeof(int16_t));
+        max_neutron_adc_data = local_max_neutron_adc_data;
+        pthread_mutex_unlock(&neutron_mutex);
 
-        // acquire he3_mutex
-        pthread_mutex_lock(&he3_mutex);
+#if 0 // XXX del
+        int i;
+        for (i = 0; i < max_neutron_adc_data; i++) {
+            printf("%d - %d\n", i, neutron_adc_data[i]);
+        }
+#endif
 
-        // publish he3 cpm values
-        for (chan = 0; chan < MAX_HE3_CHAN; chan++) {
-            he3.cpm_1_sec[chan] = pulse_counts_1_sec[chan] * (60.0 / 1);
-            he3.cpm_10_sec[chan] = (max_pc1sh >= 10 ? pulse_counts_10_sec[chan] * (60.0 / 10)
-                                                    : ERROR_NO_VALUE);
-            he3.cpm_60_sec[chan] = (max_pc1sh >= 60 ? pulse_counts_60_sec[chan] * (60.0 / 60)
-                                                    : ERROR_NO_VALUE);
-            he3.cpm_600_sec[chan] = (max_pc1sh >= 600 ? pulse_counts_600_sec[chan] * (60.0 / 600)
-                                                      : ERROR_NO_VALUE);
-        }
-
-        // publish he3_adc_samples_mv 
-        j = pulse_largest_idx - MAX_ADC_SAMPLES/2;
-        if (j < 0) {
-            j = 0;
-        } else if (j > max_data - MAX_ADC_SAMPLES) {
-            j = max_data - MAX_ADC_SAMPLES;
-        }
-        for (i = 0; i < MAX_ADC_SAMPLES; i++,j++) {
-            he3_adc_samples_mv[i] = data[j] * 1000 / 205 - 10000;
-        }
-        if (pulse_largest_baseline) {
-            he3_adc_samples_baseline_mv = pulse_largest_baseline * 1000 / 205 - 10000;
+        // get voltage, current, and pressure values so they can be printed below
+        if (dataq_get_adc(DATAQ_ADC_CHAN_VOLTAGE, NULL, &mean_mv, NULL, NULL, NULL) == 0) {  
+            sprintf(voltage_str, "%0.1f KV", convert_adc_voltage(mean_mv/1000.));
         } else {
-            he3_adc_samples_baseline_mv = he3_adc_samples_mv[0];
+            sprintf(voltage_str, "NO_VALUE");
+        }
+        if (dataq_get_adc(DATAQ_ADC_CHAN_CURRENT, NULL, &mean_mv, NULL, NULL, NULL) == 0) {
+            sprintf(current_str, "%0.1f MA", convert_adc_current(mean_mv/1000.));
+        } else {
+            sprintf(current_str, "NO_VALUE");
+        }
+        if (dataq_get_adc(DATAQ_ADC_CHAN_PRESSURE, NULL, NULL, NULL, NULL, &max_mv) == 0) {
+            float pressure_mtorr = convert_adc_pressure(max_mv/1000., GAS_ID_D2);
+            if (pressure_mtorr < 1000) {
+                sprintf(pressure_str, "%0.1f mTorr", pressure_mtorr);
+            } else {
+                sprintf(pressure_str, "%0.0f Torr", pressure_mtorr/1000);
+            }
+        } else {
+            sprintf(pressure_str, "NO_VALUE");
         }
 
-        // save the time associated with the new he3 data
-        he3_time = time_now;
-
-        // release he3_mutex
-        pthread_mutex_unlock(&he3_mutex);
-
-        // print info
-        INFO("duration=%d samples=%d mccdaq_restarts=%d\n",
-               max_pc1sh,
-               max_data,
-               mccdaq_get_restart_count());
-        PRINT_INFO(1, pulse_counts_1_sec, he3.cpm_1_sec);
-        PRINT_INFO(10, pulse_counts_10_sec, he3.cpm_10_sec);
-        PRINT_INFO(60, pulse_counts_60_sec, he3.cpm_60_sec);
-        PRINT_INFO(600, pulse_counts_600_sec, he3.cpm_600_sec);
-        printf("\n=================================================================================================================\n\n");
+        // print info, and seperator line,
+        // note that the seperator line is intended to mark the begining of the next second
+        printf("NEUTRON:  samples=%d   mccdaq_restarts=%d\n",
+               max_data, mccdaq_get_restart_count());
+        printf("SUMMARY:  neutron = %d /sec   voltage = %s   current = %s   pressure = %s\n",
+               pulse_count, voltage_str, current_str, pressure_str);
+        printf("\n");
+        INFO("=========================================================================\n");
+        printf("\n");
 
         // reset for the next second
         RESET_FOR_NEXT_SEC;

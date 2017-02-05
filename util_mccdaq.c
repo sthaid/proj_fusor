@@ -483,7 +483,7 @@ int libusb_bulk_transfer (struct libusb_device_handle *dev_handle, unsigned char
     memcpy(data, g_sim_data, length);
     if (((count % 25) == 0) && (max_data > 20)) {
         if ((count/25) & 1) {
-            data[0]   = 3000;
+            data[0] = 3000;
             data[1] = 2600;
             data[2] = 2150;
             data[3] = 2300;

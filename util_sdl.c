@@ -171,7 +171,7 @@ int32_t sdl_init(uint32_t w, uint32_t h, char * screenshot_prefix)
     font0_path = "fonts/FreeMonoBold.ttf";         // normal 
     font0_ptsize = sdl_win_height / 30 - 1;
     font1_path = "fonts/FreeMonoBold.ttf";         // large
-    font1_ptsize = sdl_win_height / 13 - 1;
+    font1_ptsize = sdl_win_height / 18 - 1;
 
     sdl_font[0].font = TTF_OpenFont(font0_path, font0_ptsize);
     if (sdl_font[0].font == NULL) {
@@ -527,7 +527,6 @@ sdl_event_t * sdl_poll_event(void)
             bool     alt = (ev.key.keysym.mod & KMOD_ALT) != 0;
             int32_t  possible_event = -1;
 
-
             if (ctrl && key == 'p') {
                 print_screen();
                 play_event_sound();
@@ -568,14 +567,14 @@ sdl_event_t * sdl_poll_event(void)
                     possible_event = '+';
                 } else if (possible_event == '/') {
                     possible_event = '?';
+                } else if (possible_event == SDL_EVENT_KEY_ESC) {
+                    possible_event = SDL_EVENT_KEY_SHIFT_ESC;
                 }
             } else if (ctrl) {
                 if (possible_event == SDL_EVENT_KEY_LEFT_ARROW) {
                     possible_event = SDL_EVENT_KEY_CTRL_LEFT_ARROW;
                 } else if (possible_event == SDL_EVENT_KEY_RIGHT_ARROW) {
                     possible_event = SDL_EVENT_KEY_CTRL_RIGHT_ARROW;
-                } else if (possible_event == SDL_EVENT_KEY_ESC) {
-                    possible_event = SDL_EVENT_KEY_CTRL_ESC;
                 }
             } else if (alt) {
                 if (possible_event == SDL_EVENT_KEY_LEFT_ARROW) {

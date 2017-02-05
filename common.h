@@ -41,9 +41,9 @@ SOFTWARE.
 #define ERROR_LAST                    1000002
 #define ERROR_TEXT(x) \
     ((int32_t)(x) == ERROR_PRESSURE_SENSOR_FAULTY ? "FAULTY" : \
-     (int32_t)(x) == ERROR_OVER_PRESSURE          ? "OVPRES" : \
-     (int32_t)(x) == ERROR_NO_VALUE               ? "NOVAL"    \
-                                                  : "????")
+     (int32_t)(x) == ERROR_OVER_PRESSURE          ? "OVERPR" : \
+     (int32_t)(x) == ERROR_NO_VALUE               ? "NOVAL "   \
+                                                  : "??????")
 
 #define PORT 9001
 
@@ -56,9 +56,9 @@ typedef struct {
         uint64_t magic;
         uint64_t time; 
 
-        float    voltage_mean_kv;
+        float    voltage_kv;      // mean voltage
         float    current_ma;
-        float    pressure_d2_mtorr;
+        float    pressure_mtorr;  // D2 pressure
         float    neutron_cps;
 
         off_t    data_part2_offset;      // for use by display pgm

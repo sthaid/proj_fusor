@@ -388,12 +388,12 @@ static void init_data_struct(data_t * data, time_t time_now)
     data->part1.magic = MAGIC_DATA_PART1;
     data->part1.time  = time_now;
 
-    // data part1 voltage_min_kv, voltage_max_kv, and voltage_mean_kv
+    // data part1 voltage_min_kv, voltage_max_kv, and voltage_kv
     ret = dataq_get_adc(DATAQ_ADC_CHAN_VOLTAGE, NULL, &mean_mv, NULL, NULL, NULL);         
     if (ret == 0) {
-        data->part1.voltage_mean_kv = convert_adc_voltage(mean_mv/1000.);
+        data->part1.voltage_kv = convert_adc_voltage(mean_mv/1000.);
     } else {
-        data->part1.voltage_mean_kv = ERROR_NO_VALUE;
+        data->part1.voltage_kv = ERROR_NO_VALUE;
     }
 
     // data part1 current_ma
@@ -404,12 +404,12 @@ static void init_data_struct(data_t * data, time_t time_now)
         data->part1.current_ma = ERROR_NO_VALUE;
     }
 
-    // data part1 pressure_d2_mtorr
+    // data part1 pressure_mtorr
     ret = dataq_get_adc(DATAQ_ADC_CHAN_PRESSURE, NULL, NULL, NULL, NULL, &max_mv);
     if (ret == 0) {
-        data->part1.pressure_d2_mtorr = convert_adc_pressure(max_mv/1000., GAS_ID_D2);
+        data->part1.pressure_mtorr = convert_adc_pressure(max_mv/1000., GAS_ID_D2);
     } else {
-        data->part1.pressure_d2_mtorr = ERROR_NO_VALUE;
+        data->part1.pressure_mtorr = ERROR_NO_VALUE;
     }
 
     // wait for up to 250 ms for neutron data to be available for time_now;  
@@ -544,7 +544,7 @@ typedef struct {
 // --- variables ---
 
 gas_t gas_tbl[] = { 
-    { "D2",
+    { "D2", // TORRS       VOLTS
       { {     0.00001,     0.000 },
         {     0.00002,     0.301 },
         {     0.00005,     0.699 },

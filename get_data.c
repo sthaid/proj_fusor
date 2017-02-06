@@ -485,6 +485,7 @@ static void init_data_struct(data_t * data, time_t time_now)
 static float convert_adc_voltage(float adc_volts)
 {
     #define TUNE_KV   1.43
+    float kv;
 
     // My fusor's voltage divider is made up of a 1G Ohm resistor, and
     // a 100K Ohm resistor. In parallel with the 100K Ohm resistor are
@@ -502,12 +503,17 @@ static float convert_adc_voltage(float adc_volts)
     //
     // Vhv = Vadc * (1G / 94.34K) / 1000      (killo-volts)
 
-    return adc_volts * (1E9 / 94.34E3 / 1000.) + TUNE_KV;    // kV
+    kv = adc_volts * (1E9 / 94.34E3 / 1000.) + TUNE_KV;    // kV
+    if (kv < 0.0 && kv > -0.1) {
+        kv = 0;
+    }
+    return kv;
 }
 
 static float convert_adc_current(float adc_volts)
 {
     #define TUNE_MA   0.14
+    float ma;
 
     // My fusor's current measurement resistor is 100 Ohm.
 
@@ -515,7 +521,11 @@ static float convert_adc_current(float adc_volts)
     //
     // I = Vadc / 100 * 1000     (milli-amps)
 
-    return adc_volts * 10. + TUNE_MA;    // mA
+    ma = adc_volts * 10. + TUNE_MA;    // mA
+    if (ma < 0.0 && ma > -0.1) {
+        ma = 0;
+    }
+    return ma;
 }
 
 // -----------------  CONVERT ADC PRESSURE GAUGE  ----------------------------

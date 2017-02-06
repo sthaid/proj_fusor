@@ -776,16 +776,17 @@ static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
             }
 
             // plot the pulse 
-            printf("PULSE:  height = %d   baseline = %d\n",
-                   pulse_height, baseline-2048);
             pulse_start_idx_extended = pulse_start_idx - 1;
             pulse_end_idx_extended = pulse_end_idx + 4;
             if (pulse_start_idx_extended < 0) {
-                pulse_end_idx_extended = 0;
+                pulse_start_idx_extended = 0;
             }
             if (pulse_end_idx_extended >= max_data) {
                 pulse_end_idx_extended = max_data-1;
             }
+            printf("PULSE:  height = %d   baseline = %d   (%d,%d,%d)\n",
+                   pulse_height, baseline-2048,
+                   pulse_start_idx_extended, pulse_end_idx_extended, max_data);
             for (i = pulse_start_idx_extended; i <= pulse_end_idx_extended; i++) {
                 print_plot_str(data[i], baseline);
             }

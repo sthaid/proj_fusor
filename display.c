@@ -83,6 +83,28 @@ SOFTWARE.
 //#define JPEG_BUFF_SAMPLE_CREATE_ENABLE
 #define JPEG_BUFF_SAMPLE_FILENAME "jpeg_buff_sample.bin"
 
+#define REDUCE(val, tbl) \
+    do { \
+        int32_t i; \
+        for (i = 1; i < sizeof(tbl)/sizeof(tbl[0]); i++) { \
+            if (val <= tbl[i]) { \
+                val = tbl[i-1]; \
+                break; \
+            } \
+        } \
+    } while (0)
+
+#define INCREASE(val, tbl) \
+    do { \
+        int32_t i; \
+        for (i = sizeof(tbl)/sizeof(tbl[0])-2; i >= 0; i--) { \
+            if (val >= tbl[i]) { \
+                val = tbl[i+1]; \
+                break; \
+            } \
+        } \
+    } while (0)
+
 //
 // typedefs
 //
@@ -138,9 +160,10 @@ static void * cam_thread(void * cx);
 static int32_t display_handler();
 static void draw_camera_image(rect_t * cam_pane, int32_t file_idx);
 static void draw_data_values(rect_t * data_pane, int32_t file_idx);
-static void draw_summary_graph_scale_select(char key);
 static void draw_summary_graph(rect_t * graph_pane, int32_t file_idx);
+static void draw_summary_graph_control(char key);
 static void draw_adc_data_graph(rect_t * graph_pane, int32_t file_idx);
+static void draw_adc_data_graph_control(char key);
 static void draw_graph_common(rect_t * graph_pane, char * title_str, int32_t x_range_param, int32_t str_col, char * x_info_str, char * y_info_str, float cursor_pos, char * cursor_str, int32_t max_graph, ...);
 static int32_t generate_test_file(void);
 static char * val2str(float val, char * fmt);
@@ -981,9 +1004,9 @@ static int32_t display_handler(void)
         draw_adc_data_graph(&adc_data_graph_pane, file_idx);
 
         // register for events   
-        sdl_event_register(SDL_EVENT_KEY_SHIFT_ESC, SDL_EVENT_TYPE_KEY, NULL);       // quit (shift-esc)
+        sdl_event_register(SDL_EVENT_KEY_SHIFT_ESC, SDL_EVENT_TYPE_KEY, NULL);       // quit (shift-esc key)
         sdl_event_register('?', SDL_EVENT_TYPE_KEY, NULL);                           // help
-        sdl_event_register(SDL_EVENT_KEY_LEFT_ARROW, SDL_EVENT_TYPE_KEY, NULL);      // graph cursor time
+        sdl_event_register(SDL_EVENT_KEY_LEFT_ARROW, SDL_EVENT_TYPE_KEY, NULL);      // summary graph cursor 
         sdl_event_register(SDL_EVENT_KEY_RIGHT_ARROW, SDL_EVENT_TYPE_KEY, NULL);
         sdl_event_register(SDL_EVENT_KEY_CTRL_LEFT_ARROW, SDL_EVENT_TYPE_KEY, NULL);
         sdl_event_register(SDL_EVENT_KEY_CTRL_RIGHT_ARROW, SDL_EVENT_TYPE_KEY, NULL); 
@@ -991,15 +1014,12 @@ static int32_t display_handler(void)
         sdl_event_register(SDL_EVENT_KEY_ALT_RIGHT_ARROW, SDL_EVENT_TYPE_KEY, NULL);
         sdl_event_register(SDL_EVENT_KEY_HOME, SDL_EVENT_TYPE_KEY, NULL);
         sdl_event_register(SDL_EVENT_KEY_END, SDL_EVENT_TYPE_KEY, NULL);
-        sdl_event_register('+', SDL_EVENT_TYPE_KEY, NULL);                           // graph scale control
+        sdl_event_register('+', SDL_EVENT_TYPE_KEY, NULL);                           // summary graph x scale 
         sdl_event_register('=', SDL_EVENT_TYPE_KEY, NULL);
         sdl_event_register('-', SDL_EVENT_TYPE_KEY, NULL);
-
-        // XXX re-use these later
-        //sdl_event_register('s', SDL_EVENT_TYPE_KEY, NULL);                           // graph select
-        //sdl_event_register('S', SDL_EVENT_TYPE_KEY, NULL);                           // graph select
-        //sdl_event_register('1', SDL_EVENT_TYPE_KEY, NULL);
-        //sdl_event_register('2', SDL_EVENT_TYPE_KEY, NULL);
+        sdl_event_register('s', SDL_EVENT_TYPE_KEY, NULL);                           // adc data graph select 
+        sdl_event_register('1', SDL_EVENT_TYPE_KEY, NULL);                           // adc data graph y scale
+        sdl_event_register('2', SDL_EVENT_TYPE_KEY, NULL);
 
         // present the display
         sdl_display_present();
@@ -1064,7 +1084,10 @@ static int32_t display_handler(void)
                 mode = (initially_live_mode ? LIVE : PLAYBACK);
                 break;
             case '-': case '+': case '=':
-                draw_summary_graph_scale_select(event->event);
+                draw_summary_graph_control(event->event);
+                break;
+            case 's': case '1': case '2':
+                draw_adc_data_graph_control(event->event);
                 break;
             default:
                 event_processed_count--;
@@ -1189,48 +1212,7 @@ static void draw_data_values(rect_t * data_pane, int32_t file_idx)
 
 // - - - - - - - - -  DISPLAY HANDLER - DRAW SUMMARY GRAPH  - - - - - - - - - - - - 
 
-static int32_t  summary_graph_time_span_sec = 1800;
-
-static void draw_summary_graph_scale_select(char key)
-{
-    static int32_t  time_span_sec_tbl[] = {60, 600, 1800, 3600, 7200, 21600, 43200, 86400};
-
-    #define REDUCE(val, tbl) \
-        do { \
-            int32_t i; \
-            for (i = 1; i < sizeof(tbl)/sizeof(tbl[0]); i++) { \
-                if (val == tbl[i]) { \
-                    val = tbl[i-1]; \
-                    break; \
-                } \
-            } \
-        } while (0)
-
-    #define INCREASE(val, tbl) \
-        do { \
-            int32_t i; \
-            for (i = sizeof(tbl)/sizeof(tbl[0])-2; i >= 0; i--) { \
-                if (val == tbl[i]) { \
-                    val = tbl[i+1]; \
-                    break; \
-                } \
-            } \
-        } while (0)
-
-    switch (key) {
-    case '-': case '+': case '=':
-        // maintain summary_graph_time_span_sec
-        if (key == '-') {
-            REDUCE(summary_graph_time_span_sec, time_span_sec_tbl);
-        } else {
-            INCREASE(summary_graph_time_span_sec, time_span_sec_tbl);
-        }
-        break;
-    default:
-        FATAL("invalid key 0x%x\n", key);
-        break;
-    }
-}
+static uint32_t summary_graph_time_span_sec = 1800;
 
 static void draw_summary_graph(rect_t * graph_pane, int32_t file_idx)
 {
@@ -1289,76 +1271,127 @@ static void draw_summary_graph(rect_t * graph_pane, int32_t file_idx)
         x_info_str, NULL, 
         cursor_pos, cursor_str, 
         4, 
-        val2str2(voltage_kv_values[i],"%-6.1f","KV "),   RED,    30.0, max_values, voltage_kv_values,
-        val2str2(current_ma_values[i],"%-6.1f","MA "),        GREEN,  30.0, max_values, current_ma_values,
+        val2str2(voltage_kv_values[i],"%-6.1f","KV "),     RED,    30.0, max_values, voltage_kv_values,
+        val2str2(current_ma_values[i],"%-6.1f","MA "),     GREEN,  30.0, max_values, current_ma_values,
         val2str2(pressure_mtorr_values[i],"%-6.1f","MT "), BLUE,   30.0, max_values, pressure_mtorr_values,
-        val2str2(neutron_cps_values[i],"%-6.0f","CPS"),       PURPLE, 30.0, max_values, neutron_cps_values);
+        val2str2(neutron_cps_values[i],"%-6.0f","CPS"),    PURPLE, 30.0, max_values, neutron_cps_values);
+}
+
+static void draw_summary_graph_control(char key)
+{
+    static uint32_t time_span_sec_tbl[] = {60, 600, 1800, 3600, 7200, 21600, 43200, 86400};
+
+    switch (key) {
+    case '-': 
+        REDUCE(summary_graph_time_span_sec, time_span_sec_tbl);
+        break;
+    case '+': case '=':
+        INCREASE(summary_graph_time_span_sec, time_span_sec_tbl);
+        break;
+    default:
+        FATAL("invalid key 0x%x\n", key);
+        break;
+    }
 }
 
 // - - - - - - - - -  DISPLAY HANDLER - DRAW ADC DATA GRAPH - - - - - - - - - - - - 
 
+static uint32_t adc_data_graph_select = 0;
+static uint32_t adc_data_graph_max_y_mv = 1000;
+
 static void draw_adc_data_graph(rect_t * graph_pane, int32_t file_idx)
 {
-// XXX tbd
-    float    voltage_kv_values[MAX_FILE_DATA_PART1];
-    float    current_ma_values[MAX_FILE_DATA_PART1];
-    float    pressure_mtorr_values[MAX_FILE_DATA_PART1];
-    float    neutron_cps_values[MAX_FILE_DATA_PART1];
-    int32_t  file_idx_start, file_idx_end, max_values, i;
-    uint64_t cursor_time_us;
-    float    cursor_pos;
-    char     x_info_str[100];
-    char     cursor_str[100];
+    struct data_part1_s * dp1;
+    struct data_part2_s * dp2;
+    float adc_data[MAX_ADC_DATA];
+    int32_t i;
+    char title_str[100];
 
-    // init x_info_str 
-    sprintf(x_info_str, "X: %d SEC (-/+)", summary_graph_time_span_sec);
-
-    // init file_idx_start & file_idx_end
-    if (mode == LIVE) {
-        file_idx_end   = file_idx;
-        file_idx_start = file_idx_end - (summary_graph_time_span_sec - 1);
-    } else {
-        file_idx_start = file_idx - summary_graph_time_span_sec / 2;
-        file_idx_end   = file_idx_start + summary_graph_time_span_sec - 1;
+    // init pointer to dp1, and read dp2
+    dp1 = &file_data_part1[file_idx];
+    dp2 = read_data_part2(file_idx);
+    if (dp2 == NULL) {
+        ERROR("failed read data part2\n");
     }
 
-    // init cursor position and string
-    cursor_time_us = file_data_part1[file_idx].time * 1000000;
-    cursor_pos = (float)(file_idx - file_idx_start) / (summary_graph_time_span_sec - 1);
-    time2str(cursor_str, cursor_time_us, false, false, false);
-
-    // init arrays of the values to graph
-    max_values = 0;
-    for (i = file_idx_start; i <= file_idx_end; i++) {
-        voltage_kv_values[max_values]   = (i >= 0 && i < file_hdr->max)
-                                               ? file_data_part1[i].voltage_kv
-                                               : ERROR_NO_VALUE;
-        current_ma_values[max_values]        = (i >= 0 && i < file_hdr->max)
-                                                ? file_data_part1[i].current_ma      
-                                                : ERROR_NO_VALUE;
-        pressure_mtorr_values[max_values] = (i >= 0 && i < file_hdr->max)
-                                                ? file_data_part1[i].pressure_mtorr
-                                                : ERROR_NO_VALUE;
-        neutron_cps_values[max_values]       = (i >= 0 && i < file_hdr->max)
-                                                ? file_data_part1[i].neutron_cps
-                                                : ERROR_NO_VALUE;
-        max_values++;
+    // preset adc_data to NO_VALUE
+    for (i = 0; i < MAX_ADC_DATA; i++) {
+        adc_data[i] = ERROR_NO_VALUE;
     }
+
+    // init array of the values to graph
+    switch (adc_data_graph_select) {
+    case 0:
+        if (dp2 && dp1->data_part2_neutron_adc_data_valid) {
+            for (i = 0; i < dp2->max_neutron_adc_data; i++) {
+                adc_data[i] = dp2->neutron_adc_data[i];
+            }
+        }
+        sprintf(title_str, "NEUTRON ADC DATA");
+        break;
+    case 1:
+        if (dp2 && dp1->data_part2_voltage_adc_data_valid) {
+            for (i = 0; i < MAX_ADC_DATA; i++) {
+                adc_data[i] = dp2->voltage_adc_data[i];
+            }
+        }
+        sprintf(title_str, "VOLTAGE ADC DATA");
+        break;
+    case 2:
+        if (dp2 && dp1->data_part2_current_adc_data_valid) {
+            for (i = 0; i < MAX_ADC_DATA; i++) {
+                adc_data[i] = dp2->current_adc_data[i];
+            }
+        }
+        sprintf(title_str, "CURRENT ADC DATA");
+        break;
+    case 3:
+        if (dp2 && dp1->data_part2_pressure_adc_data_valid) {
+            for (i = 0; i < MAX_ADC_DATA; i++) {
+                adc_data[i] = dp2->pressure_adc_data[i];
+            }
+        }
+        sprintf(title_str, "PRESSURE ADC DATA");
+        break;
+    default:
+        FATAL("invalid adc_data_graph_select = %d\n", adc_data_graph_select);
+        break;
+    }
+
+    // append Y scale to title_str
+    sprintf(title_str+strlen(title_str), " - Y SCALE %d mV    (s/1/2)", adc_data_graph_max_y_mv);
 
     // draw the graph
-    i = file_idx - file_idx_start;
     draw_graph_common(
-        graph_pane, 
-        "SUMMARY", 
-        1200,   
-        6, 
-        x_info_str, NULL, 
-        cursor_pos, cursor_str, 
-        4, 
-        val2str2(voltage_kv_values[i],"%-6.1f","KV "),   RED,    30.0, max_values, voltage_kv_values,
-        val2str2(current_ma_values[i],"%-6.1f","MA "),        GREEN,  30.0, max_values, current_ma_values,
-        val2str2(pressure_mtorr_values[i],"%-6.1f","MT "), BLUE,   30.0, max_values, pressure_mtorr_values,
-        val2str2(neutron_cps_values[i],"%-6.0f","CPS"),       PURPLE, 30.0, max_values, neutron_cps_values);
+        graph_pane,  // the pane
+        title_str,   // title_str
+        1200,        // x_range
+        0,           // str_col
+        NULL, NULL,  // x_info_str, y_info_str
+        -1, NULL,    // cursor_pos, cursor_str
+        1,           // max_graph
+        NULL, PURPLE, (double)adc_data_graph_max_y_mv, MAX_ADC_DATA, adc_data); 
+                     // name,color,y_max,max_values,values
+}
+
+static void draw_adc_data_graph_control(char key)
+{
+    static uint32_t  max_y_mv_tbl[] = {100, 200, 500, 1000, 2000, 5000, 10000};
+
+    switch (key) {
+    case 's':
+        adc_data_graph_select = ((adc_data_graph_select + 1) % 4);
+        break;
+    case '1':
+        REDUCE(adc_data_graph_max_y_mv, max_y_mv_tbl);
+        break;
+    case '2':
+        INCREASE(adc_data_graph_max_y_mv, max_y_mv_tbl);
+        break;
+    default:
+        FATAL("invalid key 0x%x\n", key);
+        break;
+    }
 }
 
 // - - - - - - - - -  DISPLAY HANDLER - DRAW GRAPH COMMON   - - - - - - - - - - - - 

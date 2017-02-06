@@ -1304,7 +1304,7 @@ static void draw_adc_data_graph(rect_t * graph_pane, int32_t file_idx)
     struct data_part1_s * dp1;
     struct data_part2_s * dp2;
     float adc_data[MAX_ADC_DATA];
-    int32_t i;
+    int32_t i, color;
     char title_str[100];
 
     // init pointer to dp1, and read dp2
@@ -1328,6 +1328,7 @@ static void draw_adc_data_graph(rect_t * graph_pane, int32_t file_idx)
             }
         }
         sprintf(title_str, "NEUTRON ADC DATA");
+        color = PURPLE;
         break;
     case 1:
         if (dp2 && dp1->data_part2_voltage_adc_data_valid) {
@@ -1336,6 +1337,7 @@ static void draw_adc_data_graph(rect_t * graph_pane, int32_t file_idx)
             }
         }
         sprintf(title_str, "VOLTAGE ADC DATA");
+        color = RED;
         break;
     case 2:
         if (dp2 && dp1->data_part2_current_adc_data_valid) {
@@ -1344,6 +1346,7 @@ static void draw_adc_data_graph(rect_t * graph_pane, int32_t file_idx)
             }
         }
         sprintf(title_str, "CURRENT ADC DATA");
+        color = GREEN;
         break;
     case 3:
         if (dp2 && dp1->data_part2_pressure_adc_data_valid) {
@@ -1352,6 +1355,7 @@ static void draw_adc_data_graph(rect_t * graph_pane, int32_t file_idx)
             }
         }
         sprintf(title_str, "PRESSURE ADC DATA");
+        color = BLUE;
         break;
     default:
         FATAL("invalid adc_data_graph_select = %d\n", adc_data_graph_select);
@@ -1363,15 +1367,15 @@ static void draw_adc_data_graph(rect_t * graph_pane, int32_t file_idx)
 
     // draw the graph
     draw_graph_common(
-        graph_pane,  // the pane
-        title_str,   // title_str
-        1200,        // x_range
-        0,           // str_col
-        NULL, NULL,  // x_info_str, y_info_str
-        -1, NULL,    // cursor_pos, cursor_str
-        1,           // max_graph
-        NULL, PURPLE, (double)adc_data_graph_max_y_mv, MAX_ADC_DATA, adc_data); 
-                     // name,color,y_max,max_values,values
+        graph_pane,        // the pane
+        title_str,         // title_str
+        1200,              // x_range
+        -8,                // str_col
+        "1 SECOND", NULL,  // x_info_str, y_info_str
+        -1, NULL,          // cursor_pos, cursor_str
+        1,                 // max_graph
+        NULL, color, (double)adc_data_graph_max_y_mv, MAX_ADC_DATA, adc_data); 
+                           // name,color,y_max,max_values,values
 }
 
 static void draw_adc_data_graph_control(char key)

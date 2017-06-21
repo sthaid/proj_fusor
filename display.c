@@ -105,6 +105,16 @@ SOFTWARE.
         } \
     } while (0)
 
+#define IMAGE_WIDTH  300
+#define IMAGE_HEIGHT 300 
+
+#if IMAGE_WIDTH > CAM_WIDTH
+    #error IMAGE_WIDTH must be <= CAM_WIDTH
+#endif
+#if IMAGE_HEIGHT > CAM_HEIGHT
+    #error IMAGE_HEIGHT must be <= CAM_HEIGHT
+#endif
+
 //
 // typedefs
 //
@@ -627,7 +637,6 @@ try_to_connect_again:
             pthread_mutex_unlock(&jpeg_mutex);
         }
 
-        // XXX  don't understand
         // if opt_no_cam then disacard camera data
         if (opt_no_cam) {
             dp2->jpeg_buff_len = 0;
@@ -1131,20 +1140,13 @@ static void draw_camera_image(rect_t * cam_pane, int32_t file_idx)
     int32_t               ret;
     struct data_part2_s * data_part2;
     char                * errstr;
+    uint32_t              skip_rows, skip_cols;
 
     static texture_t cam_texture = NULL;
 
-    // this program requires CAM_WIDTH to be >= CAM_HEIGHT; 
-    // the reason being that a square texture is created with dimension
-    // of CAM_HEIGHT x CAM_HEIGHT, and this texture is updated with the
-    // pixels centered around CAM_WIDTH/2
-    #if CAM_WIDTH < CAM_HEIGHT
-        #error CAM_WIDTH must be >= CAN_HEIGHT
-    #endif
-
     // on first call create the cam_texture
     if (cam_texture == NULL) {
-        cam_texture = sdl_create_yuy2_texture(CAM_HEIGHT,CAM_HEIGHT);
+        cam_texture = sdl_create_yuy2_texture(IMAGE_WIDTH,IMAGE_HEIGHT);
         if (cam_texture == NULL) {
             FATAL("failed to create cam_texture\n");
         }
@@ -1178,9 +1180,12 @@ static void draw_camera_image(rect_t * cam_pane, int32_t file_idx)
     }
 
     // display the decoded jpeg
-    sdl_update_yuy2_texture(cam_texture, 
-                             pixel_buff + (CAM_WIDTH - CAM_HEIGHT) / 2,
-                             CAM_WIDTH);
+    skip_cols = (CAM_WIDTH - IMAGE_WIDTH) / 2;
+    skip_rows = (CAM_HEIGHT - IMAGE_HEIGHT) / 2;
+    sdl_update_yuy2_texture(
+        cam_texture, 
+        pixel_buff + (skip_rows * CAM_WIDTH * 2) + (skip_cols * 2),
+        CAM_WIDTH);
     sdl_render_texture(cam_texture, cam_pane);
     free(pixel_buff);
 

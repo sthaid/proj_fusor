@@ -119,20 +119,78 @@ char * time2str(char * str, int64_t us, bool gmt, bool display_ms, bool display_
     return str;
 }
 
-// -----------------  RANDOM NUMBERS  -------------------------------------
+// -----------------  CONFIG READ / WRITE  -------------------------------
 
-// Refer to:
-// - http://en.wikipedia.org/wiki/Triangular_distribution
-// - http://stackoverflow.com/questions/3510475/generate-random-numbers-according-to-distributions
-int32_t random_triangular(int32_t low, int32_t high)
+int config_read(char * config_path, config_t * config, int config_version)
 {
-    int32_t range = high - low;
-    double U = random() / (double) RAND_MAX;
+    FILE * fp;
+    int    i, version=0;
+    char * name;
+    char * value;
+    char * saveptr;
+    char   s[100] = "";
 
-    if (U <= 0.5) {
-        return low + sqrt(U * range * range / 2);
-    } else {
-        return high - sqrt((1 - U) * range * range / 2);
+    // open config_file and verify version, 
+    // if this fails then write the config file with default values
+    if ((fp = fopen(config_path, "re")) == NULL ||
+        fgets(s, sizeof(s), fp) == NULL ||
+        sscanf(s, "VERSION %d", &version) != 1 ||
+        version != config_version)
+    {
+        if (fp != NULL) {
+            fclose(fp);
+        }
+        INFO("creating default config file %s, version=%d\n", config_path, config_version);
+        return config_write(config_path, config, config_version);
     }
+
+    // read config entries
+    while (fgets(s, sizeof(s), fp) != NULL) {
+        name = strtok_r(s, " \n", &saveptr);
+        if (name == NULL || name[0] == '#') {
+            continue;
+        }
+
+        value = strtok_r(NULL, " \n", &saveptr);
+        if (value == NULL) {
+            value = "";
+        }
+
+        for (i = 0; config[i].name[0]; i++) {
+            if (strcmp(name, config[i].name) == 0) {
+                strcpy(config[i].value, value);
+                break;
+            }
+        }
+    }
+
+    // close
+    fclose(fp);
+    return 0;
+}
+
+int config_write(char * config_path, config_t * config, int config_version)
+{
+    FILE * fp;
+    int    i;
+
+    // open
+    fp = fopen(config_path, "we");  // mode: truncate-or-create, close-on-exec
+    if (fp == NULL) {
+        ERROR("failed to write config file %s, %s\n", config_path, strerror(errno));
+        return -1;
+    }
+
+    // write version
+    fprintf(fp, "VERSION %d\n", config_version);
+
+    // write name/value pairs
+    for (i = 0; config[i].name[0]; i++) {
+        fprintf(fp, "%-20s %s\n", config[i].name, config[i].value);
+    }
+
+    // close
+    fclose(fp);
+    return 0;
 }
 

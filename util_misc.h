@@ -65,8 +65,16 @@ uint64_t microsec_timer(void);
 uint64_t get_real_time_us(void);
 char * time2str(char * str, int64_t us, bool gmt, bool display_ms, bool display_date);
 
-// -----------------  RANDOM NUMBERS  ----------------------------
+// -----------------  CONFIG READ/WRITE  --------------------------------------------
 
-int32_t random_triangular(int32_t low, int32_t high);
+#define MAX_CONFIG_VALUE_STR 100
+
+typedef struct {
+    const char * name;
+    char         value[MAX_CONFIG_VALUE_STR];
+} config_t;
+
+int config_read(char * config_path, config_t * config, int config_version);
+int config_write(char * config_path, config_t * config, int config_version);
 
 #endif

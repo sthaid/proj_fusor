@@ -25,6 +25,26 @@ Fusor Data Acquisition - This program acquires, displays, and\n\
 records camera and analog sensor values which are used in\n\
 Farnsworth Fusor demonstration.\n\
 \n\
+Keyboard Controls:\n\
+  Shift-Esc              : Quit\n\
+  ?                      : Help\n\
+  Ctrl-P                 : Capture Screenshot\n\
+  Left, Right, Home, End : Summary Graph Time Select (*)\n\
+  '-', '+'               : Summary Graph Time Scale\n\
+  's', '1', '2'          : Select ADC Graph, and Modify Y Scale\n\
+  'a', 'd', 'w', 'x'     : Camera Pan \n\
+  'z', 'Z'               : Camera Zoom\n\
+  'r'                    : Camera Pan/Zoom Reset \n\
+\n\
+  (*) Use Ctl or Alt with Left/Right Arrow to increase response\n\
+\n\
+Program Options:\n\
+  -h                           : help\n\
+  -v                           : display version\n\
+  -g <width>x<height>          : default = 1920x1000\n\
+  -s <live-mode-data-server>   : default = rpi_data \n\
+  -p <playback-mode-file-name> : select playback mode\n\
+\n\
 Author: Steven Haid      StevenHaid@gmail.com\n\
 \n\
 Source Code: https://github.com/sthaid/proj_fusor.git\n\

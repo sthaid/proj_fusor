@@ -1,0 +1,5 @@
+#!/bin/bash
+
+do_stop
+sleep 1
+do_start

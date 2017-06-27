@@ -1,0 +1,2 @@
+#!/bin/bash
+./get_data </dev/null &>>get_data.log &

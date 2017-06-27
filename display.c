@@ -1415,6 +1415,7 @@ static void draw_adc_data_graph(rect_t * graph_pane, int32_t file_idx)
     struct data_part2_s * dp2;
     float adc_data[MAX_ADC_DATA];
     int32_t i, color;
+    int32_t sum=0, cnt=0;
     char title_str[100];
 
     // init pointer to dp1, and read dp2
@@ -1435,6 +1436,8 @@ static void draw_adc_data_graph(rect_t * graph_pane, int32_t file_idx)
         if (dp2 && dp1->data_part2_neutron_adc_data_valid) {
             for (i = 0; i < dp2->max_neutron_adc_data; i++) {
                 adc_data[i] = dp2->neutron_adc_data[i];
+                sum += adc_data[i];
+                cnt++;
             }
         }
         sprintf(title_str, "NEUTRON ADC DATA");
@@ -1444,6 +1447,8 @@ static void draw_adc_data_graph(rect_t * graph_pane, int32_t file_idx)
         if (dp2 && dp1->data_part2_voltage_adc_data_valid) {
             for (i = 0; i < MAX_ADC_DATA; i++) {
                 adc_data[i] = dp2->voltage_adc_data[i];
+                sum += adc_data[i];
+                cnt++;
             }
         }
         sprintf(title_str, "VOLTAGE ADC DATA");
@@ -1453,6 +1458,8 @@ static void draw_adc_data_graph(rect_t * graph_pane, int32_t file_idx)
         if (dp2 && dp1->data_part2_current_adc_data_valid) {
             for (i = 0; i < MAX_ADC_DATA; i++) {
                 adc_data[i] = dp2->current_adc_data[i];
+                sum += adc_data[i];
+                cnt++;
             }
         }
         sprintf(title_str, "CURRENT ADC DATA");
@@ -1462,6 +1469,8 @@ static void draw_adc_data_graph(rect_t * graph_pane, int32_t file_idx)
         if (dp2 && dp1->data_part2_pressure_adc_data_valid) {
             for (i = 0; i < MAX_ADC_DATA; i++) {
                 adc_data[i] = dp2->pressure_adc_data[i];
+                sum += adc_data[i];
+                cnt++;
             }
         }
         sprintf(title_str, "PRESSURE ADC DATA");
@@ -1473,7 +1482,15 @@ static void draw_adc_data_graph(rect_t * graph_pane, int32_t file_idx)
     }
 
     // append Y scale to title_str
-    sprintf(title_str+strlen(title_str), " - Y SCALE %d mV    (s/1/2)", adc_data_graph_max_y_mv);
+    sprintf(title_str+strlen(title_str), " : Y SCALE %d mV", adc_data_graph_max_y_mv);
+
+    // append average to title_str
+    if (cnt > 0) {
+        sprintf(title_str+strlen(title_str), " : AVG %d mv", sum / cnt);
+    }
+
+    // append key control hint to title_str
+    sprintf(title_str+strlen(title_str), " : (s/1/2)");
 
     // draw the graph
     draw_graph_common(

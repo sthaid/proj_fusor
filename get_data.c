@@ -54,6 +54,7 @@ SOFTWARE.
 
 #define GAS_ID_D2 0
 #define GAS_ID_N2 1
+#define GAS_ID_DEFAULT  GAS_ID_N2
 
 //#define CAM_ENABLE
 
@@ -370,7 +371,7 @@ exit_thread:
 
 static void init_data_struct(data_t * data, time_t time_now)
 {
-    int16_t mean_mv, max_mv;
+    int16_t mean_mv;
     int32_t ret, wait_ms;
     bool    ret1, ret2, ret3, ret4;
 
@@ -405,9 +406,9 @@ static void init_data_struct(data_t * data, time_t time_now)
     }
 
     // data part1 pressure_mtorr
-    ret = dataq_get_adc(DATAQ_ADC_CHAN_PRESSURE, NULL, NULL, NULL, NULL, &max_mv);
+    ret = dataq_get_adc(DATAQ_ADC_CHAN_PRESSURE, NULL, &mean_mv, NULL, NULL, NULL);
     if (ret == 0) {
-        data->part1.pressure_mtorr = convert_adc_pressure(max_mv/1000., GAS_ID_D2);
+        data->part1.pressure_mtorr = convert_adc_pressure(mean_mv/1000., GAS_ID_DEFAULT);
     } else {
         data->part1.pressure_mtorr = ERROR_NO_VALUE;
     }
@@ -819,7 +820,7 @@ static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
     uint64_t time_now = time(NULL);
     if (time_now > neutron_time) {    
         char voltage_str[100], current_str[100], pressure_str[100];
-        int16_t mean_mv, max_mv;
+        int16_t mean_mv;
 
         // publish new neutron data
         pthread_mutex_lock(&neutron_mutex);
@@ -847,8 +848,8 @@ static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
         } else {
             sprintf(current_str, "NO_VALUE");
         }
-        if (dataq_get_adc(DATAQ_ADC_CHAN_PRESSURE, NULL, NULL, NULL, NULL, &max_mv) == 0) {
-            float pressure_mtorr = convert_adc_pressure(max_mv/1000., GAS_ID_D2);
+        if (dataq_get_adc(DATAQ_ADC_CHAN_PRESSURE, NULL, &mean_mv, NULL, NULL, NULL) == 0) {
+            float pressure_mtorr = convert_adc_pressure(mean_mv/1000., GAS_ID_DEFAULT);
             if (pressure_mtorr < 1000) {
                 sprintf(pressure_str, "%0.1f mTorr", pressure_mtorr);
             } else {

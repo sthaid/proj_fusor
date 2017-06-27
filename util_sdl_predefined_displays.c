@@ -276,7 +276,7 @@ void sdl_display_text(char * text)
             if (dstrect.y + dstrect.h < 0) {
                 continue;
             }
-            if (dstrect.y >= win_height) {
+            if (dstrect.y >= (signed)win_height) {
                 break;
             }
 

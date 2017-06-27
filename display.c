@@ -105,6 +105,14 @@ SOFTWARE.
         } \
     } while (0)
 
+#define DEFAULT_IMAGE_X      "320"
+#define DEFAULT_IMAGE_Y      "240"
+#define DEFAULT_IMAGE_SIZE   "300"
+
+#define CONFIG_IMAGE_X    (config[0].value)
+#define CONFIG_IMAGE_Y    (config[1].value)
+#define CONFIG_IMAGE_SIZE (config[2].value)
+
 //
 // typedefs
 //
@@ -148,6 +156,16 @@ static int32_t                  jpeg_buff_len;
 static uint64_t                 jpeg_buff_us;
 static pthread_mutex_t          jpeg_mutex = PTHREAD_MUTEX_INITIALIZER;
 
+static char                     config_path[PATH_MAX];
+static const int32_t            config_version = 1;
+static config_t                 config[] = { { "image_x",    DEFAULT_IMAGE_X    },
+                                             { "image_y",    DEFAULT_IMAGE_Y    },
+                                             { "image_size", DEFAULT_IMAGE_SIZE },
+                                             { "",           ""                 } };
+static int32_t                  image_x;
+static int32_t                  image_y;
+static int32_t                  image_size;
+
 //
 // prototypes
 //
@@ -159,6 +177,7 @@ static int32_t write_data_to_file(data_t * data);
 static void * cam_thread(void * cx);
 static int32_t display_handler();
 static void draw_camera_image(rect_t * cam_pane, int32_t file_idx);
+static void draw_camera_image_control(char key);
 static void draw_data_values(rect_t * data_pane, int32_t file_idx);
 static void draw_summary_graph(rect_t * graph_pane, int32_t file_idx);
 static void draw_summary_graph_control(char key);
@@ -217,6 +236,8 @@ int32_t main(int32_t argc, char **argv)
 
 // -----------------  INITIALIZE  ----------------------------------------------------
 
+static void atexit_config_write(void);
+
 static int32_t initialize(int32_t argc, char ** argv)
 {
     struct rlimit      rl;
@@ -226,6 +247,7 @@ static int32_t initialize(int32_t argc, char ** argv)
     char               servername[100];
     char               s[100];
     int32_t            wait_ms;
+    const char       * config_dir;
 
     // use line bufferring
     setlinebuf(stdout);
@@ -301,6 +323,24 @@ static int32_t initialize(int32_t argc, char ** argv)
             return -1;
         }
     }
+
+    // read config file, and 
+    // initialize exit handler to write config file
+    config_dir = getenv("HOME");
+    if (config_dir == NULL) {
+        FATAL("env var HOME not set\n");
+    }
+    sprintf(config_path, "%s/.fusorrc", config_dir);
+    if (config_read(config_path, config, config_version) < 0) {
+        FATAL("config_read failed for %s\n", config_path);
+    }
+    if (sscanf(CONFIG_IMAGE_X, "%d", &image_x) != 1 ||
+        sscanf(CONFIG_IMAGE_Y, "%d", &image_y) != 1 ||
+        sscanf(CONFIG_IMAGE_SIZE, "%d", &image_size) != 1)
+    {
+        FATAL("invalid config value, not a number\n");
+    }
+    atexit(atexit_config_write);
 
     // if mode is live or test then 
     //   if filename was provided then 
@@ -504,6 +544,14 @@ static void usage(void)
                     );
 }
 
+static void atexit_config_write(void)
+{
+    sprintf(CONFIG_IMAGE_X, "%d", image_x);
+    sprintf(CONFIG_IMAGE_Y, "%d", image_y);
+    sprintf(CONFIG_IMAGE_SIZE, "%d", image_size);
+    config_write(config_path, config, config_version);
+}
+
 // -----------------  GET LIVE DATA THREAD  ------------------------------------------
 
 static void * get_live_data_thread(void * cx)
@@ -627,7 +675,6 @@ try_to_connect_again:
             pthread_mutex_unlock(&jpeg_mutex);
         }
 
-        // XXX  don't understand
         // if opt_no_cam then disacard camera data
         if (opt_no_cam) {
             dp2->jpeg_buff_len = 0;
@@ -1020,6 +1067,13 @@ static int32_t display_handler(void)
         sdl_event_register('s', SDL_EVENT_TYPE_KEY, NULL);                           // adc data graph select 
         sdl_event_register('1', SDL_EVENT_TYPE_KEY, NULL);                           // adc data graph y scale
         sdl_event_register('2', SDL_EVENT_TYPE_KEY, NULL);
+        sdl_event_register('a', SDL_EVENT_TYPE_KEY, NULL);                           // camera image position & zoom
+        sdl_event_register('d', SDL_EVENT_TYPE_KEY, NULL);
+        sdl_event_register('w', SDL_EVENT_TYPE_KEY, NULL);
+        sdl_event_register('x', SDL_EVENT_TYPE_KEY, NULL);
+        sdl_event_register('z', SDL_EVENT_TYPE_KEY, NULL);
+        sdl_event_register('Z', SDL_EVENT_TYPE_KEY, NULL);
+        sdl_event_register('r', SDL_EVENT_TYPE_KEY, NULL);                             
 
         // present the display
         sdl_display_present();
@@ -1044,7 +1098,7 @@ static int32_t display_handler(void)
                 screenshot_time_us = microsec_timer();
                 break;
             case '?':  
-                sdl_display_text(about);
+                sdl_display_text(about); // XXX include help info here
                 break;
             case SDL_EVENT_KEY_LEFT_ARROW:
             case SDL_EVENT_KEY_CTRL_LEFT_ARROW:
@@ -1052,7 +1106,7 @@ static int32_t display_handler(void)
                 int32_t x = file_idx_global;
                 x -= (event->event == SDL_EVENT_KEY_LEFT_ARROW      ? 1 :
                       event->event == SDL_EVENT_KEY_CTRL_LEFT_ARROW ? 10
-                                                                    : 600);
+                                                                    : 60);
                 if (x < 0) {
                     x = 0;
                 }
@@ -1088,6 +1142,9 @@ static int32_t display_handler(void)
                 break;
             case 's': case '1': case '2':
                 draw_adc_data_graph_control(event->event);
+                break;
+            case 'a': case 'd': case 'w': case 'x': case 'z': case 'Z': case 'r':
+                draw_camera_image_control(event->event);
                 break;
             default:
                 event_processed_count--;
@@ -1131,23 +1188,19 @@ static void draw_camera_image(rect_t * cam_pane, int32_t file_idx)
     int32_t               ret;
     struct data_part2_s * data_part2;
     char                * errstr;
+    uint32_t              skip_rows, skip_cols;
 
     static texture_t cam_texture = NULL;
+    static int32_t image_size_last = 0;
 
-    // this program requires CAM_WIDTH to be >= CAM_HEIGHT; 
-    // the reason being that a square texture is created with dimension
-    // of CAM_HEIGHT x CAM_HEIGHT, and this texture is updated with the
-    // pixels centered around CAM_WIDTH/2
-    #if CAM_WIDTH < CAM_HEIGHT
-        #error CAM_WIDTH must be >= CAN_HEIGHT
-    #endif
-
-    // on first call create the cam_texture
-    if (cam_texture == NULL) {
-        cam_texture = sdl_create_yuy2_texture(CAM_HEIGHT,CAM_HEIGHT);
+    // if image_size has changed then reallocate cam_texture
+    if (cam_texture == NULL || image_size != image_size_last) {
+        sdl_destroy_texture(cam_texture);
+        cam_texture = sdl_create_yuy2_texture(image_size,image_size);
         if (cam_texture == NULL) {
             FATAL("failed to create cam_texture\n");
         }
+        image_size_last = image_size;
     }
 
     // if no jpeg buff then 
@@ -1178,9 +1231,12 @@ static void draw_camera_image(rect_t * cam_pane, int32_t file_idx)
     }
 
     // display the decoded jpeg
-    sdl_update_yuy2_texture(cam_texture, 
-                             pixel_buff + (CAM_WIDTH - CAM_HEIGHT) / 2,
-                             CAM_WIDTH);
+    skip_cols = image_x - image_size/2;
+    skip_rows = image_y - image_size/2;
+    sdl_update_yuy2_texture(
+        cam_texture, 
+        pixel_buff + (skip_rows * CAM_WIDTH * 2) + (skip_cols * 2),
+        CAM_WIDTH);
     sdl_render_texture(cam_texture, cam_pane);
     free(pixel_buff);
 
@@ -1191,6 +1247,60 @@ static void draw_camera_image(rect_t * cam_pane, int32_t file_idx)
 error:
     sdl_render_text(cam_pane, 2, 1, 1, errstr, WHITE, BLACK);
     return;
+}
+
+static void draw_camera_image_control(char key)
+{
+    // adjust image_x. image_y, image_size
+    switch (key) {
+    case 'a': 
+        image_x += 2;
+        break;
+    case 'd': 
+        image_x -= 2;
+        break;
+    case 'w': 
+        image_y += 2;
+        break;
+    case 'x': 
+        image_y -= 2;
+        break;
+    case 'z': 
+        image_size += 4;
+        break;
+    case 'Z': 
+        image_size -= 4;
+        break;
+    case 'r':
+        image_x    = atoi(DEFAULT_IMAGE_X);
+        image_y    = atoi(DEFAULT_IMAGE_Y);
+        image_size = atoi(DEFAULT_IMAGE_SIZE);
+        break;
+    default:
+        FATAL("invalid key 0x%x\n", key);
+        break;
+    }
+
+    // sanitize image_x. image_y, image_size
+    if (image_size > CAM_HEIGHT) {
+        image_size = CAM_HEIGHT;
+    }
+    if (image_size < 100) {
+        image_size = 100;
+    }
+    if (image_x - image_size/2 < 0) {
+        image_x = image_size/2;
+    }
+    if (image_x + image_size/2 >= CAM_WIDTH) {
+        image_x = CAM_WIDTH - image_size/2;
+    }
+    if (image_y - image_size/2 < 0) {
+        image_y = image_size/2;
+    }
+    if (image_y + image_size/2 >= CAM_HEIGHT) {
+        image_y = CAM_HEIGHT - image_size/2;
+    }
+    DEBUG("sanitized image_x=%d image_y=%d image_size=%d\n", image_x, image_y, image_size);
 }
 
 // - - - - - - - - -  DISPLAY HANDLER - DRAW DATA VALUES  - - - - - - - - - - - - - - 
@@ -1305,6 +1415,7 @@ static void draw_adc_data_graph(rect_t * graph_pane, int32_t file_idx)
     struct data_part2_s * dp2;
     float adc_data[MAX_ADC_DATA];
     int32_t i, color;
+    int32_t sum=0, cnt=0;
     char title_str[100];
 
     // init pointer to dp1, and read dp2
@@ -1325,6 +1436,8 @@ static void draw_adc_data_graph(rect_t * graph_pane, int32_t file_idx)
         if (dp2 && dp1->data_part2_neutron_adc_data_valid) {
             for (i = 0; i < dp2->max_neutron_adc_data; i++) {
                 adc_data[i] = dp2->neutron_adc_data[i];
+                sum += adc_data[i];
+                cnt++;
             }
         }
         sprintf(title_str, "NEUTRON ADC DATA");
@@ -1334,6 +1447,8 @@ static void draw_adc_data_graph(rect_t * graph_pane, int32_t file_idx)
         if (dp2 && dp1->data_part2_voltage_adc_data_valid) {
             for (i = 0; i < MAX_ADC_DATA; i++) {
                 adc_data[i] = dp2->voltage_adc_data[i];
+                sum += adc_data[i];
+                cnt++;
             }
         }
         sprintf(title_str, "VOLTAGE ADC DATA");
@@ -1343,6 +1458,8 @@ static void draw_adc_data_graph(rect_t * graph_pane, int32_t file_idx)
         if (dp2 && dp1->data_part2_current_adc_data_valid) {
             for (i = 0; i < MAX_ADC_DATA; i++) {
                 adc_data[i] = dp2->current_adc_data[i];
+                sum += adc_data[i];
+                cnt++;
             }
         }
         sprintf(title_str, "CURRENT ADC DATA");
@@ -1352,6 +1469,8 @@ static void draw_adc_data_graph(rect_t * graph_pane, int32_t file_idx)
         if (dp2 && dp1->data_part2_pressure_adc_data_valid) {
             for (i = 0; i < MAX_ADC_DATA; i++) {
                 adc_data[i] = dp2->pressure_adc_data[i];
+                sum += adc_data[i];
+                cnt++;
             }
         }
         sprintf(title_str, "PRESSURE ADC DATA");
@@ -1363,7 +1482,15 @@ static void draw_adc_data_graph(rect_t * graph_pane, int32_t file_idx)
     }
 
     // append Y scale to title_str
-    sprintf(title_str+strlen(title_str), " - Y SCALE %d mV    (s/1/2)", adc_data_graph_max_y_mv);
+    sprintf(title_str+strlen(title_str), " : Y SCALE %d mV", adc_data_graph_max_y_mv);
+
+    // append average to title_str
+    if (cnt > 0) {
+        sprintf(title_str+strlen(title_str), " : AVG %d mv", sum / cnt);
+    }
+
+    // append key control hint to title_str
+    sprintf(title_str+strlen(title_str), " : (s/1/2)");
 
     // draw the graph
     draw_graph_common(

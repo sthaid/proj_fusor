@@ -1434,7 +1434,7 @@ static void draw_adc_data_graph(rect_t * graph_pane, int32_t file_idx)
                 cnt++;
             }
         }
-        sprintf(title_str, "NEUTRON ADC DATA");
+        sprintf(title_str, "NEUTRON ADC");
         color = PURPLE;
         break;
     case 1:
@@ -1445,7 +1445,7 @@ static void draw_adc_data_graph(rect_t * graph_pane, int32_t file_idx)
                 cnt++;
             }
         }
-        sprintf(title_str, "VOLTAGE ADC DATA");
+        sprintf(title_str, "VOLTAGE ADC");
         color = RED;
         break;
     case 2:
@@ -1456,7 +1456,7 @@ static void draw_adc_data_graph(rect_t * graph_pane, int32_t file_idx)
                 cnt++;
             }
         }
-        sprintf(title_str, "CURRENT ADC DATA");
+        sprintf(title_str, "CURRENT ADC");
         color = GREEN;
         break;
     case 3:
@@ -1467,7 +1467,7 @@ static void draw_adc_data_graph(rect_t * graph_pane, int32_t file_idx)
                 cnt++;
             }
         }
-        sprintf(title_str, "PRESSURE ADC DATA");
+        sprintf(title_str, "PRESSURE ADC");
         color = BLUE;
         break;
     default:
@@ -1476,7 +1476,7 @@ static void draw_adc_data_graph(rect_t * graph_pane, int32_t file_idx)
     }
 
     // append Y scale to title_str
-    sprintf(title_str+strlen(title_str), " : Y SCALE %d mV", adc_data_graph_max_y_mv);
+    sprintf(title_str+strlen(title_str), " : Y %d mV", adc_data_graph_max_y_mv);
 
     // append average to title_str
     if (cnt > 0) {

@@ -54,6 +54,14 @@ Tweaks:
           dwc_otg.fiq_fsm_enable=0
     - see https://github.com/raspberrypi/linux/issues/618 for information
     - this seems to fix a webcam failure that occurs when closing and reopening the /dev/video0
+- Turn Off wlan0 Power Management, this will keep the wireless ethernet adapter
+  powered on at all times and improve network performance
+    - add the indicated line to /etc/network/interfaces
+          allow-hotplug wlan0
+          iface wlan0 inet manual
+          wireless-power off       <== add this line
+              wpa-conf /etc/wpa_supplicant/wpa_supplicant.conf
+    - following the reboot, run 'iwconfig' to verify Power Management is Off
 - reboot
 
 Install SDL2 - use this script

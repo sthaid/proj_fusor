@@ -23,6 +23,10 @@ SOFTWARE.
 #ifndef __UTIL_MISC_H__
 #define __UTIL_MISC_H__
 
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+
 // -----------------  LOGGING  -----------------------------------
 
 //#define ENABLE_LOGGING_AT_DEBUG_LEVEL
@@ -76,5 +80,12 @@ typedef struct {
 
 int config_read(char * config_path, config_t * config, int config_version);
 int config_write(char * config_path, config_t * config, int config_version);
+
+// -----------------  NETWORKING  ----------------------------------------
+
+int getsockaddr(char * node, int port, struct sockaddr_in * ret_addr);
+char * sock_addr_to_str(char * s, int slen, struct sockaddr * addr);
+int do_recv(int sockfd, void * recv_buff, size_t len);
+int do_send(int sockfd, void * send_buff, size_t len);
 
 #endif

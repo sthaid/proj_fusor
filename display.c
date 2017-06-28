@@ -42,10 +42,6 @@ SOFTWARE.
 #include <sys/resource.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <netdb.h>
-#include <arpa/inet.h>
 
 #include "common.h"
 #include "util_sdl.h"
@@ -188,8 +184,6 @@ static int32_t generate_test_file(void);
 static char * val2str(float val, char * fmt);
 static char * val2str2(float val, char * fmt, char * trailer_str);
 static struct data_part2_s * read_data_part2(int32_t file_idx);
-static int getsockaddr(char * node, int port, int socktype, int protcol, struct sockaddr_in * ret_addr);
-static char * sock_addr_to_str(char * s, int slen, struct sockaddr * addr);
 
 // -----------------  MAIN  ----------------------------------------------------------
 
@@ -472,7 +466,7 @@ static int32_t initialize(int32_t argc, char ** argv)
     if (mode == LIVE) {
         // get address of server, 
         // print servername, and serveraddr
-        ret =  getsockaddr(servername, PORT, SOCK_STREAM, 0, &server_sockaddr);
+        ret =  getsockaddr(servername, PORT, &server_sockaddr);
         if (ret < 0) {
             ERROR("failed to get address of %s\n", servername);
             return -1;
@@ -627,7 +621,7 @@ try_to_connect_again:
     while (true) {
         // read data part1 from server, and
         // verify data part1 magic, and length
-        len = recv(sfd, dp1, sizeof(struct data_part1_s), MSG_WAITALL);
+        len = do_recv(sfd, dp1, sizeof(struct data_part1_s));
         if (len != sizeof(struct data_part1_s)) {
             ERROR("recv dp1 len=%d exp=%zd, %s\n",
                   len, sizeof(struct data_part1_s), strerror(errno));
@@ -646,7 +640,7 @@ try_to_connect_again:
 
         // read data part2 from server,
         // verify magic
-        len = recv(sfd, dp2, dp1->data_part2_length, MSG_WAITALL);
+        len = do_recv(sfd, dp2, dp1->data_part2_length);
         if (len != dp1->data_part2_length) {
             ERROR("recv dp2 len=%d exp=%d, %s\n",
                   len, dp1->data_part2_length, strerror(errno));
@@ -1912,60 +1906,5 @@ struct data_part2_s * read_data_part2(int32_t file_idx)
     DEBUG("return new read data, file_idx=%d\n", file_idx);
     last_read_file_idx = file_idx;
     return last_read_data_part2;
-}
-
-static int getsockaddr(char * node, int port, int socktype, int protcol, struct sockaddr_in * ret_addr)
-{
-    struct addrinfo   hints;
-    struct addrinfo * result;
-    char              port_str[20];
-    int               ret;
-
-    sprintf(port_str, "%d", port);
-
-    bzero(&hints, sizeof(hints));
-    hints.ai_family   = AF_INET;
-    hints.ai_socktype = SOCK_DGRAM;
-    hints.ai_protocol = IPPROTO_UDP;
-    hints.ai_flags    = AI_NUMERICSERV;
-
-    ret = getaddrinfo(node, port_str, &hints, &result);
-    if (ret != 0) {
-        ERROR("failed to get address of %s, %s\n", node, gai_strerror(ret));
-        return -1;
-    }
-    if (result->ai_addrlen != sizeof(*ret_addr)) {
-        ERROR("getaddrinfo result addrlen=%d, expected=%d\n",
-            (int)result->ai_addrlen, (int)sizeof(*ret_addr));
-        return -1;
-    }
-
-    *ret_addr = *(struct sockaddr_in*)result->ai_addr;
-    freeaddrinfo(result);
-    return 0;
-}
-
-static char * sock_addr_to_str(char * s, int slen, struct sockaddr * addr)
-{
-    char addr_str[100];
-    int port;
-
-    if (addr->sa_family == AF_INET) {
-        inet_ntop(AF_INET,
-                  &((struct sockaddr_in*)addr)->sin_addr,
-                  addr_str, sizeof(addr_str));
-        port = ((struct sockaddr_in*)addr)->sin_port;
-    } else if (addr->sa_family == AF_INET6) {
-        inet_ntop(AF_INET6,
-                  &((struct sockaddr_in6*)addr)->sin6_addr,
-                 addr_str, sizeof(addr_str));
-        port = ((struct sockaddr_in6*)addr)->sin6_port;
-    } else {
-        snprintf(s,slen,"Invalid AddrFamily %d", addr->sa_family);
-        return s;
-    }
-
-    snprintf(s,slen,"%s:%d",addr_str,htons(port));
-    return s;
 }
 

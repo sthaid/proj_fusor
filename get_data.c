@@ -36,9 +36,6 @@ SOFTWARE.
 
 #include <pthread.h>
 #include <signal.h>
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
 #include <sys/resource.h>
 #include <sys/socket.h>
 
@@ -345,7 +342,7 @@ static void * server_thread(void * cx)
         init_data_struct(data, time_now);
 
         // send data struct
-        len = send(sockfd, data, sizeof(data_t)+data->part2.jpeg_buff_len, MSG_NOSIGNAL);
+        len = do_send(sockfd, data, sizeof(data_t)+data->part2.jpeg_buff_len);
         if (len != sizeof(data_t)+data->part2.jpeg_buff_len) {
             if (len == -1 && (errno == ECONNRESET || errno == EPIPE)) {
                 INFO("terminating connection\n");

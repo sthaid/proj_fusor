@@ -37,7 +37,6 @@ SOFTWARE.
 #include <termios.h>
 #include <fcntl.h>
 #include <pthread.h>
-#include <math.h>
 
 #include "util_mccdaq.h"
 #include "util_misc.h"

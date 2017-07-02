@@ -1660,9 +1660,9 @@ static void draw_graph_common(
         if (g->name) {
             name_str_col = (x_range + x_origin) / FONT0_WIDTH + str_col;    
             if (g->y_max >= 1) {
-                sprintf(name_str, "%-15s  (%.0f MAX)", g->name, g->y_max);
+                sprintf(name_str, "%-13s  (%.0f MAX)", g->name, g->y_max);
             } else {
-                sprintf(name_str, "%-15s  (%.2f MAX)", g->name, g->y_max);
+                sprintf(name_str, "%-13s  (%.2f MAX)", g->name, g->y_max);
             }
             sdl_render_text(graph_pane, gridx+1, name_str_col, 0, 
                             name_str, g->color, WHITE);

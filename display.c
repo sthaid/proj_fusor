@@ -112,8 +112,8 @@ SOFTWARE.
 #define UNITS_KV     1
 #define UNITS_MA     2
 #define UNITS_CPS    3
-#define UNITS_N2_MT  4
-#define UNITS_D2_MT  5
+#define UNITS_D2_MT  4
+#define UNITS_N2_MT  5
 
 //
 // typedefs
@@ -1319,21 +1319,26 @@ static void draw_data_values(rect_t * data_pane, int32_t file_idx)
     sdl_render_text(data_pane, 0, 0, 1, str, WHITE, BLACK);
 
     sprintf(str, "%s   %s",
-            val2str(dp1->n2_pressure_mtorr, UNITS_N2_MT),
-            val2str(dp1->d2_pressure_mtorr, UNITS_D2_MT));
+            val2str(dp1->d2_pressure_mtorr, UNITS_D2_MT),
+            val2str(dp1->n2_pressure_mtorr, UNITS_N2_MT));
     sdl_render_text(data_pane, 1, 0, 1, str, WHITE, BLACK);
 }
 
 // - - - - - - - - -  DISPLAY HANDLER - DRAW SUMMARY GRAPH  - - - - - - - - - - - - 
 
+// #define GRAPH_N2_PRESSURE
+
 static uint32_t summary_graph_time_span_sec = 1800;
 
 static void draw_summary_graph(rect_t * graph_pane, int32_t file_idx)
 {
+
     float    voltage_kv_values[MAX_FILE_DATA_PART1];
     float    current_ma_values[MAX_FILE_DATA_PART1];
-    float    n2_pressure_mtorr_values[MAX_FILE_DATA_PART1];
     float    d2_pressure_mtorr_values[MAX_FILE_DATA_PART1];
+#ifdef GRAPH_N2_PRESSURE
+    float    n2_pressure_mtorr_values[MAX_FILE_DATA_PART1];
+#endif
     float    neutron_cps_values[MAX_FILE_DATA_PART1];
     int32_t  file_idx_start, file_idx_end, max_values, i;
     uint64_t cursor_time_us;
@@ -1367,20 +1372,23 @@ static void draw_summary_graph(rect_t * graph_pane, int32_t file_idx)
         current_ma_values[max_values]        = (i >= 0 && i < file_hdr->max)
                                                 ? file_data_part1[i].current_ma      
                                                 : ERROR_NO_VALUE;
-        n2_pressure_mtorr_values[max_values] = (i >= 0 && i < file_hdr->max)
-                                                ? file_data_part1[i].n2_pressure_mtorr
+        neutron_cps_values[max_values]       = (i >= 0 && i < file_hdr->max)
+                                                ? file_data_part1[i].neutron_cps
                                                 : ERROR_NO_VALUE;
         d2_pressure_mtorr_values[max_values] = (i >= 0 && i < file_hdr->max)
                                                 ? file_data_part1[i].d2_pressure_mtorr
                                                 : ERROR_NO_VALUE;
-        neutron_cps_values[max_values]       = (i >= 0 && i < file_hdr->max)
-                                                ? file_data_part1[i].neutron_cps
+#ifdef GRAPH_N2_PRESSURE
+        n2_pressure_mtorr_values[max_values] = (i >= 0 && i < file_hdr->max)
+                                                ? file_data_part1[i].n2_pressure_mtorr
                                                 : ERROR_NO_VALUE;
+#endif
         max_values++;
     }
 
     // draw the graph
     i = file_idx - file_idx_start;
+#ifdef GRAPH_N2_PRESSURE
     draw_graph_common(
         graph_pane, 
         "SUMMARY", 
@@ -1390,10 +1398,24 @@ static void draw_summary_graph(rect_t * graph_pane, int32_t file_idx)
         cursor_pos, cursor_str, 
         5,
         val2str(voltage_kv_values[i],UNITS_KV),           RED,             30., max_values, voltage_kv_values,
-        val2str(current_ma_values[i],UNITS_MA),           PINK,            30., max_values, current_ma_values,
+        val2str(current_ma_values[i],UNITS_MA),           GREEN,           30., max_values, current_ma_values,
         val2str(neutron_cps_values[i],UNITS_CPS),         PURPLE,         100., max_values, neutron_cps_values,
-        val2str(n2_pressure_mtorr_values[i],UNITS_N2_MT), BLUE,       1000000., max_values, n2_pressure_mtorr_values,
-        val2str(d2_pressure_mtorr_values[i],UNITS_D2_MT), GREEN,          100., max_values, d2_pressure_mtorr_values);
+        val2str(d2_pressure_mtorr_values[i],UNITS_D2_MT), BLUE,           100., max_values, d2_pressure_mtorr_values,
+        val2str(n2_pressure_mtorr_values[i],UNITS_N2_MT), LIGHT_BLUE, 1000000., max_values, n2_pressure_mtorr_values);
+#else
+    draw_graph_common(
+        graph_pane, 
+        "SUMMARY", 
+        1200,   
+        6, 
+        x_info_str, NULL, 
+        cursor_pos, cursor_str, 
+        4,
+        val2str(voltage_kv_values[i],UNITS_KV),           RED,             30., max_values, voltage_kv_values,
+        val2str(current_ma_values[i],UNITS_MA),           GREEN,           30., max_values, current_ma_values,
+        val2str(neutron_cps_values[i],UNITS_CPS),         PURPLE,         100., max_values, neutron_cps_values,
+        val2str(d2_pressure_mtorr_values[i],UNITS_D2_MT), BLUE,           100., max_values, d2_pressure_mtorr_values);
+#endif
 }
 
 static void draw_summary_graph_control(char key)
@@ -1472,7 +1494,7 @@ static void draw_adc_data_graph(rect_t * graph_pane, int32_t file_idx)
             }
         }
         sprintf(title_str, "CURRENT ADC");
-        color = PINK;
+        color = GREEN;
         break;
     case 3:
         if (dp2 && dp1->data_part2_pressure_adc_data_valid) {
@@ -1778,8 +1800,8 @@ static int32_t generate_test_file(void)
 
         dp1->voltage_kv = 30.0 * idx / test_file_secs;
         dp1->current_ma = 0;
-        dp1->d2_pressure_mtorr = 13;
-        dp1->n2_pressure_mtorr = 10;
+        dp1->d2_pressure_mtorr = 10;
+        dp1->n2_pressure_mtorr = 13;
         dp1->neutron_cps = 7;
 
         dp1->data_part2_offset = dp2_offset;
@@ -1853,8 +1875,8 @@ static char * val2str(float val, int32_t units)
         units_str = " CPS";
         fmt = "%0.1f";
         break;
-    case UNITS_N2_MT:
     case UNITS_D2_MT:
+    case UNITS_N2_MT:
         units_str = (units == UNITS_N2_MT ? " N2-MT" : " D2-MT");
         if (IS_ERROR(val)) {
             fmt = "notused";

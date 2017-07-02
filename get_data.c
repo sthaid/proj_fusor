@@ -51,7 +51,6 @@ SOFTWARE.
 
 #define GAS_ID_D2 0
 #define GAS_ID_N2 1
-#define GAS_ID_DEFAULT  GAS_ID_N2
 
 //#define CAM_ENABLE
 
@@ -402,12 +401,14 @@ static void init_data_struct(data_t * data, time_t time_now)
         data->part1.current_ma = ERROR_NO_VALUE;
     }
 
-    // data part1 pressure_mtorr
+    // data part1 d2_pressure_mtorr and n2_pressure_mtorr
     ret = dataq_get_adc(DATAQ_ADC_CHAN_PRESSURE, NULL, &mean_mv, NULL, NULL, NULL);
     if (ret == 0) {
-        data->part1.pressure_mtorr = convert_adc_pressure(mean_mv/1000., GAS_ID_DEFAULT);
+        data->part1.d2_pressure_mtorr = convert_adc_pressure(mean_mv/1000., GAS_ID_D2);
+        data->part1.n2_pressure_mtorr = convert_adc_pressure(mean_mv/1000., GAS_ID_N2);
     } else {
-        data->part1.pressure_mtorr = ERROR_NO_VALUE;
+        data->part1.d2_pressure_mtorr = ERROR_NO_VALUE;
+        data->part1.n2_pressure_mtorr = ERROR_NO_VALUE;
     }
 
     // wait for up to 250 ms for neutron data to be available for time_now;  
@@ -816,7 +817,7 @@ static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
     // endif
     uint64_t time_now = time(NULL);
     if (time_now > neutron_time) {    
-        char voltage_str[100], current_str[100], pressure_str[100];
+        char voltage_str[100], current_str[100], d2_pressure_str[100], n2_pressure_str[100];
         int16_t mean_mv;
 
         // publish new neutron data
@@ -846,22 +847,33 @@ static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
             sprintf(current_str, "NO_VALUE");
         }
         if (dataq_get_adc(DATAQ_ADC_CHAN_PRESSURE, NULL, &mean_mv, NULL, NULL, NULL) == 0) {
-            float pressure_mtorr = convert_adc_pressure(mean_mv/1000., GAS_ID_DEFAULT);
-            if (pressure_mtorr < 1000) {
-                sprintf(pressure_str, "%0.1f mTorr", pressure_mtorr);
+            float d2_pressure_mtorr = convert_adc_pressure(mean_mv/1000., GAS_ID_D2);
+            float n2_pressure_mtorr = convert_adc_pressure(mean_mv/1000., GAS_ID_N2);
+            if (IS_ERROR(d2_pressure_mtorr)) {
+                sprintf(d2_pressure_str, "%s", ERROR_TEXT(d2_pressure_mtorr));
+            } else if (d2_pressure_mtorr < 1000) {
+                sprintf(d2_pressure_str, "%0.1f mTorr", d2_pressure_mtorr);
             } else {
-                sprintf(pressure_str, "%0.0f Torr", pressure_mtorr/1000);
+                sprintf(d2_pressure_str, "%0.0f Torr", d2_pressure_mtorr/1000);
+            }
+            if (IS_ERROR(n2_pressure_mtorr)) {
+                sprintf(n2_pressure_str, "%s", ERROR_TEXT(n2_pressure_mtorr));
+            } else if (n2_pressure_mtorr < 1000) {
+                sprintf(n2_pressure_str, "%0.1f mTorr", n2_pressure_mtorr);
+            } else {
+                sprintf(n2_pressure_str, "%0.0f Torr", n2_pressure_mtorr/1000);
             }
         } else {
-            sprintf(pressure_str, "NO_VALUE");
+            sprintf(d2_pressure_str, "NO_VALUE");
+            sprintf(n2_pressure_str, "NO_VALUE");
         }
 
         // print info, and seperator line,
         // note that the seperator line is intended to mark the begining of the next second
         printf("NEUTRON:  samples=%d   mccdaq_restarts=%d\n",
                max_data, mccdaq_get_restart_count());
-        printf("SUMMARY:  neutron = %d /sec   voltage = %s   current = %s   pressure = %s\n",
-               pulse_count, voltage_str, current_str, pressure_str);
+        printf("SUMMARY:  neutron = %d /sec   voltage = %s   current = %s   d2_pressure = %s   n2_pressure = %s\n",
+               pulse_count, voltage_str, current_str, d2_pressure_str, n2_pressure_str);
         printf("\n");
         INFO("=========================================================================\n");
         printf("\n");

@@ -567,7 +567,8 @@ static void * get_live_data_thread(void * cx)
     dp1->time                                     = 0;
     dp1->voltage_kv                               = ERROR_NO_VALUE;
     dp1->current_ma                               = ERROR_NO_VALUE;
-    dp1->pressure_mtorr                           = ERROR_NO_VALUE;
+    dp1->d2_pressure_mtorr                        = ERROR_NO_VALUE;
+    dp1->n2_pressure_mtorr                        = ERROR_NO_VALUE;
     dp1->neutron_cps                              = ERROR_NO_VALUE;
     dp1->data_part2_offset                        = 0;
     dp1->data_part2_length                        = sizeof(struct data_part2_s);
@@ -951,15 +952,15 @@ static int32_t display_handler(void)
                   CAM_HEIGHT+4, CAM_HEIGHT+4); 
     sdl_init_pane(&data_pane_full, &data_pane, 
                   CAM_HEIGHT+2, FONT0_HEIGHT+2, 
-                  win_width-(CAM_HEIGHT+2), FONT1_HEIGHT+4); 
+                  win_width-(CAM_HEIGHT+2), 2*FONT1_HEIGHT+4); 
     sdl_init_pane(&summary_graph_pane_full, &summary_graph_pane, 
                   0, FONT0_HEIGHT+CAM_HEIGHT+4,
                   win_width, win_height-(FONT0_HEIGHT+CAM_HEIGHT+4));
     sdl_init_pane(&adc_data_graph_pane_full, &adc_data_graph_pane, 
                   CAM_HEIGHT+2,
-                  FONT0_HEIGHT+FONT1_HEIGHT+4,
+                  FONT0_HEIGHT+2*FONT1_HEIGHT+4,
                   win_width - (CAM_HEIGHT+2),
-                  CAM_HEIGHT+FONT0_HEIGHT+6 - (FONT0_HEIGHT+FONT1_HEIGHT+4));
+                  CAM_HEIGHT+FONT0_HEIGHT+6 - (FONT0_HEIGHT+2*FONT1_HEIGHT+4));
 
     // loop until quit
     while (!quit) {
@@ -1306,12 +1307,16 @@ static void draw_data_values(rect_t * data_pane, int32_t file_idx)
 
     dp1 = &file_data_part1[file_idx];
 
-    sprintf(str, "%s KV  %s MA  %s MT  %s CPS",
+    sprintf(str, "%s KV  %s MA  %s CPS",
             val2str(dp1->voltage_kv, "%0.1f"),
             val2str(dp1->current_ma, "%0.1f"),
-            val2str(dp1->pressure_mtorr, "%0.1f"),
             val2str(dp1->neutron_cps, "%0.0f"));
     sdl_render_text(data_pane, 0, 0, 1, str, WHITE, BLACK);
+
+// XXX continue work here
+    sprintf(str, "%s MT",
+            val2str(dp1->n2_pressure_mtorr, "%0.1f"));
+    sdl_render_text(data_pane, 1, 0, 1, str, WHITE, BLACK);
 }
 
 // - - - - - - - - -  DISPLAY HANDLER - DRAW SUMMARY GRAPH  - - - - - - - - - - - - 
@@ -1322,7 +1327,7 @@ static void draw_summary_graph(rect_t * graph_pane, int32_t file_idx)
 {
     float    voltage_kv_values[MAX_FILE_DATA_PART1];
     float    current_ma_values[MAX_FILE_DATA_PART1];
-    float    pressure_mtorr_values[MAX_FILE_DATA_PART1];
+    float    d2_pressure_mtorr_values[MAX_FILE_DATA_PART1];
     float    neutron_cps_values[MAX_FILE_DATA_PART1];
     int32_t  file_idx_start, file_idx_end, max_values, i;
     uint64_t cursor_time_us;
@@ -1350,15 +1355,16 @@ static void draw_summary_graph(rect_t * graph_pane, int32_t file_idx)
     // init arrays of the values to graph
     max_values = 0;
     for (i = file_idx_start; i <= file_idx_end; i++) {
-        voltage_kv_values[max_values]   = (i >= 0 && i < file_hdr->max)
+        voltage_kv_values[max_values]        = (i >= 0 && i < file_hdr->max)
                                                ? file_data_part1[i].voltage_kv
                                                : ERROR_NO_VALUE;
         current_ma_values[max_values]        = (i >= 0 && i < file_hdr->max)
                                                 ? file_data_part1[i].current_ma      
                                                 : ERROR_NO_VALUE;
-        pressure_mtorr_values[max_values] = (i >= 0 && i < file_hdr->max)
-                                                ? file_data_part1[i].pressure_mtorr
+        d2_pressure_mtorr_values[max_values] = (i >= 0 && i < file_hdr->max)
+                                                ? file_data_part1[i].d2_pressure_mtorr
                                                 : ERROR_NO_VALUE;
+// XXX
         neutron_cps_values[max_values]       = (i >= 0 && i < file_hdr->max)
                                                 ? file_data_part1[i].neutron_cps
                                                 : ERROR_NO_VALUE;
@@ -1377,7 +1383,7 @@ static void draw_summary_graph(rect_t * graph_pane, int32_t file_idx)
         4, 
         val2str2(voltage_kv_values[i],"%-6.1f","KV "),     RED,    30.0, max_values, voltage_kv_values,
         val2str2(current_ma_values[i],"%-6.1f","MA "),     GREEN,  30.0, max_values, current_ma_values,
-        val2str2(pressure_mtorr_values[i],"%-6.1f","MT "), BLUE,   30.0, max_values, pressure_mtorr_values,
+        val2str2(d2_pressure_mtorr_values[i],"%-6.1f","MT "), BLUE,   30.0, max_values, d2_pressure_mtorr_values,
         val2str2(neutron_cps_values[i],"%-6.0f","CPS"),    PURPLE, 30.0, max_values, neutron_cps_values);
 }
 
@@ -1763,7 +1769,8 @@ static int32_t generate_test_file(void)
 
         dp1->voltage_kv = 30.0 * idx / test_file_secs;
         dp1->current_ma = 0;
-        dp1->pressure_mtorr = 10;
+        dp1->d2_pressure_mtorr = 13;
+        dp1->n2_pressure_mtorr = 10;
         dp1->neutron_cps = 7;
 
         dp1->data_part2_offset = dp2_offset;

@@ -58,8 +58,10 @@ typedef struct {
 
         float    voltage_kv;      // mean voltage
         float    current_ma;
-        float    pressure_mtorr;  // D2 pressure
+        float    d2_pressure_mtorr;
+        float    n2_pressure_mtorr;
         float    neutron_cps;
+        float    reserved[5];
 
         off_t    data_part2_offset;      // for use by display pgm
         uint32_t data_part2_length;

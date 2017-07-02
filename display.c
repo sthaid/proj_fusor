@@ -109,6 +109,12 @@ SOFTWARE.
 #define CONFIG_IMAGE_Y    (config[1].value)
 #define CONFIG_IMAGE_SIZE (config[2].value)
 
+#define UNITS_KV     1
+#define UNITS_MA     2
+#define UNITS_CPS    3
+#define UNITS_N2_MT  4
+#define UNITS_D2_MT  5
+
 //
 // typedefs
 //
@@ -181,8 +187,7 @@ static void draw_adc_data_graph(rect_t * graph_pane, int32_t file_idx);
 static void draw_adc_data_graph_control(char key);
 static void draw_graph_common(rect_t * graph_pane, char * title_str, int32_t x_range_param, int32_t str_col, char * x_info_str, char * y_info_str, float cursor_pos, char * cursor_str, int32_t max_graph, ...);
 static int32_t generate_test_file(void);
-static char * val2str(float val, char * fmt);
-static char * val2str2(float val, char * fmt, char * trailer_str);
+static char * val2str(float val, int32_t units);
 static struct data_part2_s * read_data_part2(int32_t file_idx);
 
 // -----------------  MAIN  ----------------------------------------------------------
@@ -1093,7 +1098,7 @@ static int32_t display_handler(void)
                 screenshot_time_us = microsec_timer();
                 break;
             case '?':  
-                sdl_display_text(about); // XXX include help info here
+                sdl_display_text(about);
                 break;
             case SDL_EVENT_KEY_LEFT_ARROW:
             case SDL_EVENT_KEY_CTRL_LEFT_ARROW:
@@ -1307,15 +1312,15 @@ static void draw_data_values(rect_t * data_pane, int32_t file_idx)
 
     dp1 = &file_data_part1[file_idx];
 
-    sprintf(str, "%s KV  %s MA  %s CPS",
-            val2str(dp1->voltage_kv, "%0.1f"),
-            val2str(dp1->current_ma, "%0.1f"),
-            val2str(dp1->neutron_cps, "%0.0f"));
+    sprintf(str, "%s   %s   %s",
+            val2str(dp1->voltage_kv, UNITS_KV),
+            val2str(dp1->current_ma, UNITS_MA),
+            val2str(dp1->neutron_cps, UNITS_CPS));
     sdl_render_text(data_pane, 0, 0, 1, str, WHITE, BLACK);
 
-// XXX continue work here
-    sprintf(str, "%s MT",
-            val2str(dp1->n2_pressure_mtorr, "%0.1f"));
+    sprintf(str, "%s   %s",
+            val2str(dp1->n2_pressure_mtorr, UNITS_N2_MT),
+            val2str(dp1->d2_pressure_mtorr, UNITS_D2_MT));
     sdl_render_text(data_pane, 1, 0, 1, str, WHITE, BLACK);
 }
 
@@ -1327,6 +1332,7 @@ static void draw_summary_graph(rect_t * graph_pane, int32_t file_idx)
 {
     float    voltage_kv_values[MAX_FILE_DATA_PART1];
     float    current_ma_values[MAX_FILE_DATA_PART1];
+    float    n2_pressure_mtorr_values[MAX_FILE_DATA_PART1];
     float    d2_pressure_mtorr_values[MAX_FILE_DATA_PART1];
     float    neutron_cps_values[MAX_FILE_DATA_PART1];
     int32_t  file_idx_start, file_idx_end, max_values, i;
@@ -1361,10 +1367,12 @@ static void draw_summary_graph(rect_t * graph_pane, int32_t file_idx)
         current_ma_values[max_values]        = (i >= 0 && i < file_hdr->max)
                                                 ? file_data_part1[i].current_ma      
                                                 : ERROR_NO_VALUE;
+        n2_pressure_mtorr_values[max_values] = (i >= 0 && i < file_hdr->max)
+                                                ? file_data_part1[i].n2_pressure_mtorr
+                                                : ERROR_NO_VALUE;
         d2_pressure_mtorr_values[max_values] = (i >= 0 && i < file_hdr->max)
                                                 ? file_data_part1[i].d2_pressure_mtorr
                                                 : ERROR_NO_VALUE;
-// XXX
         neutron_cps_values[max_values]       = (i >= 0 && i < file_hdr->max)
                                                 ? file_data_part1[i].neutron_cps
                                                 : ERROR_NO_VALUE;
@@ -1380,11 +1388,12 @@ static void draw_summary_graph(rect_t * graph_pane, int32_t file_idx)
         6, 
         x_info_str, NULL, 
         cursor_pos, cursor_str, 
-        4, 
-        val2str2(voltage_kv_values[i],"%-6.1f","KV "),     RED,    30.0, max_values, voltage_kv_values,
-        val2str2(current_ma_values[i],"%-6.1f","MA "),     GREEN,  30.0, max_values, current_ma_values,
-        val2str2(d2_pressure_mtorr_values[i],"%-6.1f","MT "), BLUE,   30.0, max_values, d2_pressure_mtorr_values,
-        val2str2(neutron_cps_values[i],"%-6.0f","CPS"),    PURPLE, 30.0, max_values, neutron_cps_values);
+        5,
+        val2str(voltage_kv_values[i],UNITS_KV),           RED,             30., max_values, voltage_kv_values,
+        val2str(current_ma_values[i],UNITS_MA),           PINK,            30., max_values, current_ma_values,
+        val2str(neutron_cps_values[i],UNITS_CPS),         PURPLE,         100., max_values, neutron_cps_values,
+        val2str(n2_pressure_mtorr_values[i],UNITS_N2_MT), BLUE,       1000000., max_values, n2_pressure_mtorr_values,
+        val2str(d2_pressure_mtorr_values[i],UNITS_D2_MT), GREEN,          100., max_values, d2_pressure_mtorr_values);
 }
 
 static void draw_summary_graph_control(char key)
@@ -1463,7 +1472,7 @@ static void draw_adc_data_graph(rect_t * graph_pane, int32_t file_idx)
             }
         }
         sprintf(title_str, "CURRENT ADC");
-        color = GREEN;
+        color = PINK;
         break;
     case 3:
         if (dp2 && dp1->data_part2_pressure_adc_data_valid) {
@@ -1619,7 +1628,7 @@ static void draw_graph_common(
 
         // draw the graph lines
         for (i = 0; i < g->max_values; i++) {
-            if (g->values[i] != ERROR_NO_VALUE) {
+            if (!IS_ERROR(g->values[i])) {
                 p = &points[max_points];
                 p->x = x;
                 p->y = y_origin - y_scale_factor * g->values[i];
@@ -1651,9 +1660,9 @@ static void draw_graph_common(
         if (g->name) {
             name_str_col = (x_range + x_origin) / FONT0_WIDTH + str_col;    
             if (g->y_max >= 1) {
-                sprintf(name_str, "%s : %.0f MAX", g->name, g->y_max);
+                sprintf(name_str, "%-15s  (%.0f MAX)", g->name, g->y_max);
             } else {
-                sprintf(name_str, "%s : %.2f MAX", g->name, g->y_max);
+                sprintf(name_str, "%-15s  (%.2f MAX)", g->name, g->y_max);
             }
             sdl_render_text(graph_pane, gridx+1, name_str_col, 0, 
                             name_str, g->color, WHITE);
@@ -1822,47 +1831,62 @@ static int32_t generate_test_file(void)
 
 // -----------------  SUPPORT  ------------------------------------------------------ 
 
-static char * val2str(float val, char * fmt)
+static char * val2str(float val, int32_t units)
 {
     static char str_tbl[20][100];
     static uint32_t idx;
-    char * str;
+    char *str;
+    const char *fmt;
+    const char *units_str;
 
+    // determine fmt and units_str from units arg
+    switch (units) {
+    case UNITS_KV:
+        units_str = " KV";
+        fmt = "%0.1f";
+        break;
+    case UNITS_MA:
+        units_str = " MA";
+        fmt = "%0.1f";
+        break;
+    case UNITS_CPS:
+        units_str = " CPS";
+        fmt = "%0.1f";
+        break;
+    case UNITS_N2_MT:
+    case UNITS_D2_MT:
+        units_str = (units == UNITS_N2_MT ? " N2-MT" : " D2-MT");
+        if (IS_ERROR(val)) {
+            fmt = "notused";
+        } else if (val < 1000) {
+            fmt = "%0.1f";
+        } else {
+            val /= 1000;
+            fmt = (val < 10 ? "%0.2fK" : val < 100 ? "%0.1fK" : "%0.0fK");
+        }
+        break;
+    default:
+        FATAL("invalid units arg %d\n", units);
+        break;
+    }
+
+    // pick a static str to use 
     str = str_tbl[idx];
     idx = (idx + 1) % 20;
 
+    // start the return string with the value
     if (IS_ERROR(val)) {
         sprintf(str, "%s", ERROR_TEXT(val));
     } else {
         sprintf(str, fmt, val);
     }
 
+    // append units_str to the end of str
+    strcat(str, units_str);
+
+    // return the str
     return str;
 }
-
-static char * val2str2(float val, char * fmt, char * trailer_str)
-{
-    static char str_tbl[20][100];
-    static uint32_t idx;
-    char * str;
-
-    str = str_tbl[idx];
-    idx = (idx + 1) % 20;
-
-    if (IS_ERROR(val)) {
-        sprintf(str, "%s", ERROR_TEXT(val));
-    } else {
-        sprintf(str, fmt, val);
-    }
-
-    if (trailer_str) {
-        strcat(str, " ");
-        strcat(str, trailer_str);
-    }
-
-    return str;
-}
-    
 
 struct data_part2_s * read_data_part2(int32_t file_idx)
 {

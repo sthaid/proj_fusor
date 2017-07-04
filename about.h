@@ -35,6 +35,7 @@ Keyboard Controls:\n\
   'a', 'd', 'w', 'x'     : Camera Pan \n\
   'z', 'Z'               : Camera Zoom\n\
   'r'                    : Camera Pan/Zoom Reset \n\
+  '3', '4'               : Change Neutron Pulse Height Threshold\n\
 \n\
   (*) Use Ctl or Alt with Left/Right Arrow to increase response\n\
 \n\
@@ -44,6 +45,8 @@ Program Options:\n\
   -g <width>x<height>          : default = 1920x1000\n\
   -s <live-mode-data-server>   : default = rpi_data \n\
   -p <playback-mode-file-name> : select playback mode\n\
+  -x                           : don't capture cam data in live mode\n\
+  -t <secs>                    : generate test data file\n\
 \n\
 Author: Steven Haid      StevenHaid@gmail.com\n\
 \n\

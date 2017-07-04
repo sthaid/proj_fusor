@@ -60,8 +60,9 @@ SOFTWARE.
 
 #define MAGIC_FILE 0x1122334455667788
 
-#define MAX_FILE_DATA_PART1   86400   // 1 day
+#define MAX_FILE_DATA_PART1   (6*3600)  // 6 hours
 #define MAX_DATA_PART2_LENGTH 1000000
+#define MAX_NEUTRON_PHT_MV    10000
 
 #define FILE_DATA_PART2_OFFSET \
    ((sizeof(file_hdr_t) +  \
@@ -101,13 +102,15 @@ SOFTWARE.
         } \
     } while (0)
 
-#define DEFAULT_IMAGE_X      "320"
-#define DEFAULT_IMAGE_Y      "240"
-#define DEFAULT_IMAGE_SIZE   "300"
+#define DEFAULT_IMAGE_X         "320"
+#define DEFAULT_IMAGE_Y         "240"
+#define DEFAULT_IMAGE_SIZE      "300"
+#define DEFAULT_NEUTRON_PHT_MV  "100"
 
-#define CONFIG_IMAGE_X    (config[0].value)
-#define CONFIG_IMAGE_Y    (config[1].value)
-#define CONFIG_IMAGE_SIZE (config[2].value)
+#define CONFIG_IMAGE_X        (config[0].value)
+#define CONFIG_IMAGE_Y        (config[1].value)
+#define CONFIG_IMAGE_SIZE     (config[2].value)
+#define CONFIG_NEUTRON_PHT_MV (config[3].value)   // Neutron Pulse Height Threshold, in mv
 
 #define UNITS_KV     1
 #define UNITS_MA     2
@@ -160,13 +163,15 @@ static pthread_mutex_t          jpeg_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 static char                     config_path[PATH_MAX];
 static const int32_t            config_version = 1;
-static config_t                 config[] = { { "image_x",    DEFAULT_IMAGE_X    },
-                                             { "image_y",    DEFAULT_IMAGE_Y    },
-                                             { "image_size", DEFAULT_IMAGE_SIZE },
-                                             { "",           ""                 } };
+static config_t                 config[] = { { "image_x",        DEFAULT_IMAGE_X        },
+                                             { "image_y",        DEFAULT_IMAGE_Y        },
+                                             { "image_size",     DEFAULT_IMAGE_SIZE     },
+                                             { "neutron_pht_mv", DEFAULT_NEUTRON_PHT_MV },
+                                             { "",               ""                     } };
 static int32_t                  image_x;
 static int32_t                  image_y;
 static int32_t                  image_size;
+static int32_t                  neutron_pht_mv;
 
 //
 // prototypes
@@ -189,6 +194,7 @@ static void draw_graph_common(rect_t * graph_pane, char * title_str, int32_t x_r
 static int32_t generate_test_file(void);
 static char * val2str(float val, int32_t units);
 static struct data_part2_s * read_data_part2(int32_t file_idx);
+static int32_t neutron_cps(int32_t file_idx);
 
 // -----------------  MAIN  ----------------------------------------------------------
 
@@ -335,7 +341,8 @@ static int32_t initialize(int32_t argc, char ** argv)
     }
     if (sscanf(CONFIG_IMAGE_X, "%d", &image_x) != 1 ||
         sscanf(CONFIG_IMAGE_Y, "%d", &image_y) != 1 ||
-        sscanf(CONFIG_IMAGE_SIZE, "%d", &image_size) != 1)
+        sscanf(CONFIG_IMAGE_SIZE, "%d", &image_size) != 1 ||
+        sscanf(CONFIG_NEUTRON_PHT_MV, "%d", &neutron_pht_mv) != 1)
     {
         FATAL("invalid config value, not a number\n");
     }
@@ -493,6 +500,7 @@ static int32_t initialize(int32_t argc, char ** argv)
             usleep(10000);
             if (wait_ms >= 5000) {
                 ERROR("failed to receive data from server\n");
+                unlink(filename);
                 return -1;
             }
         }
@@ -548,6 +556,7 @@ static void atexit_config_write(void)
     sprintf(CONFIG_IMAGE_X, "%d", image_x);
     sprintf(CONFIG_IMAGE_Y, "%d", image_y);
     sprintf(CONFIG_IMAGE_SIZE, "%d", image_size);
+    sprintf(CONFIG_NEUTRON_PHT_MV, "%d", neutron_pht_mv);
     config_write(config_path, config, config_version);
 }
 
@@ -574,19 +583,16 @@ static void * get_live_data_thread(void * cx)
     dp1->current_ma                               = ERROR_NO_VALUE;
     dp1->d2_pressure_mtorr                        = ERROR_NO_VALUE;
     dp1->n2_pressure_mtorr                        = ERROR_NO_VALUE;
-    dp1->neutron_cps                              = ERROR_NO_VALUE;
+    dp1->max_neutron_pulse                        = 0;
     dp1->data_part2_offset                        = 0;
     dp1->data_part2_length                        = sizeof(struct data_part2_s);
-    dp1->data_part2_jpeg_buff_valid               = false;
+    dp1->data_part2_jpeg_buff_len                 = 0;
     dp1->data_part2_voltage_adc_data_valid        = false;
     dp1->data_part2_current_adc_data_valid        = false;
     dp1->data_part2_pressure_adc_data_valid       = false;
-    dp1->data_part2_neutron_adc_data_valid        = false;
 
     dp2                                           = &data_novalue.part2;
     dp2->magic                                    = MAGIC_DATA_PART2;
-    dp2->jpeg_buff_len                            = 0;
-    dp2->max_neutron_adc_data                     = 0;
 
     // init others
     sfd = -1;
@@ -664,12 +670,11 @@ try_to_connect_again:
         // if data part2 does not contain camera data then 
         // see if the camera data is being captured by this program, 
         // and add it
-        if (!dp1->data_part2_jpeg_buff_valid) {
+        if (dp1->data_part2_jpeg_buff_len == 0) {
             pthread_mutex_lock(&jpeg_mutex);
             if (microsec_timer() - jpeg_buff_us < 1000000) {
                 memcpy(dp2->jpeg_buff, jpeg_buff, jpeg_buff_len);
-                dp2->jpeg_buff_len = jpeg_buff_len;
-                dp1->data_part2_jpeg_buff_valid = true;
+                dp1->data_part2_jpeg_buff_len = jpeg_buff_len;
                 dp1->data_part2_length = sizeof(struct data_part2_s) + jpeg_buff_len;
             }
             pthread_mutex_unlock(&jpeg_mutex);
@@ -677,8 +682,7 @@ try_to_connect_again:
 
         // if opt_no_cam then disacard camera data
         if (opt_no_cam) {
-            dp2->jpeg_buff_len = 0;
-            dp1->data_part2_jpeg_buff_valid = false;
+            dp1->data_part2_jpeg_buff_len = 0;
             dp1->data_part2_length = sizeof(struct data_part2_s);
         }
 
@@ -739,7 +743,7 @@ try_to_connect_again:
 #ifdef JPEG_BUFF_SAMPLE_CREATE_ENABLE
         // write a sample jpeg buffer to jpeg_buff_sample file
         static bool sample_written = false;
-        if (!sample_written && dp1->data_part2_jpeg_buff_valid) {
+        if (!sample_written && dp1->data_part2_jpeg_buff_len != 0) {
             int32_t fd = open(JPEG_BUFF_SAMPLE_FILENAME, O_CREAT|O_TRUNC|O_RDWR, 0666);
             if (fd < 0) {
                 ERROR("open %s, %s\n", JPEG_BUFF_SAMPLE_FILENAME, strerror(errno));
@@ -1074,6 +1078,8 @@ static int32_t display_handler(void)
         sdl_event_register('z', SDL_EVENT_TYPE_KEY, NULL);
         sdl_event_register('Z', SDL_EVENT_TYPE_KEY, NULL);
         sdl_event_register('r', SDL_EVENT_TYPE_KEY, NULL);                             
+        sdl_event_register('3', SDL_EVENT_TYPE_KEY, NULL);                           // adjust neutron pulse height thresh
+        sdl_event_register('4', SDL_EVENT_TYPE_KEY, NULL);
 
         // present the display
         sdl_display_present();
@@ -1146,6 +1152,16 @@ static int32_t display_handler(void)
             case 'a': case 'd': case 'w': case 'x': case 'z': case 'Z': case 'r':
                 draw_camera_image_control(event->event);
                 break;
+            case '3': case '4':
+                if (event->event == '3' && neutron_pht_mv > 0) {
+                    neutron_pht_mv--;
+                } else if (event->event == '4' && neutron_pht_mv < MAX_NEUTRON_PHT_MV) {
+                    neutron_pht_mv++;
+                } 
+                break;
+            case SDL_EVENT_WIN_SIZE_CHANGE:
+            case SDL_EVENT_WIN_RESTORED:
+                break;
             default:
                 event_processed_count--;
                 break;
@@ -1207,7 +1223,7 @@ static void draw_camera_image(rect_t * cam_pane, int32_t file_idx)
     //   display 'no image'
     //   return
     // endif
-    if (!file_data_part1[file_idx].data_part2_jpeg_buff_valid ||
+    if (file_data_part1[file_idx].data_part2_jpeg_buff_len == 0 ||
         (data_part2 = read_data_part2(file_idx)) == NULL)
     {
         errstr = "NO IMAGE";
@@ -1217,7 +1233,7 @@ static void draw_camera_image(rect_t * cam_pane, int32_t file_idx)
     // decode the jpeg buff contained in data_part2
     ret = jpeg_decode(0,  // cxid
                      JPEG_DECODE_MODE_YUY2,      
-                     data_part2->jpeg_buff, data_part2->jpeg_buff_len,
+                     data_part2->jpeg_buff, file_data_part1[file_idx].data_part2_jpeg_buff_len,
                      &pixel_buff, &pixel_buff_width, &pixel_buff_height);
     if (ret < 0) {
         ERROR("jpeg_decode ret %d\n", ret);
@@ -1312,10 +1328,11 @@ static void draw_data_values(rect_t * data_pane, int32_t file_idx)
 
     dp1 = &file_data_part1[file_idx];
 
-    sprintf(str, "%s   %s   %s",
+    sprintf(str, "%s   %s   %s   NPHT=%d MV",
             val2str(dp1->voltage_kv, UNITS_KV),
             val2str(dp1->current_ma, UNITS_MA),
-            val2str(dp1->neutron_cps, UNITS_CPS));
+            val2str(neutron_cps(file_idx), UNITS_CPS),
+            neutron_pht_mv);
     sdl_render_text(data_pane, 0, 0, 1, str, WHITE, BLACK);
 
     sprintf(str, "%s   %s",
@@ -1347,7 +1364,7 @@ static void draw_summary_graph(rect_t * graph_pane, int32_t file_idx)
     char     cursor_str[100];
 
     // init x_info_str 
-    sprintf(x_info_str, "X: %d SEC (-/+)", summary_graph_time_span_sec);
+    sprintf(x_info_str, "X: %d SEC", summary_graph_time_span_sec);
 
     // init file_idx_start & file_idx_end
     if (mode == LIVE) {
@@ -1373,7 +1390,7 @@ static void draw_summary_graph(rect_t * graph_pane, int32_t file_idx)
                                                 ? file_data_part1[i].current_ma      
                                                 : ERROR_NO_VALUE;
         neutron_cps_values[max_values]       = (i >= 0 && i < file_hdr->max)
-                                                ? file_data_part1[i].neutron_cps
+                                                ? neutron_cps(i)
                                                 : ERROR_NO_VALUE;
         d2_pressure_mtorr_values[max_values] = (i >= 0 && i < file_hdr->max)
                                                 ? file_data_part1[i].d2_pressure_mtorr
@@ -1445,7 +1462,7 @@ static void draw_adc_data_graph(rect_t * graph_pane, int32_t file_idx)
     struct data_part1_s * dp1;
     struct data_part2_s * dp2;
     float adc_data[MAX_ADC_DATA];
-    int32_t i, color;
+    int32_t i, j, k, color;
     int32_t sum=0, cnt=0;
     char title_str[100];
 
@@ -1464,11 +1481,20 @@ static void draw_adc_data_graph(rect_t * graph_pane, int32_t file_idx)
     // init array of the values to graph
     switch (adc_data_graph_select) {
     case 0:
-        if (dp2 && dp1->data_part2_neutron_adc_data_valid) {
-            for (i = 0; i < dp2->max_neutron_adc_data; i++) {
-                adc_data[i] = dp2->neutron_adc_data[i];
-                sum += adc_data[i];
-                cnt++;
+        if (dp2) {
+            k = 0;
+            for (i = 0; i < dp1->max_neutron_pulse; i++) {
+                if (dp1->neutron_pulse_mv[i] >= neutron_pht_mv) {
+                    for (j = 0; j < MAX_NEUTRON_ADC_PULSE_DATA; j++) {
+                        adc_data[k++] = dp2->neutron_adc_pulse_data[i][j];
+                        if (k == MAX_ADC_DATA) {
+                            break;
+                        }
+                    }
+                    if (k == MAX_ADC_DATA) {
+                        break;
+                    }
+                }
             }
         }
         sprintf(title_str, "NEUTRON ADC");
@@ -1513,15 +1539,12 @@ static void draw_adc_data_graph(rect_t * graph_pane, int32_t file_idx)
     }
 
     // append Y scale to title_str
-    sprintf(title_str+strlen(title_str), " : Y %d mV", adc_data_graph_max_y_mv);
+    sprintf(title_str+strlen(title_str), " : Y %d MV", adc_data_graph_max_y_mv);
 
-    // append average to title_str
+    // append average to title_str  (if applicable)
     if (cnt > 0) {
-        sprintf(title_str+strlen(title_str), " : AVG %d mv", sum / cnt);
+        sprintf(title_str+strlen(title_str), " : AVG %d MV", sum / cnt);
     }
-
-    // append key control hint to title_str
-    sprintf(title_str+strlen(title_str), " : (s/1/2)");
 
     // draw the graph
     draw_graph_common(
@@ -1802,15 +1825,17 @@ static int32_t generate_test_file(void)
         dp1->current_ma = 0;
         dp1->d2_pressure_mtorr = 10;
         dp1->n2_pressure_mtorr = 13;
-        dp1->neutron_cps = 7;
+        for (i = 0; i < 100; i++) {
+            dp1->neutron_pulse_mv[i] = 50 + 5 * i;   // pulse height in mv
+        }
+        dp1->max_neutron_pulse = 100;
 
         dp1->data_part2_offset = dp2_offset;
         dp1->data_part2_length = sizeof(struct data_part2_s) + jpeg_buff_len;
-        dp1->data_part2_jpeg_buff_valid = (jpeg_buff_len != 0);
+        dp1->data_part2_jpeg_buff_len = jpeg_buff_len;
         dp1->data_part2_voltage_adc_data_valid = true;
         dp1->data_part2_current_adc_data_valid = true;
         dp1->data_part2_pressure_adc_data_valid = true;
-        dp1->data_part2_neutron_adc_data_valid = true;
 
         // data part2
         dp2->magic = MAGIC_DATA_PART2;
@@ -1818,13 +1843,12 @@ static int32_t generate_test_file(void)
             dp2->voltage_adc_data[i]  = 10000 * i / MAX_ADC_DATA;
             dp2->current_adc_data[i]  =  5000 * i / MAX_ADC_DATA;
             dp2->pressure_adc_data[i] =  1000 * i / MAX_ADC_DATA;
-            dp2->neutron_adc_data[i] = (i % 50) == 25 ? 1000 :
-                                       (i % 50) == 26 ? -200 :
-                                       (i % 50) == 27 ? -20 
-                                                      : 0;
         }
-        dp2->max_neutron_adc_data = 350;
-        dp2->jpeg_buff_len = jpeg_buff_len;
+        for (i = 0; i < dp1->max_neutron_pulse; i++) {
+            dp2->neutron_adc_pulse_data[i][MAX_NEUTRON_ADC_PULSE_DATA/2+0] = dp1->neutron_pulse_mv[i];
+            dp2->neutron_adc_pulse_data[i][MAX_NEUTRON_ADC_PULSE_DATA/2+1] = dp1->neutron_pulse_mv[i] / 2;
+            dp2->neutron_adc_pulse_data[i][MAX_NEUTRON_ADC_PULSE_DATA/2+2] = dp1->neutron_pulse_mv[i] / 4;
+        }
         memcpy(dp2->jpeg_buff, jpeg_buff, jpeg_buff_len);
 
         len = pwrite(file_fd, dp2, dp1->data_part2_length, dp2_offset);
@@ -1961,3 +1985,51 @@ struct data_part2_s * read_data_part2(int32_t file_idx)
     return last_read_data_part2;
 }
 
+static int32_t neutron_cps(int32_t file_idx)
+{
+    int32_t i, cps;
+
+    static int32_t neutron_pht_mv_cache = -1;
+    static int32_t neutron_cps_cache[MAX_FILE_DATA_PART1];
+
+    // if file_idx out of range then return error
+    if (file_idx < 0 || file_idx >= MAX_FILE_DATA_PART1 || file_idx >= file_hdr->max) {
+        ERROR("file_idx %d is not valid, file_hdr->max=%d\n", 
+              file_idx, file_hdr->max);
+        return ERROR_NO_VALUE;
+    }
+
+    // if neutron_pht_mv has changed then clear cached results
+    if (neutron_pht_mv != neutron_pht_mv_cache) {
+        for (i = 0; i < MAX_FILE_DATA_PART1; i++) {
+            neutron_cps_cache[i] = -1;
+        }
+        neutron_pht_mv_cache = neutron_pht_mv;
+    }
+
+    // if cached result is not available then compute it
+    if (neutron_cps_cache[file_idx] == -1) {
+        struct data_part1_s * dp1 = &file_data_part1[file_idx];
+
+        // sanity check dp1->magic
+        if (dp1->magic != MAGIC_DATA_PART1) {
+            ERROR("dp1->magix 0x%lx is not valid\n", dp1->magic);
+            return ERROR_NO_VALUE;
+        }
+
+        // count the number of pulses which have height greater or
+        // equal to the pulse-height-threshold
+        cps = 0;
+        for (i = 0; i < dp1->max_neutron_pulse; i++) {
+            if (dp1->neutron_pulse_mv[i] >= neutron_pht_mv) {
+                cps++;
+            }
+        }
+
+        // save the result in the neutron_cps_cache
+        neutron_cps_cache[file_idx] = cps;
+    }
+
+    // return the cached result
+    return neutron_cps_cache[file_idx];
+}

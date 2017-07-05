@@ -2013,7 +2013,7 @@ static int32_t neutron_cps(int32_t file_idx)
 
         // sanity check dp1->magic
         if (dp1->magic != MAGIC_DATA_PART1) {
-            ERROR("dp1->magix 0x%lx is not valid\n", dp1->magic);
+            ERROR("dp1->magix 0x%"PRIx64" is not valid\n", dp1->magic);
             return ERROR_NO_VALUE;
         }
 

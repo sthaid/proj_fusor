@@ -914,6 +914,6 @@ static void print_plot_str(int32_t value, int32_t baseline)
         }
     }
 
-    printf("%5d: %s\n", value-2048, str);
+    printf("%5d: %s\n", value, str);
 }
 

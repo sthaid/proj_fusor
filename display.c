@@ -930,11 +930,6 @@ static int32_t display_handler(void)
     bool          lost_connection_msg_is_displayed;
     bool          file_error_msg_is_displayed;
     bool          time_error_msg_is_displayed;
-    uint64_t      screenshot_time_us;
-    bool          screenshot_msg;
-    bool          screenshot_msg_is_displayed;
-
-    #define MAX_SCREENSHOT_US 1000000
 
     // initializae 
     quit = false;
@@ -942,9 +937,6 @@ static int32_t display_handler(void)
     lost_connection_msg_is_displayed = false;
     file_error_msg_is_displayed = false;
     time_error_msg_is_displayed = false;
-    screenshot_time_us = 0;
-    screenshot_msg = false;
-    screenshot_msg_is_displayed = false;
 
     if (sdl_init(win_width, win_height, screenshot_prefix) < 0) {
         ERROR("sdl_init %dx%d failed\n", win_width, win_height);
@@ -1031,13 +1023,6 @@ static int32_t display_handler(void)
             time_error_msg_is_displayed = false;
         }
 
-        if (screenshot_msg) {
-            sdl_render_text(&title_pane, 0, 77, 0, "SCREENSHOT", WHITE, BLACK);
-            screenshot_msg_is_displayed = true;
-        } else {
-            screenshot_msg_is_displayed = false;
-        }
-
         sdl_render_text(&title_pane, 0, -11, 0, "(SHIFT-ESC)", WHITE, BLACK);
 
         sdl_render_text(&title_pane, 0, -15, 0, "(?)", WHITE, BLACK);
@@ -1100,9 +1085,18 @@ static int32_t display_handler(void)
             case SDL_EVENT_QUIT: case SDL_EVENT_KEY_SHIFT_ESC: 
                 quit = true;
                 break;
-            case SDL_EVENT_SCREENSHOT_TAKEN:
-                screenshot_time_us = microsec_timer();
-                break;
+            case SDL_EVENT_SCREENSHOT_TAKEN: {
+                // set screen white for 1 second
+                rect_t screen_pane, dummy_pane;
+                rect_t rect = {0,0,win_width,win_height};
+                sdl_init_pane(&screen_pane, &dummy_pane, 
+                            0, 0, 
+                            win_width, win_height);
+                sdl_display_init();
+                sdl_render_fill_rect(&screen_pane, &rect, WHITE);
+                sdl_display_present();
+                usleep(1000000);
+                break; }
             case '?':  
                 sdl_display_text(about);
                 break;
@@ -1167,15 +1161,11 @@ static int32_t display_handler(void)
                 break;
             }
 
-            // determine if screenshot msg should be displayed 
-            screenshot_msg = (microsec_timer() - screenshot_time_us) < MAX_SCREENSHOT_US;
-
             // test if should break out of this loop
             if ((quit) ||
                 (lost_connection != lost_connection_msg_is_displayed) ||
                 (file_error != file_error_msg_is_displayed) ||
                 (time_error != time_error_msg_is_displayed) ||
-                (screenshot_msg != screenshot_msg_is_displayed) ||
                 ((event->event == SDL_EVENT_NONE) &&
                  ((event_processed_count > 0) ||
                   (file_idx != file_idx_global) ||

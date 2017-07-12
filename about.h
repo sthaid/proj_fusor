@@ -28,7 +28,7 @@ Farnsworth Fusor demonstration.\n\
 Keyboard Controls:\n\
   Shift-Esc              : Quit\n\
   ?                      : Help\n\
-  Ctrl-P                 : Capture Screenshot\n\
+  Ctrl-p, or Alt-p       : Capture Screenshot\n\
   Left, Right, Home, End : Summary Graph Time Select (*)\n\
   '-', '+'               : Summary Graph Time Scale\n\
   's', '1', '2'          : Select ADC Graph, and Modify Y Scale\n\

@@ -120,7 +120,7 @@ int32_t sdl_init(uint32_t w, uint32_t h, char * screenshot_prefix)
 {
     #define SDL_FLAGS SDL_WINDOW_RESIZABLE
 
-    char  * font0_path, * font1_path;
+    char    font0_path[PATH_MAX], font1_path[PATH_MAX];
     int32_t font0_ptsize, font1_ptsize;
 
     // save copy of screenshot_prefix
@@ -168,9 +168,9 @@ int32_t sdl_init(uint32_t w, uint32_t h, char * screenshot_prefix)
         return -1;
     }
 
-    font0_path = "fonts/FreeMonoBold.ttf";         // normal 
+    sprintf(font0_path, "%s/proj_fusor/fonts/FreeMonoBold.ttf", getenv("HOME"));  // normal
     font0_ptsize = sdl_win_height / 30 - 1;
-    font1_path = "fonts/FreeMonoBold.ttf";         // large
+    sprintf(font1_path, "%s/proj_fusor/fonts/FreeMonoBold.ttf", getenv("HOME"));  // normal
     font1_ptsize = sdl_win_height / 18 - 1;
 
     sdl_font[0].font = TTF_OpenFont(font0_path, font0_ptsize);
@@ -527,7 +527,9 @@ sdl_event_t * sdl_poll_event(void)
             bool     alt = (ev.key.keysym.mod & KMOD_ALT) != 0;
             int32_t  possible_event = -1;
 
-            if (ctrl && key == 'p') {
+            // use either ctrl-p or alt-p to printscreen, because 
+            // KMOD_CTRL not working on my system
+            if ((ctrl && key == 'p') || (alt && key == 'p')) {
                 print_screen();
                 play_event_sound();
                 event.event = SDL_EVENT_SCREENSHOT_TAKEN;

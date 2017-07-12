@@ -1349,14 +1349,15 @@ static uint32_t summary_graph_time_span_sec = 1800;
 
 static void draw_summary_graph(rect_t * graph_pane, int32_t file_idx)
 {
+    #define MAX_TIME_SPAN  5000
 
-    float    voltage_kv_values[MAX_FILE_DATA_PART1];
-    float    current_ma_values[MAX_FILE_DATA_PART1];
-    float    d2_pressure_mtorr_values[MAX_FILE_DATA_PART1];
+    float    voltage_kv_values[MAX_TIME_SPAN];
+    float    current_ma_values[MAX_TIME_SPAN];
+    float    d2_pressure_mtorr_values[MAX_TIME_SPAN];
 #ifdef GRAPH_N2_PRESSURE
-    float    n2_pressure_mtorr_values[MAX_FILE_DATA_PART1];
+    float    n2_pressure_mtorr_values[MAX_TIME_SPAN];
 #endif
-    float    neutron_cps_values[MAX_FILE_DATA_PART1];
+    float    neutron_cps_values[MAX_TIME_SPAN];
     int32_t  file_idx_start, file_idx_end, max_values, i;
     uint64_t cursor_time_us;
     float    cursor_pos;
@@ -1437,7 +1438,9 @@ static void draw_summary_graph(rect_t * graph_pane, int32_t file_idx)
 
 static void draw_summary_graph_control(char key)
 {
-    static uint32_t time_span_sec_tbl[] = {60, 600, 1800, 3600, 7200, 21600, 43200, 86400};
+    // if changing this, also change MAX_TIME_SPAN above
+    //                                       1    5   10    20    30    60  minutes
+    static uint32_t time_span_sec_tbl[] = { 60, 300, 600, 1200, 1800, 3600 };
 
     switch (key) {
     case '-': 

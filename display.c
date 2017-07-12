@@ -1414,9 +1414,9 @@ static void draw_summary_graph(rect_t * graph_pane, int32_t file_idx)
         x_info_str, NULL, 
         cursor_pos, cursor_str, 
         5,
-        val2str(voltage_kv_values[i],UNITS_KV),           RED,             30., max_values, voltage_kv_values,
-        val2str(current_ma_values[i],UNITS_MA),           GREEN,           30., max_values, current_ma_values,
-        val2str(neutron_cps_values[i],UNITS_CPS),         PURPLE,         100., max_values, neutron_cps_values,
+        val2str(voltage_kv_values[i],UNITS_KV),           RED,             50., max_values, voltage_kv_values,
+        val2str(current_ma_values[i],UNITS_MA),           GREEN,           50., max_values, current_ma_values,
+        val2str(neutron_cps_values[i],UNITS_CPS),         PURPLE,          50., max_values, neutron_cps_values,
         val2str(d2_pressure_mtorr_values[i],UNITS_D2_MT), BLUE,           100., max_values, d2_pressure_mtorr_values,
         val2str(n2_pressure_mtorr_values[i],UNITS_N2_MT), LIGHT_BLUE, 1000000., max_values, n2_pressure_mtorr_values);
 #else
@@ -1428,9 +1428,9 @@ static void draw_summary_graph(rect_t * graph_pane, int32_t file_idx)
         x_info_str, NULL, 
         cursor_pos, cursor_str, 
         4,
-        val2str(voltage_kv_values[i],UNITS_KV),           RED,             30., max_values, voltage_kv_values,
-        val2str(current_ma_values[i],UNITS_MA),           GREEN,           30., max_values, current_ma_values,
-        val2str(neutron_cps_values[i],UNITS_CPS),         PURPLE,         100., max_values, neutron_cps_values,
+        val2str(voltage_kv_values[i],UNITS_KV),           RED,             50., max_values, voltage_kv_values,
+        val2str(current_ma_values[i],UNITS_MA),           GREEN,           50., max_values, current_ma_values,
+        val2str(neutron_cps_values[i],UNITS_CPS),         PURPLE,          50., max_values, neutron_cps_values,
         val2str(d2_pressure_mtorr_values[i],UNITS_D2_MT), BLUE,           100., max_values, d2_pressure_mtorr_values);
 #endif
 }

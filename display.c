@@ -438,14 +438,14 @@ static int32_t initialize(int32_t argc, char ** argv)
     }
     
     // open and map filename
-    file_fd = open(filename, O_RDWR);
+    file_fd = open(filename, mode == PLAYBACK ? O_RDONLY : O_RDWR);
     if (file_fd < 0) {
         ERROR("failed to open %s, %s\n", filename, strerror(errno));
         return -1;
     }
     file_hdr = mmap(NULL,  // addr
                     sizeof(file_hdr_t),
-                    PROT_READ|PROT_WRITE,
+                    mode == PLAYBACK ? PROT_READ : PROT_READ|PROT_WRITE,
                     MAP_SHARED,
                     file_fd,
                     0);   // offset
@@ -455,7 +455,7 @@ static int32_t initialize(int32_t argc, char ** argv)
     }
     file_data_part1 = mmap(NULL,  // addr
                            sizeof(struct data_part1_s) * MAX_FILE_DATA_PART1,
-                           PROT_READ|PROT_WRITE,
+                           mode == PLAYBACK ? PROT_READ : PROT_READ|PROT_WRITE,
                            MAP_SHARED,
                            file_fd,
                            sizeof(file_hdr_t));   // offset
@@ -1481,7 +1481,7 @@ static void draw_summary_graph_control(char key)
 // - - - - - - - - -  DISPLAY HANDLER - DRAW ADC DATA GRAPH - - - - - - - - - - - - 
 
 static uint32_t adc_data_graph_select = 0;
-static uint32_t adc_data_graph_max_y_mv = 1000;
+static uint32_t adc_data_graph_max_y_mv = 10000;
 
 static void draw_adc_data_graph(rect_t * graph_pane, int32_t file_idx)
 {
@@ -2013,6 +2013,8 @@ struct data_part2_s * read_data_part2(int32_t file_idx)
 
 static float neutron_cpm(int32_t file_idx)
 {
+    #define AVG_SAMPLES 11
+
     int32_t file_idx_avg_start;
     int32_t file_idx_avg_end;
 
@@ -2021,8 +2023,8 @@ static float neutron_cpm(int32_t file_idx)
     static float   neutron_cpm_average_cache[MAX_FILE_DATA_PART1];
 
     // init the start and end of the range to be averaged
-    file_idx_avg_start = file_idx - 3;
-    file_idx_avg_end   = file_idx + 3;
+    file_idx_avg_start = file_idx - (AVG_SAMPLES / 2);
+    file_idx_avg_end   = file_idx_avg_start + (AVG_SAMPLES - 1);
 
     // if neutron_pht_mv has changed then clear cached results
     if (neutron_pht_mv != neutron_pht_mv_cache) {

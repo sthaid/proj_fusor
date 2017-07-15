@@ -62,7 +62,6 @@ SOFTWARE.
 
 #define MAX_FILE_DATA_PART1   (6*3600)  // 6 hours
 #define MAX_DATA_PART2_LENGTH 1000000
-#define MAX_NEUTRON_PHT_MV    10000
 
 #define FILE_DATA_PART2_OFFSET \
    ((sizeof(file_hdr_t) +  \
@@ -74,8 +73,8 @@ SOFTWARE.
 #define FONT1_HEIGHT (sdl_font_char_height(1))
 #define FONT1_WIDTH  (sdl_font_char_width(1))
 
-#define DEFAULT_WIN_WIDTH   1920
-#define DEFAULT_WIN_HEIGHT  1000
+#define DEFAULT_WIN_WIDTH         1920
+#define DEFAULT_WIN_HEIGHT        1000
 
 //#define JPEG_BUFF_SAMPLE_CREATE_ENABLE
 #define JPEG_BUFF_SAMPLE_FILENAME "jpeg_buff_sample.bin"
@@ -102,19 +101,21 @@ SOFTWARE.
         } \
     } while (0)
 
-#define DEFAULT_IMAGE_X         "320"
-#define DEFAULT_IMAGE_Y         "240"
-#define DEFAULT_IMAGE_SIZE      "300"
-#define DEFAULT_NEUTRON_PHT_MV  "100"
+#define DEFAULT_IMAGE_X           "320"
+#define DEFAULT_IMAGE_Y           "240"
+#define DEFAULT_IMAGE_SIZE        "300"
+#define DEFAULT_NEUTRON_PHT_MV    "100"
+#define DEFAULT_NEUTRON_SCALE_CPM "100"
 
-#define CONFIG_IMAGE_X        (config[0].value)
-#define CONFIG_IMAGE_Y        (config[1].value)
-#define CONFIG_IMAGE_SIZE     (config[2].value)
-#define CONFIG_NEUTRON_PHT_MV (config[3].value)   // Neutron Pulse Height Threshold, in mv
+#define CONFIG_IMAGE_X           (config[0].value)
+#define CONFIG_IMAGE_Y           (config[1].value)
+#define CONFIG_IMAGE_SIZE        (config[2].value)
+#define CONFIG_NEUTRON_PHT_MV    (config[3].value)
+#define CONFIG_NEUTRON_SCALE_CPM (config[4].value)
 
 #define UNITS_KV     1
 #define UNITS_MA     2
-#define UNITS_CPS    3
+#define UNITS_CPM    3
 #define UNITS_D2_MT  4
 #define UNITS_N2_MT  5
 
@@ -163,15 +164,17 @@ static pthread_mutex_t          jpeg_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 static char                     config_path[PATH_MAX];
 static const int32_t            config_version = 1;
-static config_t                 config[] = { { "image_x",        DEFAULT_IMAGE_X        },
-                                             { "image_y",        DEFAULT_IMAGE_Y        },
-                                             { "image_size",     DEFAULT_IMAGE_SIZE     },
-                                             { "neutron_pht_mv", DEFAULT_NEUTRON_PHT_MV },
-                                             { "",               ""                     } };
+static config_t                 config[] = { { "image_x",           DEFAULT_IMAGE_X        },
+                                             { "image_y",           DEFAULT_IMAGE_Y        },
+                                             { "image_size",        DEFAULT_IMAGE_SIZE     },
+                                             { "neutron_pht_mv",    DEFAULT_NEUTRON_PHT_MV },
+                                             { "neutron_scale_cpm", DEFAULT_NEUTRON_SCALE_CPM },
+                                             { "",                  ""                     } };
 static int32_t                  image_x;
 static int32_t                  image_y;
 static int32_t                  image_size;
 static int32_t                  neutron_pht_mv;
+static int32_t                  neutron_scale_cpm;
 
 //
 // prototypes
@@ -194,7 +197,7 @@ static void draw_graph_common(rect_t * graph_pane, char * title_str, int32_t x_r
 static int32_t generate_test_file(void);
 static char * val2str(float val, int32_t units);
 static struct data_part2_s * read_data_part2(int32_t file_idx);
-static int32_t neutron_cps(int32_t file_idx);
+static float neutron_cpm(int32_t file_idx);
 
 // -----------------  MAIN  ----------------------------------------------------------
 
@@ -342,7 +345,8 @@ static int32_t initialize(int32_t argc, char ** argv)
     if (sscanf(CONFIG_IMAGE_X, "%d", &image_x) != 1 ||
         sscanf(CONFIG_IMAGE_Y, "%d", &image_y) != 1 ||
         sscanf(CONFIG_IMAGE_SIZE, "%d", &image_size) != 1 ||
-        sscanf(CONFIG_NEUTRON_PHT_MV, "%d", &neutron_pht_mv) != 1)
+        sscanf(CONFIG_NEUTRON_PHT_MV, "%d", &neutron_pht_mv) != 1 ||
+        sscanf(CONFIG_NEUTRON_SCALE_CPM, "%d", &neutron_scale_cpm) != 1)
     {
         FATAL("invalid config value, not a number\n");
     }
@@ -557,6 +561,7 @@ static void atexit_config_write(void)
     sprintf(CONFIG_IMAGE_Y, "%d", image_y);
     sprintf(CONFIG_IMAGE_SIZE, "%d", image_size);
     sprintf(CONFIG_NEUTRON_PHT_MV, "%d", neutron_pht_mv);
+    sprintf(CONFIG_NEUTRON_SCALE_CPM, "%d", neutron_scale_cpm);
     config_write(config_path, config, config_version);
 }
 
@@ -1065,6 +1070,8 @@ static int32_t display_handler(void)
         sdl_event_register('r', SDL_EVENT_TYPE_KEY, NULL);                             
         sdl_event_register('3', SDL_EVENT_TYPE_KEY, NULL);                           // adjust neutron pulse height thresh
         sdl_event_register('4', SDL_EVENT_TYPE_KEY, NULL);
+        sdl_event_register('5', SDL_EVENT_TYPE_KEY, NULL);                           // adjust neutron summary graph scale
+        sdl_event_register('6', SDL_EVENT_TYPE_KEY, NULL);
 
         // present the display
         sdl_display_present();
@@ -1146,11 +1153,36 @@ static int32_t display_handler(void)
             case 'a': case 'd': case 'w': case 'x': case 'z': case 'Z': case 'r':
                 draw_camera_image_control(event->event);
                 break;
-            case '3': case '4':
-                if (event->event == '3' && neutron_pht_mv > 0) {
-                    neutron_pht_mv--;
-                } else if (event->event == '4' && neutron_pht_mv < MAX_NEUTRON_PHT_MV) {
-                    neutron_pht_mv++;
+            case '3': case '4': {
+                int32_t delta;
+                delta = (neutron_pht_mv < 500  ? 1  :
+                         neutron_pht_mv < 1000 ? 5  :
+                         neutron_pht_mv < 2000 ? 10 : 
+                         neutron_pht_mv < 3000 ? 20 : 
+                                                100);
+                if (event->event == '3') {
+                    neutron_pht_mv -= delta;
+                    if (neutron_pht_mv < 0) {
+                        neutron_pht_mv = 0;
+                    }
+                } else if (event->event == '4') {
+                    neutron_pht_mv += delta;
+                    if (neutron_pht_mv > 10000) {
+                        neutron_pht_mv = 10000;
+                    }
+                } 
+                break; }
+            case '5': case '6':
+                if (event->event == '5') {
+                    neutron_scale_cpm -= 1;
+                    if (neutron_scale_cpm < 10) {
+                        neutron_scale_cpm = 10;
+                    }
+                } else if (event->event == '6') {
+                    neutron_scale_cpm += 1;
+                    if (neutron_scale_cpm > 1000) {
+                        neutron_scale_cpm = 1000;
+                    }
                 } 
                 break;
             case SDL_EVENT_WIN_SIZE_CHANGE:
@@ -1321,7 +1353,7 @@ static void draw_data_values(rect_t * data_pane, int32_t file_idx)
     sprintf(str, "%s   %s   %s   NPHT=%d MV",
             val2str(dp1->voltage_kv, UNITS_KV),
             val2str(dp1->current_ma, UNITS_MA),
-            val2str(neutron_cps(file_idx), UNITS_CPS),
+            val2str(neutron_cpm(file_idx), UNITS_CPM),
             neutron_pht_mv);
     sdl_render_text(data_pane, 0, 0, 1, str, WHITE, BLACK);
 
@@ -1335,7 +1367,7 @@ static void draw_data_values(rect_t * data_pane, int32_t file_idx)
 
 // #define GRAPH_N2_PRESSURE
 
-static uint32_t summary_graph_time_span_sec = 1800;
+static uint32_t summary_graph_time_span_sec = 600;
 
 static void draw_summary_graph(rect_t * graph_pane, int32_t file_idx)
 {
@@ -1347,7 +1379,7 @@ static void draw_summary_graph(rect_t * graph_pane, int32_t file_idx)
 #ifdef GRAPH_N2_PRESSURE
     float    n2_pressure_mtorr_values[MAX_TIME_SPAN];
 #endif
-    float    neutron_cps_values[MAX_TIME_SPAN];
+    float    neutron_cpm_values[MAX_TIME_SPAN];
     int32_t  file_idx_start, file_idx_end, max_values, i;
     uint64_t cursor_time_us;
     float    cursor_pos;
@@ -1380,8 +1412,8 @@ static void draw_summary_graph(rect_t * graph_pane, int32_t file_idx)
         current_ma_values[max_values]        = (i >= 0 && i < file_hdr->max)
                                                 ? file_data_part1[i].current_ma      
                                                 : ERROR_NO_VALUE;
-        neutron_cps_values[max_values]       = (i >= 0 && i < file_hdr->max)
-                                                ? neutron_cps(i)
+        neutron_cpm_values[max_values]       = (i >= 0 && i < file_hdr->max)
+                                                ? neutron_cpm(i)
                                                 : ERROR_NO_VALUE;
         d2_pressure_mtorr_values[max_values] = (i >= 0 && i < file_hdr->max)
                                                 ? file_data_part1[i].d2_pressure_mtorr
@@ -1396,6 +1428,7 @@ static void draw_summary_graph(rect_t * graph_pane, int32_t file_idx)
 
     // draw the graph
     i = file_idx - file_idx_start;
+    double ns = neutron_scale_cpm;
 #ifdef GRAPH_N2_PRESSURE
     draw_graph_common(
         graph_pane, 
@@ -1407,7 +1440,7 @@ static void draw_summary_graph(rect_t * graph_pane, int32_t file_idx)
         5,
         val2str(voltage_kv_values[i],UNITS_KV),           RED,             50., max_values, voltage_kv_values,
         val2str(current_ma_values[i],UNITS_MA),           GREEN,           50., max_values, current_ma_values,
-        val2str(neutron_cps_values[i],UNITS_CPS),         PURPLE,          50., max_values, neutron_cps_values,
+        val2str(neutron_cpm_values[i],UNITS_CPM),         PURPLE,           ns, max_values, neutron_cpm_values,
         val2str(d2_pressure_mtorr_values[i],UNITS_D2_MT), BLUE,           100., max_values, d2_pressure_mtorr_values,
         val2str(n2_pressure_mtorr_values[i],UNITS_N2_MT), LIGHT_BLUE, 1000000., max_values, n2_pressure_mtorr_values);
 #else
@@ -1421,7 +1454,7 @@ static void draw_summary_graph(rect_t * graph_pane, int32_t file_idx)
         4,
         val2str(voltage_kv_values[i],UNITS_KV),           RED,             50., max_values, voltage_kv_values,
         val2str(current_ma_values[i],UNITS_MA),           GREEN,           50., max_values, current_ma_values,
-        val2str(neutron_cps_values[i],UNITS_CPS),         PURPLE,          50., max_values, neutron_cps_values,
+        val2str(neutron_cpm_values[i],UNITS_CPM),         PURPLE,           ns, max_values, neutron_cpm_values,
         val2str(d2_pressure_mtorr_values[i],UNITS_D2_MT), BLUE,           100., max_values, d2_pressure_mtorr_values);
 #endif
 }
@@ -1888,8 +1921,8 @@ static char * val2str(float val, int32_t units)
         units_str = " MA";
         fmt = "%0.1f";
         break;
-    case UNITS_CPS:
-        units_str = " CPS";
+    case UNITS_CPM:
+        units_str = " CPM";
         fmt = "%0.1f";
         break;
     case UNITS_D2_MT:
@@ -1978,51 +2011,74 @@ struct data_part2_s * read_data_part2(int32_t file_idx)
     return last_read_data_part2;
 }
 
-static int32_t neutron_cps(int32_t file_idx)
+static float neutron_cpm(int32_t file_idx)
 {
-    int32_t i, cps;
+    int32_t file_idx_avg_start;
+    int32_t file_idx_avg_end;
 
     static int32_t neutron_pht_mv_cache = -1;
     static int32_t neutron_cps_cache[MAX_FILE_DATA_PART1];
+    static float   neutron_cpm_average_cache[MAX_FILE_DATA_PART1];
 
-    // if file_idx out of range then return error
-    if (file_idx < 0 || file_idx >= MAX_FILE_DATA_PART1 || file_idx >= file_hdr->max) {
-        ERROR("file_idx %d is not valid, file_hdr->max=%d\n", 
-              file_idx, file_hdr->max);
-        return ERROR_NO_VALUE;
-    }
+    // init the start and end of the range to be averaged
+    file_idx_avg_start = file_idx - 3;
+    file_idx_avg_end   = file_idx + 3;
 
     // if neutron_pht_mv has changed then clear cached results
     if (neutron_pht_mv != neutron_pht_mv_cache) {
+        int32_t i;
         for (i = 0; i < MAX_FILE_DATA_PART1; i++) {
             neutron_cps_cache[i] = -1;
+            neutron_cpm_average_cache[i] = -1;
         }
         neutron_pht_mv_cache = neutron_pht_mv;
     }
 
-    // if cached result is not available then compute it
-    if (neutron_cps_cache[file_idx] == -1) {
-        struct data_part1_s * dp1 = &file_data_part1[file_idx];
-
-        // sanity check dp1->magic
-        if (dp1->magic != MAGIC_DATA_PART1) {
-            ERROR("dp1->magix 0x%"PRIx64" is not valid\n", dp1->magic);
-            return ERROR_NO_VALUE;
-        }
-
-        // count the number of pulses which have height greater or
-        // equal to the pulse-height-threshold
-        cps = 0;
-        for (i = 0; i < dp1->max_neutron_pulse; i++) {
-            if (dp1->neutron_pulse_mv[i] >= neutron_pht_mv) {
-                cps++;
-            }
-        }
-
-        // save the result in the neutron_cps_cache
-        neutron_cps_cache[file_idx] = cps;
+    // if file_idx out of range then return error
+    if (file_idx_avg_start < 0 || file_idx_avg_end >= file_hdr->max) {
+        return ERROR_NO_VALUE;
     }
 
-    // return the cached result
-    return neutron_cps_cache[file_idx];
+    // if cached average cpm value is not available then
+    // compute it
+    if (neutron_cpm_average_cache[file_idx] == -1) {
+        int32_t sum = 0, n = 0, i, j, cps;
+
+        // loop over range to average
+        for (i = file_idx_avg_start; i <= file_idx_avg_end; i++) {
+            // if cached cps value is not available then compute it
+            // based on current setting of neutron_pht_mv
+            if (neutron_cps_cache[i] == -1) {
+                struct data_part1_s * dp1 = &file_data_part1[i];
+
+                // sanity check dp1->magic
+                if (dp1->magic != MAGIC_DATA_PART1) {
+                    ERROR("dp1->magix 0x%"PRIx64" is not valid\n", dp1->magic);
+                    return ERROR_NO_VALUE;
+                }
+
+                // count the number of pulses which have height greater or
+                // equal to the pulse-height-threshold
+                cps = 0;
+                for (j = 0; j < dp1->max_neutron_pulse; j++) {
+                    if (dp1->neutron_pulse_mv[j] >= neutron_pht_mv) {
+                        cps++;
+                    }
+                }
+
+                // save the result in the neutron_cps_cache
+                neutron_cps_cache[i] = cps;
+            }
+
+            // sum the cached cps values
+            sum += neutron_cps_cache[i];
+            n++;
+        }
+
+        // compute cached average cpm value
+        neutron_cpm_average_cache[file_idx] = (float)sum / n * 60;
+    }
+
+    // return the cached average cpm value
+    return neutron_cpm_average_cache[file_idx];
 }

@@ -49,10 +49,11 @@ SOFTWARE.
 // defines
 //
 
+//#define CAM_ENABLE
+//#define DEBUG_PRINT_PULSE_GRAPH
+
 #define GAS_ID_D2 0
 #define GAS_ID_N2 1
-
-//#define CAM_ENABLE
 
 #define ATOMIC_INCREMENT(x) \
     do { \
@@ -104,7 +105,9 @@ static float convert_adc_voltage(float adc_volts);
 static float convert_adc_current(float adc_volts);
 static float convert_adc_pressure(float adc_volts, int32_t gas_id);
 static int32_t mccdaq_callback(uint16_t * data, int32_t max_data);
+#ifdef DEBUG_PRINT_PULSE_GRAPH
 static void print_plot_str(int32_t value, int32_t baseline);
+#endif
 
 // -----------------  MAIN & TOP LEVEL ROUTINES  -------------------------------------
 
@@ -772,6 +775,7 @@ static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
                 local_max_neutron_pulse++;
             }
 
+#ifdef DEBUG_PRINT_PULSE_GRAPH
             // plot the pulse 
             pulse_start_idx_extended = pulse_start_idx - 1;
             pulse_end_idx_extended = pulse_end_idx + 4;
@@ -788,6 +792,7 @@ static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
                 print_plot_str((data[i]-2048)*10000/2048, (baseline-2048)*10000/2048); 
             }
             printf("\n");
+#endif
 
             // done with this pulse
             pulse_start_idx = -1;
@@ -871,6 +876,7 @@ static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
     return 0;
 }
 
+#ifdef DEBUG_PRINT_PULSE_GRAPH
 static void print_plot_str(int32_t value, int32_t baseline)
 {
     char    str[110];
@@ -916,4 +922,4 @@ static void print_plot_str(int32_t value, int32_t baseline)
 
     printf("%5d: %s\n", value, str);
 }
-
+#endif

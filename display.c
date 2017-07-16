@@ -1159,7 +1159,7 @@ static int32_t display_handler(void)
                          neutron_pht_mv < 1000 ? 5  :
                          neutron_pht_mv < 2000 ? 10 : 
                          neutron_pht_mv < 3000 ? 20 : 
-                                                100);
+                                                 100);
                 if (event->event == '3') {
                     neutron_pht_mv -= delta;
                     if (neutron_pht_mv < 0) {
@@ -1172,19 +1172,25 @@ static int32_t display_handler(void)
                     }
                 } 
                 break; }
-            case '5': case '6':
+            case '5': case '6': {
+                int32_t delta;
+                delta = (neutron_scale_cpm < 500  ? 1  :
+                         neutron_scale_cpm < 1000 ? 5  :
+                         neutron_scale_cpm < 2000 ? 10 : 
+                         neutron_scale_cpm < 3000 ? 20 : 
+                                                    100);
                 if (event->event == '5') {
-                    neutron_scale_cpm -= 1;
+                    neutron_scale_cpm -= delta;
                     if (neutron_scale_cpm < 10) {
                         neutron_scale_cpm = 10;
                     }
                 } else if (event->event == '6') {
-                    neutron_scale_cpm += 1;
-                    if (neutron_scale_cpm > 1000) {
-                        neutron_scale_cpm = 1000;
+                    neutron_scale_cpm += delta;
+                    if (neutron_scale_cpm > 10000) {
+                        neutron_scale_cpm = 10000;
                     }
                 } 
-                break;
+                break; }
             case SDL_EVENT_WIN_SIZE_CHANGE:
             case SDL_EVENT_WIN_RESTORED:
                 break;
@@ -2013,7 +2019,7 @@ struct data_part2_s * read_data_part2(int32_t file_idx)
 
 static float neutron_cpm(int32_t file_idx)
 {
-    #define AVG_SAMPLES 11
+    #define AVG_SAMPLES 10
 
     int32_t file_idx_avg_start;
     int32_t file_idx_avg_end;
@@ -2023,8 +2029,8 @@ static float neutron_cpm(int32_t file_idx)
     static float   neutron_cpm_average_cache[MAX_FILE_DATA_PART1];
 
     // init the start and end of the range to be averaged
-    file_idx_avg_start = file_idx - (AVG_SAMPLES / 2);
-    file_idx_avg_end   = file_idx_avg_start + (AVG_SAMPLES - 1);
+    file_idx_avg_start = file_idx - (AVG_SAMPLES-1);
+    file_idx_avg_end   = file_idx;
 
     // if neutron_pht_mv has changed then clear cached results
     if (neutron_pht_mv != neutron_pht_mv_cache) {

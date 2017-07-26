@@ -9,6 +9,8 @@ From Wikipedia:
 > this voltage drop, building up speed. If they collide in the center, 
 > they can fuse. This is a type of inertial electrostatic confinement device.
 
+Refer to screenshot1.png for data collected from a fusor.
+
 # REFERENCES
 
 http://www.fusor.net

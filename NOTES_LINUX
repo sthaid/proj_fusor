@@ -1,0 +1,27 @@
+================================
+BUILDING AND RUNNING THE DISPLAY PROGRAM ON LINUX
+================================
+
+This procedure is for Fedora-20, and assumes you already have
+the base software development packages installed.
+ 
+   # install additional software development packages
+   yum install SDL2-devel SDL2_ttf-devel SDL2-mixer-devel
+   yum install libjpeg-turbo-devel libpng-devel
+   yum install gnu-free-mono-fonts
+
+   # clone the git repo
+   cd ~      
+   git clone https://github.com/sthaid/proj_fusor.git
+
+   # build the display program
+   cd proj_fusor
+   make display
+
+   # Dowload the 248M data file by browsing to:
+   #   https://drive.google.com/file/d/0B3Q10qVwU0_FZmc2VWZrSlNxQUU/view?usp=sharing
+
+   # run the display program
+   display -h                                        # help on program options
+   display -p ~/Downloads/fusor_170724_192651.dat    # then use '?' for help
+

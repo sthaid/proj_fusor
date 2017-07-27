@@ -119,9 +119,12 @@ static void sdl_set_color(int32_t color);
 int32_t sdl_init(uint32_t w, uint32_t h, char * screenshot_prefix)
 {
     #define SDL_FLAGS SDL_WINDOW_RESIZABLE
+    #define MAX_FONT_SEARCH_PATH 3
 
-    char    font0_path[PATH_MAX], font1_path[PATH_MAX];
+    char   *font_path;
     int32_t font0_ptsize, font1_ptsize;
+    char    font_search_path[MAX_FONT_SEARCH_PATH][PATH_MAX];
+    static const char * font_filename = "FreeMonoBold.ttf";
 
     // save copy of screenshot_prefix
     strcpy(sdl_screenshot_prefix, screenshot_prefix);
@@ -168,19 +171,37 @@ int32_t sdl_init(uint32_t w, uint32_t h, char * screenshot_prefix)
         return -1;
     }
 
-    sprintf(font0_path, "%s/proj_fusor/fonts/FreeMonoBold.ttf", getenv("HOME"));  // normal
-    font0_ptsize = sdl_win_height / 30 - 1;
-    sprintf(font1_path, "%s/proj_fusor/fonts/FreeMonoBold.ttf", getenv("HOME"));  // normal
-    font1_ptsize = sdl_win_height / 18 - 1;
-
-    sdl_font[0].font = TTF_OpenFont(font0_path, font0_ptsize);
-    if (sdl_font[0].font == NULL) {
-        ERROR("failed TTF_OpenFont %s\n", font0_path);
+    // search for FreeMonoBold.ttf font file in possible locations
+    // note - fonts can be installed using:
+    //   sudo yum install gnu-free-mono-fonts       # rhel,centos,fedora
+    //   sudo apt-get install fonts-freefont-ttf    # raspberrypi, ubuntu
+    sprintf(font_search_path[0], "%s/%s", "/usr/share/fonts/gnu-free", font_filename);
+    sprintf(font_search_path[1], "%s/%s", "/usr/share/fonts/truetype/freefont", font_filename);
+    sprintf(font_search_path[2], "%s/%s/%s", getenv("HOME"), "proj_fusor/fonts", font_filename);
+    for (i = 0; i < MAX_FONT_SEARCH_PATH; i++) {
+        struct stat buf;
+        font_path = font_search_path[i];
+        if (stat(font_path, &buf) == 0) {
+            break;
+        }
+    }
+    if (i == MAX_FONT_SEARCH_PATH) {
+        ERROR("failed to locate font file\n");
         return -1;
     }
-    sdl_font[0].font_underline = TTF_OpenFont(font0_path, font0_ptsize);
+    INFO("using font %s\n", font_path);
+
+    // initialize font0 and font0_underline,
+    // this is the small font 
+    font0_ptsize = sdl_win_height / 30 - 1;
+    sdl_font[0].font = TTF_OpenFont(font_path, font0_ptsize);
     if (sdl_font[0].font == NULL) {
-        ERROR("failed TTF_OpenFont %s\n", font0_path);
+        ERROR("failed TTF_OpenFont %s\n", font_path);
+        return -1;
+    }
+    sdl_font[0].font_underline = TTF_OpenFont(font_path, font0_ptsize);
+    if (sdl_font[0].font == NULL) {
+        ERROR("failed TTF_OpenFont %s\n", font_path);
         return -1;
     }
     TTF_SizeText(sdl_font[0].font, "X", &sdl_font[0].char_width, &sdl_font[0].char_height);
@@ -188,14 +209,17 @@ int32_t sdl_init(uint32_t w, uint32_t h, char * screenshot_prefix)
     INFO("font0 psize=%d width=%d height=%d\n", 
          font0_ptsize, sdl_font[0].char_width, sdl_font[0].char_height);
 
-    sdl_font[1].font = TTF_OpenFont(font1_path, font1_ptsize);
+    // initialize font1 and font1_underline,
+    // this is the large font 
+    font1_ptsize = sdl_win_height / 18 - 1;
+    sdl_font[1].font = TTF_OpenFont(font_path, font1_ptsize);
     if (sdl_font[1].font == NULL) {
-        ERROR("failed TTF_OpenFont %s\n", font1_path);
+        ERROR("failed TTF_OpenFont %s\n", font_path);
         return -1;
     }
-    sdl_font[1].font_underline = TTF_OpenFont(font1_path, font1_ptsize);
+    sdl_font[1].font_underline = TTF_OpenFont(font_path, font1_ptsize);
     if (sdl_font[1].font == NULL) {
-        ERROR("failed TTF_OpenFont %s\n", font1_path);
+        ERROR("failed TTF_OpenFont %s\n", font_path);
         return -1;
     }
     TTF_SizeText(sdl_font[1].font, "X", &sdl_font[1].char_width, &sdl_font[1].char_height);

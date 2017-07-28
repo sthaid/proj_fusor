@@ -177,7 +177,7 @@ int32_t sdl_init(uint32_t w, uint32_t h, char * screenshot_prefix)
     //   sudo apt-get install fonts-freefont-ttf    # raspberrypi, ubuntu
     sprintf(font_search_path[0], "%s/%s", "/usr/share/fonts/gnu-free", font_filename);
     sprintf(font_search_path[1], "%s/%s", "/usr/share/fonts/truetype/freefont", font_filename);
-    sprintf(font_search_path[2], "%s/%s/%s", getenv("HOME"), "proj_fusor/fonts", font_filename);
+    sprintf(font_search_path[2], "%s/%s/%s", getenv("HOME"), "proj_fusor/support/fonts", font_filename);
     for (i = 0; i < MAX_FONT_SEARCH_PATH; i++) {
         struct stat buf;
         font_path = font_search_path[i];

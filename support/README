@@ -1,0 +1,17 @@
+bin:  contains scripts to start, stop, and restart the get_data program;
+    also contains script to install the SDL2 development environment 
+
+fonts: contains the font file used by the display program; usually the display
+    program will find the font file it needs in a system directory, however if 
+    not found there then the ~/proj_fusor/support/fonts directory will be attempted
+
+jpeg_buff_sample.bin: used by the display program to generate a fuser_test.dat fie
+
+kjl_code_generator: used to convert a table copied from the "Kurt J Lesker 275i Series 
+    Convection Vacuum Guge Module User Manual" to C language
+
+mccdaq_test: unit test of the high speed ADC
+
+old_revs: old revisions of the software; these revs are not compatible with
+    each other and not compatible with the current rev
+

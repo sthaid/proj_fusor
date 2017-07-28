@@ -77,7 +77,7 @@ SOFTWARE.
 #define DEFAULT_WIN_HEIGHT        1000
 
 //#define JPEG_BUFF_SAMPLE_CREATE_ENABLE
-#define JPEG_BUFF_SAMPLE_FILENAME "jpeg_buff_sample.bin"
+#define JPEG_BUFF_SAMPLE_FILENAME "support/jpeg_buff_sample.bin"
 
 #define REDUCE(val, tbl) \
     do { \

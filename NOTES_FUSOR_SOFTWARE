@@ -4,14 +4,14 @@ INTRODUCTION
 
 This software is comprised of 2 programs:
 - get_data:  reads analog data and transmits the data to the display program via internet connection
-- display:   received the data values from the get_data program, 
+- display:   receives the data values from the get_data program, 
              reads image from webcam,
              displays the webcam image, analog values, and graph of analog values
              records the data to file so it can be reviewed later
 
 These 2 programs could be run on the same computer, using the loopback network interface;
 however it is best to run them on seperate computers for the following reasons:
-- ADC Ground Loops - When the Raspberry Pi, that has the ADC converters attached, is powered
+- Ground Loops - When the Raspberry Pi, that has the ADC converters attached, is powered
   by an AC supply then an AC ripple is seen on the ADC data. To avoid this I power this
   Raspberry PI by a rechargeable battery, and don't connect a display.
 - The High Speed ADC converter being used to analyze the pulses from the HE3 Proportional
@@ -26,7 +26,7 @@ Hardware Diagram of my system ...
         pressure            --usb--|  RPI   |- - - wifi - - -| RPI     |/
                             --usb--|  Data  |               /| Display |\
                    ------- /       ----------         --usb- -----------  -- usb-- keyboard & mouse
-  scaler --- R ----|ADC-2|             |              |           |
+     scaler -------|ADC-2|             |              |           |
                    -------             |           webcam         |
                                      Battery                    AC Power
                                      Power                      Adapter
@@ -51,12 +51,6 @@ Hardware Diagram of my system ...
     scaler:  Ludlum 2929 Dual channel scaler.  This scaler has an Amp Out BNC connector, which
         is connected to ADC-2 through Resistor R.
 
-    R:  Connecting the scaler to ADC-2 presents a problem because the scaler (Ludlum 2929) Amp Out 
-        connection provides voltages that can be as high is 22 volts, and the pulse width is 
-        about 2 us, which is the same as the ADC-2 sample rate. So, the scaler amp out pulses
-        need to be shorter and wider. After trying a few approaches that yielded unexpected 
-        results I found that a 25K ohn series resisitor yields the desired result.
-
 The software can be obtained from https://github.com/sthaid/proj_fusor.git. 
 Source code files are:
 - display.c          - the display prgram
@@ -80,44 +74,48 @@ The display program receives the ADC data from the get_data program in a data_t
 structure, once per second. The display program adds the webcam image to the data_t,
 and writes the data to a file so that it can be reviewed later. While the data is
 being received (LIVE mode) the display program will also display the data in real time
-as it is received. The webcam image is displayed in the upper left corner. The 
-voltage, current, pressure, and neutron rate are displayed in the upper right corner.
-And graphs are presented on the lower half of this display. The graph types that are
-displayed include;
-  SUMMARY: the voltage, current, pressure, and neutron cpm vs. time 
-  ADC SAMPLES: raw sample values, converted to voltage,  from the ADC-1 and ADC-2 converters. 
-  CPM:  counts per minute from the He3 proportional counter, in 8 channels, and
-        a range of averaging intervals
-
-Since my fusor is not complete, I have tested this software in various ways
-without fusion. The HV power supply sensor has been tested, but the current has not.
-The Pirani gauge pressure analog output has been tested. And the He3 Proportional counter
-pulse outputs have been tested using background radiation events. The webcam has also 
-been tested.
+as it is received. 
 
 ===============================================
 RUNNING THE SOFTWARE
 ===============================================
 
-Get_data program should start when the battery power is applied to the RPI-Data, assuming
-that the suggested change to /etc/rc.local has been made.
+Ther get_data program should start automatically when the battery power is applied to the 
+RPI-Data, assuming that the suggested change to /etc/rc.local has been made.
 
 The display program is typically executed without command line options. In this case the display program
-will establish conection with the get_data program, and receive and display the data. The 
-runtime controls include:
-- left-arrow, right-arrow, ctrl-left-arrow, ctrl-right-arrow, alt-left-arrow, alt-right-arrow,
-  home, end:  adjusts the time of displayed data
-- '-', '+': adjusts the X axis time duration for some graphs
-- '1', '2': adjusts the Y axis scale for some graphs
-- 's', 'S': selects a different graph
-- other available controls are displayed as (X), such as (ESC) to terminate program.
+will establish conection with the get_data program, and receive and display the data. 
 
-The cmd line options for the display program are:
--h          : help
--v          : version
--g WxH      : window width and height, default 1920x1080
--s name     : server name
--p filename : playback file
--x          : don't capture cam data in live mode
--t secs     : generate test data file, secs long
+The display program's runtime controls include:
+  Shift-Esc              : Quit
+  ?                      : Help
+  Ctrl-p, or Alt-p       : Capture Screenshot
+  Left, Right, Home, End : Summary Graph Time Select (*)
+  '-', '+'               : Summary Graph Time Scale
+  's', '1', '2'          : Select ADC Graph, and Modify Y Scale
+  'a', 'd', 'w', 'x'     : Camera Pan 
+  'z', 'Z'               : Camera Zoom
+  'r'                    : Camera Pan/Zoom Reset 
+  '3', '4'               : Change Neutron Pulse Height Threshold
+  '5', '6'               : Change Neutron CPM Summary Graph Scale
+
+  (*) Use Ctl or Alt with Left/Right Arrow to increase response
+
+The display program's command line options include:
+  -h                           : help
+  -v                           : display version
+  -g <width>x<height>          : default = 1920x1000
+  -s <live-mode-data-server>   : default = rpi_data 
+  -p <playback-mode-file-name> : select playback mode
+  -x                           : don't capture cam data in live mode
+  -t <secs>                    : generate test data file
+
+The display program's display includes:
+- camera image
+- voltage, current, pressure, neutron cpm, and neutron pulse height threshold values
+- SUMMARY graph, displays a graph of the voltage, current, pressure, and nuetron cpm values
+- ADC Data Graph: this graph displays 1 second of ADC data, and can be configured to display
+  either: (1) neutron pulse ADC data, (2) voltage ADC data, (3) current ADC data, or 
+  (4) pressure ADC data.
+- 
 

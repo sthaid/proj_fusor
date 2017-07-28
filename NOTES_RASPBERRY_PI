@@ -44,6 +44,7 @@ Updates, and install additional packages:
   apt-get install libudev-dev libevdev-dev libreadline-dev libjpeg-dev
   apt-get install libfreetype6-dev
   apt-get install vim tk cscope
+  apt-get install fonts-freefont-ttf
 
 Tweaks:
 - Enable core dumps for suid processes:
@@ -106,7 +107,7 @@ Configure GIT
     git config --global core.editor "vim"
 
 Build and install fusor software
-- update /etc/hosts, add the following
+- update /etc/hosts, add the following (for example)
      192.168.1.60   home
      192.168.1.117  rpi_data
      192.168.1.11   rpi_display
@@ -226,7 +227,7 @@ syntax on
 set hlsearch
 
 ================================
-NOTES - FOR INFORMATION ONLY
+ADDITIONAL INFORMATION         
 ================================
 
 GRAPHICS ACCELERATOR

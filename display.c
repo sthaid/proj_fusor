@@ -20,8 +20,6 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-// XXX needs comment about keyboard
-
 #define _FILE_OFFSET_BITS 64
 
 #include <stdio.h>
@@ -137,7 +135,7 @@ enum mode {LIVE, PLAYBACK, TEST};
 
 typedef struct {
     uint64_t magic;
-    uint64_t start_time;
+    uint64_t start_time;  // XXX not used
     uint32_t max;
     uint8_t  reserved[4096-20];
 } file_hdr_t;
@@ -190,9 +188,9 @@ static int32_t                  image_size;
 static int32_t                  neutron_pht_mv;
 static int32_t                  neutron_scale_cpm;
 static int32_t                  summary_graph_time_span_sec;
-static int32_t                  file_idx_playback_init;
-static uint32_t                 adc_data_graph_select;
-static uint32_t                 adc_data_graph_max_y_mv;
+static int64_t                  file_idx_playback_init;
+static int32_t                  adc_data_graph_select;
+static int32_t                  adc_data_graph_max_y_mv;
 
 //
 // prototypes
@@ -366,7 +364,7 @@ static int32_t initialize(int32_t argc, char ** argv)
         sscanf(CONFIG_NEUTRON_PHT_MV, "%d", &neutron_pht_mv) != 1 ||
         sscanf(CONFIG_NEUTRON_SCALE_CPM, "%d", &neutron_scale_cpm) != 1 ||
         sscanf(CONFIG_SUMMARY_GRAPH_TIME_SPAN_SEC, "%d", &summary_graph_time_span_sec) != 1 ||
-        sscanf(CONFIG_FILE_IDX_PLAYBACK_INIT, "%d", &file_idx_playback_init) != 1 ||
+        sscanf(CONFIG_FILE_IDX_PLAYBACK_INIT, "%ld", &file_idx_playback_init) != 1 ||
         sscanf(CONFIG_ADC_DATA_GRAPH_SELECT, "%d", &adc_data_graph_select) != 1 ||
         sscanf(CONFIG_ADC_DATA_GRAPH_MAX_Y_MV, "%d", &adc_data_graph_max_y_mv) != 1) 
     {
@@ -546,13 +544,28 @@ static int32_t initialize(int32_t argc, char ** argv)
     //   set file_idx_global
     // endif
     if (mode == PLAYBACK) {
+        // verify data_part1 magic
         if (file_data_part1[0].magic != MAGIC_DATA_PART1) {
             ERROR("no data in file %s (0x%"PRIx64"\n", filename, file_data_part1[0].magic);
             return -1;
         }
-        // XXX needs work
-        file_idx_global = file_idx_playback_init;
+
+        // try to init file_idx_global to location from prior invocation of display
+        if (file_idx_playback_init != 0 &&
+            file_hdr->max >= 1 &&
+            file_idx_playback_init >= file_data_part1[0].time &&
+            file_idx_playback_init <= file_data_part1[file_hdr->max-1].time)
+        {
+            file_idx_global = file_idx_playback_init - file_data_part1[0].time;
+        } else {
+            file_idx_global = 0;
+        }
+
+        // sanity check file_idx_global
         if (file_idx_global < 0 || file_idx_global >= file_hdr->max) {
+            ERROR("file_idx_global=%d is out of range, file_hdr->max=%d, "
+                  "setting file_idx_global to zero\n",
+                  file_idx_global, file_hdr->max);
             file_idx_global = 0;
         }
     }
@@ -590,7 +603,7 @@ static void atexit_config_write(void)
     sprintf(CONFIG_NEUTRON_SCALE_CPM, "%d", neutron_scale_cpm);
     sprintf(CONFIG_SUMMARY_GRAPH_TIME_SPAN_SEC, "%d", summary_graph_time_span_sec);
     if (initial_mode == PLAYBACK) {
-        sprintf(CONFIG_FILE_IDX_PLAYBACK_INIT, "%d", file_idx_global);
+        sprintf(CONFIG_FILE_IDX_PLAYBACK_INIT, "%ld", file_idx_global+file_data_part1[0].time);
     } else {
         sprintf(CONFIG_FILE_IDX_PLAYBACK_INIT, "%d", 0);
     }

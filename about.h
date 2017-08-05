@@ -37,6 +37,7 @@ Keyboard Controls:\n\
   'r'                    : Camera Pan/Zoom Reset \n\
   '3', '4'               : Change Neutron Pulse Height Threshold\n\
   '5', '6'               : Change Neutron CPM Summary Graph Scale\n\
+  '>', '<'               : Set Playback Speed\n\
 \n\
   (*) Use Ctl or Alt with Left/Right Arrow to increase response\n\
 \n\

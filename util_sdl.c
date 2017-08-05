@@ -593,6 +593,10 @@ sdl_event_t * sdl_poll_event(void)
                     possible_event = '+';
                 } else if (possible_event == '/') {
                     possible_event = '?';
+                } else if (possible_event == ',') {
+                    possible_event = '<';
+                } else if (possible_event == '.') {
+                    possible_event = '>';
                 } else if (possible_event == SDL_EVENT_KEY_ESC) {
                     possible_event = SDL_EVENT_KEY_SHIFT_ESC;
                 }
@@ -756,6 +760,7 @@ static void print_screen(void)
     }
 
     // create file 
+    INFO("creating screenshot %s\n", file_name);
     fp = fopen(file_name, "wb");
     if (!fp) {
         ERROR("fopen %s\n", file_name);

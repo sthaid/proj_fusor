@@ -20,6 +20,8 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
+// XXX needs comment about keyboard
+
 #define _FILE_OFFSET_BITS 64
 
 #include <stdio.h>
@@ -548,6 +550,7 @@ static int32_t initialize(int32_t argc, char ** argv)
             ERROR("no data in file %s (0x%"PRIx64"\n", filename, file_data_part1[0].magic);
             return -1;
         }
+        // XXX needs work
         file_idx_global = file_idx_playback_init;
         if (file_idx_global < 0 || file_idx_global >= file_hdr->max) {
             file_idx_global = 0;
@@ -950,6 +953,13 @@ static void * cam_thread(void * cx)
 
 static int32_t display_handler(void)
 {
+    #define MAX_PLAYBACK_SPEED 5
+    #define SET_PLAYBACK_PAUSED \
+        do { \
+            playback_speed = 0; \
+            playback_advance_us = 0; \
+        } while (0)
+
     bool          quit;
     sdl_event_t * event;
     rect_t        title_pane_full, title_pane; 
@@ -966,6 +976,8 @@ static int32_t display_handler(void)
     bool          lost_connection_msg_is_displayed;
     bool          file_error_msg_is_displayed;
     bool          time_error_msg_is_displayed;
+    int32_t       playback_speed;
+    uint64_t      playback_advance_us;
 
     // initializae 
     quit = false;
@@ -973,6 +985,8 @@ static int32_t display_handler(void)
     lost_connection_msg_is_displayed = false;
     file_error_msg_is_displayed = false;
     time_error_msg_is_displayed = false;
+    playback_speed = 0;
+    playback_advance_us = 0;
 
     if (sdl_init(win_width, win_height, screenshot_prefix) < 0) {
         ERROR("sdl_init %dx%d failed\n", win_width, win_height);
@@ -1025,10 +1039,23 @@ static int32_t display_handler(void)
         sdl_render_pane_border(&adc_data_graph_pane_full, GREEN);
 
         // draw title line
+        // 
+        // 0         1         2         3         4         5         6         7        
+        // 0123456789 123456789 123456789 123456789 123456789 123456789 123456789 
+        // PLAYBACK_PAUSED  yy/mm/dd hh:mm:ss  LOST_CONN    FILE_ERROR   TIME_ERROR    ...  (?) (SHIFT-ESC)
+        // ^                ^                  ^            ^            ^                  ^   ^         ^
+        // 0                17                 36           49           62                -15  -11       -1
+
         if (mode == LIVE) {
             sdl_render_text(&title_pane, 0, 0, 0, "LIVE", GREEN, BLACK);
         } else {
-            sdl_render_text(&title_pane, 0, 0, 0, "PLAYBACK", RED, BLACK);
+            char playback_mode_str[50];
+            if (playback_speed == 0) {
+                sprintf(playback_mode_str, "PLAYBACK_PAUSED");
+            } else {
+                sprintf(playback_mode_str, "PLAYBACK_X%d", playback_speed);
+            }
+            sdl_render_text(&title_pane, 0, 0, 0, playback_mode_str, RED, BLACK);
         }
             
         t = file_data_part1[file_idx].time;
@@ -1036,10 +1063,10 @@ static int32_t display_handler(void)
         sprintf(str, "%d/%d/%d %2.2d:%2.2d:%2.2d",
                 tm->tm_year-100, tm->tm_mon+1, tm->tm_mday,
                 tm->tm_hour, tm->tm_min, tm->tm_sec);
-        sdl_render_text(&title_pane, 0, 10, 0, str, WHITE, BLACK);
+        sdl_render_text(&title_pane, 0, 17, 0, str, WHITE, BLACK);
 
         if (lost_connection) {
-            sdl_render_text(&title_pane, 0, 35, 0, "LOST_CONN", RED, BLACK);
+            sdl_render_text(&title_pane, 0, 36, 0, "LOST_CONN", RED, BLACK);
             lost_connection_msg_is_displayed = true;
         } else {
             lost_connection_msg_is_displayed = false;
@@ -1053,7 +1080,7 @@ static int32_t display_handler(void)
         }
 
         if (time_error) {
-            sdl_render_text(&title_pane, 0, 63, 0, "TIME_ERROR", RED, BLACK);
+            sdl_render_text(&title_pane, 0, 62, 0, "TIME_ERROR", RED, BLACK);
             time_error_msg_is_displayed = true;
         } else {
             time_error_msg_is_displayed = false;
@@ -1103,6 +1130,10 @@ static int32_t display_handler(void)
         sdl_event_register('4', SDL_EVENT_TYPE_KEY, NULL);
         sdl_event_register('5', SDL_EVENT_TYPE_KEY, NULL);                           // adjust neutron summary graph scale
         sdl_event_register('6', SDL_EVENT_TYPE_KEY, NULL);
+        sdl_event_register('>', SDL_EVENT_TYPE_KEY, NULL);                           // playback speed control
+        sdl_event_register('<', SDL_EVENT_TYPE_KEY, NULL);
+        sdl_event_register(',', SDL_EVENT_TYPE_KEY, NULL);
+        sdl_event_register('.', SDL_EVENT_TYPE_KEY, NULL);
 
         // present the display
         sdl_display_present();
@@ -1133,10 +1164,11 @@ static int32_t display_handler(void)
                 sdl_display_init();
                 sdl_render_fill_rect(&screen_pane, &rect, WHITE);
                 sdl_display_present();
-                usleep(1000000);
+                usleep(250000);
                 break; }
             case '?':  
                 sdl_display_text(about);
+                SET_PLAYBACK_PAUSED;
                 break;
             case SDL_EVENT_KEY_LEFT_ARROW:
             case SDL_EVENT_KEY_CTRL_LEFT_ARROW:
@@ -1150,6 +1182,7 @@ static int32_t display_handler(void)
                 }
                 file_idx_global = x;
                 mode = PLAYBACK;
+                SET_PLAYBACK_PAUSED;
                 break; }
             case SDL_EVENT_KEY_RIGHT_ARROW:
             case SDL_EVENT_KEY_CTRL_RIGHT_ARROW:
@@ -1166,14 +1199,17 @@ static int32_t display_handler(void)
                     file_idx_global = x;
                     mode = PLAYBACK;
                 }
+                SET_PLAYBACK_PAUSED;
                 break; }
             case SDL_EVENT_KEY_HOME:
                 file_idx_global = 0;
                 mode = PLAYBACK;
+                SET_PLAYBACK_PAUSED;
                 break;
             case SDL_EVENT_KEY_END:
                 file_idx_global = file_hdr->max - 1;
                 mode = initial_mode;
+                SET_PLAYBACK_PAUSED;
                 break;
             case '-': case '+': case '=':
                 draw_summary_graph_control(event->event);
@@ -1222,12 +1258,44 @@ static int32_t display_handler(void)
                     }
                 } 
                 break; }
+            case '>': case '.':
+                if (mode == PLAYBACK && playback_speed < MAX_PLAYBACK_SPEED) {
+                    playback_speed++;
+                    playback_advance_us = microsec_timer() + 1000000 / playback_speed;
+                }
+                break;
+            case '<': case ',':
+                if (mode == PLAYBACK && playback_speed > 0) {
+                    playback_speed--;
+                    playback_advance_us = (playback_speed ? microsec_timer() + 1000000 / playback_speed : 0);
+                }
+                break;
+            case SDL_EVENT_WIN_MINIMIZED:
+                SET_PLAYBACK_PAUSED;
+                break;
             case SDL_EVENT_WIN_SIZE_CHANGE:
             case SDL_EVENT_WIN_RESTORED:
                 break;
             default:
                 event_processed_count--;
                 break;
+            }
+
+            // if in playback run mode then
+            // check if it is time to increment file_idx_global
+            if (mode == PLAYBACK && playback_speed > 0) {
+                uint64_t curr_us = microsec_timer();
+                if (curr_us > playback_advance_us) {
+                    int32_t x = file_idx_global+1;
+                    if (x >= file_hdr->max) {
+                        file_idx_global = file_hdr->max - 1;
+                        mode = initial_mode;
+                        SET_PLAYBACK_PAUSED;
+                    } else {
+                        file_idx_global = x;
+                        playback_advance_us = curr_us + 1000000 / playback_speed;
+                    }
+                }
             }
 
             // test if should break out of this loop

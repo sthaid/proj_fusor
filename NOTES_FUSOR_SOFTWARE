@@ -98,6 +98,7 @@ The display program's runtime controls include:
   'r'                    : Camera Pan/Zoom Reset 
   '3', '4'               : Change Neutron Pulse Height Threshold
   '5', '6'               : Change Neutron CPM Summary Graph Scale
+  '>', '<'               : Set Playback Speed
 
   (*) Use Ctl or Alt with Left/Right Arrow to increase response
 

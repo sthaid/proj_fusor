@@ -101,17 +101,25 @@ SOFTWARE.
         } \
     } while (0)
 
-#define DEFAULT_IMAGE_X           "320"
-#define DEFAULT_IMAGE_Y           "240"
-#define DEFAULT_IMAGE_SIZE        "300"
-#define DEFAULT_NEUTRON_PHT_MV    "100"
-#define DEFAULT_NEUTRON_SCALE_CPM "100"
+#define DEFAULT_IMAGE_X                     "320"
+#define DEFAULT_IMAGE_Y                     "240"
+#define DEFAULT_IMAGE_SIZE                  "300"
+#define DEFAULT_NEUTRON_PHT_MV              "100"
+#define DEFAULT_NEUTRON_SCALE_CPM           "100"
+#define DEFAULT_SUMMARY_GRAPH_TIME_SPAN_SEC "600"
+#define DEFAULT_FILE_IDX_PLAYBACK_INIT      "0"
+#define DEFAULT_ADC_DATA_GRAPH_SELECT       "0"
+#define DEFAULT_ADC_DATA_GRAPH_MAX_Y_MV     "10000"
 
-#define CONFIG_IMAGE_X           (config[0].value)
-#define CONFIG_IMAGE_Y           (config[1].value)
-#define CONFIG_IMAGE_SIZE        (config[2].value)
-#define CONFIG_NEUTRON_PHT_MV    (config[3].value)
-#define CONFIG_NEUTRON_SCALE_CPM (config[4].value)
+#define CONFIG_IMAGE_X                      (config[0].value)
+#define CONFIG_IMAGE_Y                      (config[1].value)
+#define CONFIG_IMAGE_SIZE                   (config[2].value)
+#define CONFIG_NEUTRON_PHT_MV               (config[3].value)
+#define CONFIG_NEUTRON_SCALE_CPM            (config[4].value)
+#define CONFIG_SUMMARY_GRAPH_TIME_SPAN_SEC  (config[5].value)
+#define CONFIG_FILE_IDX_PLAYBACK_INIT       (config[6].value)
+#define CONFIG_ADC_DATA_GRAPH_SELECT        (config[7].value)
+#define CONFIG_ADC_DATA_GRAPH_MAX_Y_MV      (config[8].value)
 
 #define UNITS_KV     1
 #define UNITS_MA     2
@@ -137,7 +145,7 @@ typedef struct {
 //
 
 static enum mode                mode;
-static bool                     initially_live_mode;
+static bool                     initial_mode;
 static bool                     lost_connection;
 static bool                     file_error;
 static bool                     time_error;
@@ -164,17 +172,25 @@ static pthread_mutex_t          jpeg_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 static char                     config_path[PATH_MAX];
 static const int32_t            config_version = 1;
-static config_t                 config[] = { { "image_x",           DEFAULT_IMAGE_X        },
-                                             { "image_y",           DEFAULT_IMAGE_Y        },
-                                             { "image_size",        DEFAULT_IMAGE_SIZE     },
-                                             { "neutron_pht_mv",    DEFAULT_NEUTRON_PHT_MV },
-                                             { "neutron_scale_cpm", DEFAULT_NEUTRON_SCALE_CPM },
-                                             { "",                  ""                     } };
+static config_t                 config[] = { { "image_x",                     DEFAULT_IMAGE_X                     },
+                                             { "image_y",                     DEFAULT_IMAGE_Y                     },
+                                             { "image_size",                  DEFAULT_IMAGE_SIZE                  },
+                                             { "neutron_pht_mv",              DEFAULT_NEUTRON_PHT_MV              },
+                                             { "neutron_scale_cpm",           DEFAULT_NEUTRON_SCALE_CPM           },
+                                             { "summary_graph_time_span_sec", DEFAULT_SUMMARY_GRAPH_TIME_SPAN_SEC },
+                                             { "file_idx_playback_init",      DEFAULT_FILE_IDX_PLAYBACK_INIT      },
+                                             { "adc_data_graph_select",       DEFAULT_ADC_DATA_GRAPH_SELECT       },
+                                             { "adc_data_graph_max_y_mv",     DEFAULT_ADC_DATA_GRAPH_MAX_Y_MV     },
+                                             { "",                            ""                     } };
 static int32_t                  image_x;
 static int32_t                  image_y;
 static int32_t                  image_size;
 static int32_t                  neutron_pht_mv;
 static int32_t                  neutron_scale_cpm;
+static int32_t                  summary_graph_time_span_sec;
+static int32_t                  file_idx_playback_init;
+static uint32_t                 adc_data_graph_select;
+static uint32_t                 adc_data_graph_max_y_mv;
 
 //
 // prototypes
@@ -346,7 +362,11 @@ static int32_t initialize(int32_t argc, char ** argv)
         sscanf(CONFIG_IMAGE_Y, "%d", &image_y) != 1 ||
         sscanf(CONFIG_IMAGE_SIZE, "%d", &image_size) != 1 ||
         sscanf(CONFIG_NEUTRON_PHT_MV, "%d", &neutron_pht_mv) != 1 ||
-        sscanf(CONFIG_NEUTRON_SCALE_CPM, "%d", &neutron_scale_cpm) != 1)
+        sscanf(CONFIG_NEUTRON_SCALE_CPM, "%d", &neutron_scale_cpm) != 1 ||
+        sscanf(CONFIG_SUMMARY_GRAPH_TIME_SPAN_SEC, "%d", &summary_graph_time_span_sec) != 1 ||
+        sscanf(CONFIG_FILE_IDX_PLAYBACK_INIT, "%d", &file_idx_playback_init) != 1 ||
+        sscanf(CONFIG_ADC_DATA_GRAPH_SELECT, "%d", &adc_data_graph_select) != 1 ||
+        sscanf(CONFIG_ADC_DATA_GRAPH_MAX_Y_MV, "%d", &adc_data_graph_max_y_mv) != 1) 
     {
         FATAL("invalid config value, not a number\n");
     }
@@ -528,11 +548,14 @@ static int32_t initialize(int32_t argc, char ** argv)
             ERROR("no data in file %s (0x%"PRIx64"\n", filename, file_data_part1[0].magic);
             return -1;
         }
-        file_idx_global = 0;
+        file_idx_global = file_idx_playback_init;
+        if (file_idx_global < 0 || file_idx_global >= file_hdr->max) {
+            file_idx_global = 0;
+        }
     }
 
-    // set initially_live_mode flag
-    initially_live_mode = (mode == LIVE);
+    // set initial_mode
+    initial_mode = mode;
 
     // return success
     return 0;
@@ -562,6 +585,14 @@ static void atexit_config_write(void)
     sprintf(CONFIG_IMAGE_SIZE, "%d", image_size);
     sprintf(CONFIG_NEUTRON_PHT_MV, "%d", neutron_pht_mv);
     sprintf(CONFIG_NEUTRON_SCALE_CPM, "%d", neutron_scale_cpm);
+    sprintf(CONFIG_SUMMARY_GRAPH_TIME_SPAN_SEC, "%d", summary_graph_time_span_sec);
+    if (initial_mode == PLAYBACK) {
+        sprintf(CONFIG_FILE_IDX_PLAYBACK_INIT, "%d", file_idx_global);
+    } else {
+        sprintf(CONFIG_FILE_IDX_PLAYBACK_INIT, "%d", 0);
+    }
+    sprintf(CONFIG_ADC_DATA_GRAPH_SELECT, "%d", adc_data_graph_select);
+    sprintf(CONFIG_ADC_DATA_GRAPH_MAX_Y_MV, "%d", adc_data_graph_max_y_mv);
     config_write(config_path, config, config_version);
 }
 
@@ -1130,7 +1161,7 @@ static int32_t display_handler(void)
                 if (x >= file_hdr->max) {
                     x = file_hdr->max - 1;
                     file_idx_global = x;
-                    mode = (initially_live_mode ? LIVE : PLAYBACK);
+                    mode = initial_mode;
                 } else {
                     file_idx_global = x;
                     mode = PLAYBACK;
@@ -1142,7 +1173,7 @@ static int32_t display_handler(void)
                 break;
             case SDL_EVENT_KEY_END:
                 file_idx_global = file_hdr->max - 1;
-                mode = (initially_live_mode ? LIVE : PLAYBACK);
+                mode = initial_mode;
                 break;
             case '-': case '+': case '=':
                 draw_summary_graph_control(event->event);
@@ -1373,8 +1404,6 @@ static void draw_data_values(rect_t * data_pane, int32_t file_idx)
 
 // #define GRAPH_N2_PRESSURE
 
-static uint32_t summary_graph_time_span_sec = 600;
-
 static void draw_summary_graph(rect_t * graph_pane, int32_t file_idx)
 {
     #define MAX_TIME_SPAN  5000
@@ -1486,9 +1515,6 @@ static void draw_summary_graph_control(char key)
 
 // - - - - - - - - -  DISPLAY HANDLER - DRAW ADC DATA GRAPH - - - - - - - - - - - - 
 
-static uint32_t adc_data_graph_select = 0;
-static uint32_t adc_data_graph_max_y_mv = 10000;
-
 static void draw_adc_data_graph(rect_t * graph_pane, int32_t file_idx)
 {
     struct data_part1_s * dp1;
@@ -1517,8 +1543,20 @@ static void draw_adc_data_graph(rect_t * graph_pane, int32_t file_idx)
             k = 0;
             for (i = 0; i < dp1->max_neutron_pulse; i++) {
                 if (dp1->neutron_pulse_mv[i] >= neutron_pht_mv) {
+                    // copy pulse data to adc_data array (to be plotted)
                     for (j = 0; j < MAX_NEUTRON_ADC_PULSE_DATA; j++) {
                         adc_data[k++] = dp2->neutron_adc_pulse_data[i][j];
+                        if (k == MAX_ADC_DATA) {
+                            break;
+                        }
+                    }
+                    if (k == MAX_ADC_DATA) {
+                        break;
+                    }
+
+                    // insert gap in adc_data array, between pulses
+                    for (j = 0; j < MAX_NEUTRON_ADC_PULSE_DATA; j++) {
+                        adc_data[k++] = ERROR_NO_VALUE;
                         if (k == MAX_ADC_DATA) {
                             break;
                         }
@@ -1681,6 +1719,7 @@ static void draw_graph_common(
 
     for (gridx = 0; gridx < max_graph; gridx++) {
         #define MAX_POINTS 1000
+        #define LINE_WIDTH 2
 
         struct graph_s * g;
         float            x;
@@ -1690,47 +1729,51 @@ static void draw_graph_common(
         int32_t          y_limit2;
         int32_t          max_points;
 
-        int32_t          i;
+        int32_t          i, lw;
         point_t          points[MAX_POINTS];
         point_t        * p;
 
-        // init for graph[gridx]
-        g                 = &graph[gridx];
-        x                 = (float)x_origin;
-        x_pixels_per_val  = (float)x_range / g->max_values;
-        y_scale_factor    = (float)y_range / g->y_max;
-        y_limit1          = y_origin - y_range;
-        y_limit2          = y_origin + FONT0_HEIGHT;
-        max_points        = 0;
+        // loop over LINE_WIDTH
+        for (lw = 0; lw < LINE_WIDTH; lw++) {
+            // init for graph[gridx]
+            g                 = &graph[gridx];
+            x                 = (float)x_origin;
+            x_pixels_per_val  = (float)x_range / g->max_values;
+            y_scale_factor    = (float)y_range / g->y_max;
+            y_limit1          = y_origin - y_range;
+            y_limit2          = y_origin + FONT0_HEIGHT;
+            max_points        = 0;
 
-        // draw the graph lines
-        for (i = 0; i < g->max_values; i++) {
-            if (!IS_ERROR(g->values[i])) {
-                p = &points[max_points];
-                p->x = x;
-                p->y = y_origin - y_scale_factor * g->values[i];
-                if (p->y < y_limit1) {
-                    p->y = y_limit1;
-                }
-                if (p->y > y_limit2) {
-                    p->y = y_limit2;
-                }
-                max_points++;
-                if (max_points == MAX_POINTS) {
+            // draw the graph lines
+            for (i = 0; i < g->max_values; i++) {
+                if (!IS_ERROR(g->values[i])) {
+                    p = &points[max_points];
+                    p->x = x;
+                    p->y = y_origin - y_scale_factor * g->values[i];
+                    if (p->y < y_limit1) {
+                        p->y = y_limit1;
+                    }
+                    if (p->y > y_limit2) {
+                        p->y = y_limit2;
+                    }
+                    p->y += lw;
+                    max_points++;
+                    if (max_points == MAX_POINTS) {
+                        sdl_render_lines(graph_pane, points, max_points, g->color);
+                        points[0].x = points[max_points-1].x;
+                        points[0].y = points[max_points-1].y;
+                        max_points = 1;
+                    }
+                } else if (max_points > 0) {
                     sdl_render_lines(graph_pane, points, max_points, g->color);
-                    points[0].x = points[max_points-1].x;
-                    points[0].y = points[max_points-1].y;
-                    max_points = 1;
+                    max_points = 0;
                 }
-            } else if (max_points > 0) {
-                sdl_render_lines(graph_pane, points, max_points, g->color);
-                max_points = 0;
-            }
 
-            x += x_pixels_per_val;
-        }
-        if (max_points) {
-            sdl_render_lines(graph_pane, points, max_points, g->color);
+                x += x_pixels_per_val;
+            }
+            if (max_points) {
+                sdl_render_lines(graph_pane, points, max_points, g->color);
+            }
         }
 
         // draw the graph name
@@ -1777,6 +1820,10 @@ static void draw_graph_common(
     // draw cursor, and cursor_str
     if (cursor_pos >= 0) {
         cursor_x = x_origin + cursor_pos * (x_range - 1);
+        sdl_render_line(graph_pane,
+                        cursor_x-1, y_origin,
+                        cursor_x-1, y_origin-y_range,
+                        PURPLE);
         sdl_render_line(graph_pane,
                         cursor_x, y_origin,
                         cursor_x, y_origin-y_range,

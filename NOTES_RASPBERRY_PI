@@ -61,7 +61,7 @@ Tweaks:
           allow-hotplug wlan0
           iface wlan0 inet manual
           wireless-power off       <== add this line
-              wpa-conf /etc/wpa_supplicant/wpa_supplicant.conf
+          wpa-roam /etc/wpa_supplicant/wpa_supplicant.conf
     - following the reboot, run 'iwconfig' to verify Power Management is Off
 - reboot
 

@@ -64,6 +64,8 @@ ssh into system using own account, and ...
     set noincsearch
     " this was used to disable autoindent of comments,seems not needed now
     "     autocmd FileType * setlocal formatoptions-=c formatoptions-=r formatoptions-=o
+- .profile
+    export PS1='[RPI_DISPLAY \u@\h \W]\$ '
 - /etc/hosts
     192.168.1.117  rpi_data
     192.168.1.65   rpi_display

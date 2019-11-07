@@ -75,6 +75,10 @@ ssh into system using own account, and ...
     git config --global credential.helper cache
     git config --global credential.helper 'cache --timeout=3600'
     git config --global core.editor "vim"
+- Configure GIT External diff
+    Copy these files to ~/bin dir:  git_external_diff, tkdiff
+    Add to .profile: export GIT_EXTERNAL_DIFF=~/bin/git_external_diff
+    When ssh'ing to the rpi_display, use -X option
 - install packages
     sudo bash
     apt update

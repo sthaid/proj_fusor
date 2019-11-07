@@ -1,4 +1,98 @@
 ================================
+INSTALL RASPBERRY PI 3B+   Nov 2019
+================================
+
+Create MicroSD Card
+- https://www.raspberrypi.org/downloads/raspbian/
+- lsblk  to verify correct /dev/sdX
+- sudo dd if=2019-09-26-raspbian-buster-full.img of=/dev/sdb bs=4M conv=fsync
+
+Make connections and boot
+- insert microsd card
+- power connection
+- monitor connection
+- keybd and mouse adapter
+- boot
+
+Follow Prompts to Setup
+- this includes setting the location, root password, and wifi
+- when I did this it attempted to update but failed
+- reboot
+
+Preferences -> RaspberryPi Config
+  hostname        => rpi-display
+  autologin to pi => disable
+
+Add User Account for self
+- adduser <yourname>
+- visudo    # <yourname>  ALL=(ALL)  NOPASSWD: ALL
+- logout and login as self
+- verify sudo works
+- systemctl enable ssh
+- systemctl start ssh
+
+ssh into system using own account, and ...
+- .ssh  COPY IN THIS DIRECTORY
+- .bashrc  ADD THE FOLLOWING TO THE END
+    # cd aliases
+    alias pf='cd ~/proj_fusor'
+    # command aliases
+    alias ls='ls -l --color=always --group-directories-first --human-readable'
+    alias vi='vim'
+    alias cscope_init='/usr/bin/cscope -bR'
+    alias cscope='/usr/bin/cscope -d'
+    alias bashrc='source ~/.bashrc'
+- .vimrc
+    source /usr/share/vim/vim81/defaults.vim
+    " tabs
+    set expandtab
+    set tabstop=8
+    set softtabstop=4
+    set shiftwidth=4
+    " enable copy and paste out of vim
+    set mouse=r
+    " disable autoinent
+    set nocindent
+    set nosmartindent
+    set noautoindent
+    set indentexpr=
+    filetype indent off
+    filetype plugin indent off
+    " highlight search
+    set hlsearch
+    " disable show next match while entering a search
+    set noincsearch
+    " this was used to disable autoindent of comments,seems not needed now
+    "     autocmd FileType * setlocal formatoptions-=c formatoptions-=r formatoptions-=o
+- /etc/hosts
+    192.168.1.117  rpi_data
+    192.168.1.65   rpi_display
+    192.168.1.95   shell
+    192.168.1.60   home
+- Configure GIT
+    git config --global user.name "Steven Haid"
+    git config --global user.email stevenhaid@gmail.com
+    git config --global credential.helper cache
+    git config --global credential.helper 'cache --timeout=3600'
+    git config --global core.editor "vim"
+- install packages
+    sudo bash
+    apt update
+    apt dist-upgrade
+    apt install vim tk cscope
+    apt install libsdl2-dev libsdl2-ttf-dev libsdl2-mixer-dev libjpeg-dev
+    reboot
+
+After reboot ssh in as self again
+- git clone https://github.com/sthaid/proj_fusor.git
+- make display
+- ./display
+
+NOTES
+- switch to text mode     : ctl-alt-f1
+- switch back to graphics : ctl-alt-f7
+
+================================
 INSTALL RASPBERRY PI 3
 ================================
 

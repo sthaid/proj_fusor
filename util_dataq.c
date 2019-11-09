@@ -91,7 +91,7 @@ static void * dataq_monitor_thread(void * cx);
 
 int32_t dataq_init(float averaging_duration_sec, int32_t scan_hz_arg, int32_t max_adc_chan, ...)
 {
-    char      cmd_str[100];
+    char      cmd_str[500];
     char      resp[MAX_RESP];
     int32_t   i, cnt, len, total_len, duration, ret, best_scan_hz;
     char      adc_channels_str[100];

@@ -6,6 +6,7 @@ CFLAGS = -c -g -O2 -pthread -fsigned-char -Wall \
          $(shell sdl2-config --cflags) 
 
 SRC_GET_DATA = get_data.c \
+               util_owon_b35.c \
                util_dataq.c \
                util_mccdaq.c \
                util_cam.c \

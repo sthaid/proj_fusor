@@ -42,6 +42,7 @@ SOFTWARE.
 #include "common.h"
 #include "util_dataq.h"
 #include "util_mccdaq.h"
+#include "util_owon_b35.h"
 #include "util_cam.h"
 #include "util_misc.h"
 
@@ -101,8 +102,8 @@ static void * cam_thread(void * cx);
 static void signal_handler(int sig);
 static void * server_thread(void * cx);
 static void init_data_struct(data_t * data, time_t time_now);
-static float convert_adc_voltage(float adc_volts);
-static float convert_adc_current(float adc_volts);
+static float get_fusor_voltage_kv(void);
+static float get_fusor_current_ma(void);
 static float convert_adc_pressure(float adc_volts, int32_t gas_id);
 static int32_t mccdaq_callback(uint16_t * data, int32_t max_data);
 #ifdef DEBUG_PRINT_PULSE_GRAPH
@@ -175,9 +176,7 @@ static void init(void)
     // init dataq device used to acquire chamber voltage, current and pressure readings
     dataq_init(0.5,   // averaging duration in secs
                1200,  // scan rate  (samples per second)
-               3,     // number of adc channels
-               DATAQ_ADC_CHAN_VOLTAGE,
-               DATAQ_ADC_CHAN_CURRENT,
+               1,     // number of adc channels
                DATAQ_ADC_CHAN_PRESSURE);
 
     // init mccdaq device, used to acquire 500000 samples per second from the
@@ -383,20 +382,10 @@ static void init_data_struct(data_t * data, time_t time_now)
     data->part2.magic = MAGIC_DATA_PART2;
 
     // data part1 voltage_kv
-    ret = dataq_get_adc(DATAQ_ADC_CHAN_VOLTAGE, NULL, &mean_mv, NULL, NULL, NULL);         
-    if (ret == 0) {
-        data->part1.voltage_kv = convert_adc_voltage(mean_mv/1000.);
-    } else {
-        data->part1.voltage_kv = ERROR_NO_VALUE;
-    }
+    data->part1.voltage_kv = get_fusor_voltage_kv();
 
     // data part1 current_ma
-    ret = dataq_get_adc(DATAQ_ADC_CHAN_CURRENT, NULL, &mean_mv, NULL, NULL, NULL);
-    if (ret == 0) {
-        data->part1.current_ma = convert_adc_current(mean_mv/1000.);
-    } else {
-        data->part1.current_ma = ERROR_NO_VALUE;
-    }
+    data->part1.current_ma = get_fusor_current_ma();
 
     // data part1 d2_pressure_mtorr and n2_pressure_mtorr
     ret = dataq_get_adc(DATAQ_ADC_CHAN_PRESSURE, NULL, &mean_mv, NULL, NULL, NULL);
@@ -409,14 +398,8 @@ static void init_data_struct(data_t * data, time_t time_now)
     }
 
     // data part2: voltage, current, and pressure adc_data
-    ret = dataq_get_adc_data(DATAQ_ADC_CHAN_VOLTAGE, 
-                             data->part2.voltage_adc_data,
-                             MAX_ADC_DATA);
-    data->part1.data_part2_voltage_adc_data_valid  = (ret == 0);
-    ret = dataq_get_adc_data(DATAQ_ADC_CHAN_CURRENT, 
-                             data->part2.current_adc_data,
-                             MAX_ADC_DATA);
-    data->part1.data_part2_current_adc_data_valid  = (ret == 0);
+    data->part1.data_part2_voltage_adc_data_valid  = false;
+    data->part1.data_part2_current_adc_data_valid  = false;
     ret = dataq_get_adc_data(DATAQ_ADC_CHAN_PRESSURE, 
                              data->part2.pressure_adc_data,
                              MAX_ADC_DATA);
@@ -458,59 +441,31 @@ static void init_data_struct(data_t * data, time_t time_now)
     data->part1.data_part2_length  = sizeof(struct data_part2_s) + data->part1.data_part2_jpeg_buff_len;
 }
 
-// -----------------  CONVERT ADC HV VOLTAGE & CURRENT  ------------------------------
+// -----------------  GET FUSOR VOLTAGE AND CURRENT  ---------------------------------
 
-// These routines convert the voltage read from the dataq adc channels to
-// the value which will be displayed. 
-//
-// For example assume that the HV voltage divider is 10000 to 1, thus an adc 
-// voltage reading of 2 V means the HV is 20000 Volts. The HV is displayed in
-// kV, so the value returned would be 20.
-
-static float convert_adc_voltage(float adc_volts)
+static float get_fusor_voltage_kv(void)
 {
-    #define TUNE_KV   1.43
-    float kv;
+    double ua, kv;
 
-    // My fusor's voltage divider is made up of a 1G Ohm resistor, and
-    // a 100K Ohm resistor. In parallel with the 100K Ohm resistor are
-    // the panel meter and the dataq adc input, which have resistances of
-    // 10M Ohm and 2M Ohm respectively. So, use 94.34K instead of 100K
-    // in the conversion calculation.
+    // for example:
+    //   I = E / R = 1000 v / 10^9 ohm = 10^-6 amps
+    // therefore 1uA meter reading means 1kv fusor voltage
 
-    // I = Vhv / (1G + 94.34K) 
-    //
-    // I = Vhv / 1G                           (approximately)
-    //
-    // Vadc = (Vhv / 1G) * 94.34K
-    //
-    // Vhv = Vadc * (1G / 94.34K)             (volts)
-    //
-    // Vhv = Vadc * (1G / 94.34K) / 1000      (killo-volts)
-
-    kv = adc_volts * (1E9 / 94.34E3 / 1000.) + TUNE_KV;    // kV
-    if (kv < 0.0 && kv > -0.1) {
-        kv = 0;
+    ua = owon_b35_get_reading(OWON_B35_FUSOR_VOLTAGE_METER, OWON_B35_VALUE_TYPE_DC_MICROAMP);
+    if (ua == ERROR_NO_VALUE) {
+        INFO("GOT NO_VALUE\n");
+        return ERROR_NO_VALUE;
     }
+
+    kv = ua;
+    INFO("GOT %.1f KV\n", kv);
     return kv;
 }
 
-static float convert_adc_current(float adc_volts)
+static float get_fusor_current_ma(void)
 {
-    #define TUNE_MA   0.14
-    float ma;
-
-    // My fusor's current measurement resistor is 100 Ohm.
-
-    // I = Vadc / 100            (amps)
-    //
-    // I = Vadc / 100 * 1000     (milli-amps)
-
-    ma = adc_volts * 10. + TUNE_MA;    // mA
-    if (ma < 0.0 && ma > -0.1) {
-        ma = 0;
-    }
-    return ma;
+    // XXX tbd
+    return 3;
 }
 
 // -----------------  CONVERT ADC PRESSURE GAUGE  ----------------------------
@@ -811,6 +766,7 @@ static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
     uint64_t time_now = time(NULL);
     if (time_now > neutron_time) {    
         char voltage_str[100], current_str[100], d2_pressure_str[100], n2_pressure_str[100];
+        float current_ma, voltage_kv;
         int16_t mean_mv;
 
         // publish new neutron data
@@ -826,13 +782,15 @@ static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
         pthread_mutex_unlock(&neutron_mutex);
 
         // get voltage, current, and pressure values so they can be printed below
-        if (dataq_get_adc(DATAQ_ADC_CHAN_VOLTAGE, NULL, &mean_mv, NULL, NULL, NULL) == 0) {  
-            sprintf(voltage_str, "%0.1f KV", convert_adc_voltage(mean_mv/1000.));
+        voltage_kv = get_fusor_voltage_kv();
+        if (voltage_kv != ERROR_NO_VALUE) {
+            sprintf(voltage_str, "%0.1f KV", voltage_kv);
         } else {
             sprintf(voltage_str, "NO_VALUE");
         }
-        if (dataq_get_adc(DATAQ_ADC_CHAN_CURRENT, NULL, &mean_mv, NULL, NULL, NULL) == 0) {
-            sprintf(current_str, "%0.1f MA", convert_adc_current(mean_mv/1000.));
+        current_ma = get_fusor_current_ma();
+        if (current_ma != ERROR_NO_VALUE) {
+            sprintf(current_str, "%0.1f MA", current_ma);
         } else {
             sprintf(current_str, "NO_VALUE");
         }
@@ -858,6 +816,7 @@ static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
             sprintf(n2_pressure_str, "NO_VALUE");
         }
 
+#if 0  // XXX
         // print info, and seperator line,
         // note that the seperator line is intended to mark the begining of the next second
         printf("NEUTRON:  samples=%d   mccdaq_restarts=%d\n",
@@ -867,6 +826,7 @@ static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
         printf("\n");
         INFO("=========================================================================\n");
         printf("\n");
+#endif
 
         // reset for the next second
         RESET_FOR_NEXT_SEC;

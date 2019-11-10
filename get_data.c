@@ -465,7 +465,7 @@ static float get_fusor_current_ma(void)
 {
     double ma;
 
-    ma = owon_b35_get_reading(OWON_B35_FUSOR_CURRENT_METER, OWON_B35_VALUE_TYPE_DC_MILLIOAMP);
+    ma = owon_b35_get_reading(OWON_B35_FUSOR_CURRENT_METER, OWON_B35_VALUE_TYPE_DC_MILLIAMP);
     if (ma == ERROR_NO_VALUE) {
         return ERROR_NO_VALUE;
     }

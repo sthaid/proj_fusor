@@ -364,7 +364,7 @@ static int32_t initialize(int32_t argc, char ** argv)
         sscanf(CONFIG_NEUTRON_PHT_MV, "%d", &neutron_pht_mv) != 1 ||
         sscanf(CONFIG_NEUTRON_SCALE_CPM, "%d", &neutron_scale_cpm) != 1 ||
         sscanf(CONFIG_SUMMARY_GRAPH_TIME_SPAN_SEC, "%d", &summary_graph_time_span_sec) != 1 ||
-        sscanf(CONFIG_FILE_IDX_PLAYBACK_INIT, "%ld", &file_idx_playback_init) != 1 ||
+        sscanf(CONFIG_FILE_IDX_PLAYBACK_INIT, "%lld", &file_idx_playback_init) != 1 ||
         sscanf(CONFIG_ADC_DATA_GRAPH_SELECT, "%d", &adc_data_graph_select) != 1 ||
         sscanf(CONFIG_ADC_DATA_GRAPH_MAX_Y_MV, "%d", &adc_data_graph_max_y_mv) != 1) 
     {
@@ -603,7 +603,7 @@ static void atexit_config_write(void)
     sprintf(CONFIG_NEUTRON_SCALE_CPM, "%d", neutron_scale_cpm);
     sprintf(CONFIG_SUMMARY_GRAPH_TIME_SPAN_SEC, "%d", summary_graph_time_span_sec);
     if (initial_mode == PLAYBACK) {
-        sprintf(CONFIG_FILE_IDX_PLAYBACK_INIT, "%ld", file_idx_global+file_data_part1[0].time);
+        sprintf(CONFIG_FILE_IDX_PLAYBACK_INIT, "%lld", file_idx_global+file_data_part1[0].time);
     } else {
         sprintf(CONFIG_FILE_IDX_PLAYBACK_INIT, "%d", 0);
     }

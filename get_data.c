@@ -453,19 +453,25 @@ static float get_fusor_voltage_kv(void)
 
     ua = owon_b35_get_reading(OWON_B35_FUSOR_VOLTAGE_METER, OWON_B35_VALUE_TYPE_DC_MICROAMP);
     if (ua == ERROR_NO_VALUE) {
-        INFO("GOT NO_VALUE\n");
         return ERROR_NO_VALUE;
     }
 
     kv = ua;
-    INFO("GOT %.1f KV\n", kv);
+    INFO("GOT %.1f kV\n", kv);
     return kv;
 }
 
 static float get_fusor_current_ma(void)
 {
-    // XXX tbd
-    return 3;
+    double ma;
+
+    ma = owon_b35_get_reading(OWON_B35_FUSOR_CURRENT_METER, OWON_B35_VALUE_TYPE_DC_MILLIOAMP);
+    if (ma == ERROR_NO_VALUE) {
+        return ERROR_NO_VALUE;
+    }
+
+    INFO("GOT %.1f mA\n", ma);
+    return ma;
 }
 
 // -----------------  CONVERT ADC PRESSURE GAUGE  ----------------------------

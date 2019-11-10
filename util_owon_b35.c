@@ -1,3 +1,25 @@
+/*
+Copyright (c) 2019 Steven Haid
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+*/
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -15,18 +37,26 @@
 #include "util_owon_b35.h"
 #include "util_misc.h"
 
-/***
-XXX
-hcitool lescan
-  98:84:E3:CD:B8:68  BDM
-
-gatttool -b 98:84:E3:CD:B8:68 --char-read --handle 0x2d --listen
-Notification handle = 0x002e value: 2d 30 30 30 30 20 34 31 00 80 40 00 0d 0a 
-Notification handle = 0x002e value: 2b 30 30 30 30 20 34 31 00 80 40 00 0d 0a 
-Notification handle = 0x002e value: 2b 30 30 30 30 20 34 31 00 80 40 00 0d 0a 
-Notification handle = 0x002e value: 2b 30 30 30 30 20 34 31 00 80 40 00 0d 0a 
-
-***/
+// NOTES:
+//
+// Inspection of the code found here: https://github.com/inflex/owon-b35
+// was very helpful in designing this code.
+//
+// Use 'hcitool lescan' to determine the bluetooth addresses that are
+// in supplied in common.h.
+//
+// This program uses popen to run gatttol. Gatttool acquires the data
+// from the OWON B35T meter. The meter_thread decodes the data and writes
+// the meter reading in the meter[] array. The owon_b35_get_reading() 
+// routine returns the meter reading from the meter[] array as long as the
+// reading is recent and in the desired units.
+//
+// Here is an example of the output from gatttool:
+//    gatttool -b 98:84:E3:CD:B8:68 --char-read --handle 0x2d --listen
+//    Notification handle = 0x002e value: 2d 30 30 30 30 20 34 31 00 80 40 00 0d 0a 
+//    Notification handle = 0x002e value: 2b 30 30 30 30 20 34 31 00 80 40 00 0d 0a 
+//
+// The meter_thread only decodes voltage and current.
 
 //
 // defines
@@ -67,7 +97,7 @@ double owon_b35_get_reading(char *bluetooth_addr, int desired_value_type)
     bool found = false;
     pthread_t thread;
 
-    // locate meter data struct
+    // locate meter data struct for the bluetooth_addr specified by caller
     for (i = 0; i < max_meter; i++) {
         m = &meter[i];
         if (strcmp(bluetooth_addr, m->bluetooth_addr) == 0) {
@@ -79,8 +109,10 @@ double owon_b35_get_reading(char *bluetooth_addr, int desired_value_type)
     // if a thread has not yet been created to get data from 
     // this meter then create the thread, and return ERROR_NO_VALUE
     if (!found) {
+        if (max_meter >= MAX_METER) {
+            FATAL("too many meters\n");
+        }
         m = &meter[max_meter];        
-        printf("%d %p\n", max_meter, m);
         memset(m, 0, sizeof(meter_t));
         strcpy(m->bluetooth_addr, bluetooth_addr);
         max_meter++;
@@ -163,7 +195,6 @@ static void * meter_thread(void *cx)
         // determine value, using the following ...
         //   0:    2b               sign 2b=>'+'  2d=>'-'
         //   1-4:  30 30 30 30      v = 0000 - 9999 
-        //   5:    20               ignore
         //   6:    34               30 : v /= 1
         //                          31 : v /= 1000
         //                          32 : v /= 100
@@ -225,10 +256,10 @@ static void * meter_thread(void *cx)
         m->value_type = value_type;
         m->value = value;
         m->reading_time_us = microsec_timer();
-        //INFO("%s : %.3f %s\n", 
-        //     m->bluetooth_addr,
-        //     m->value, 
-        //     OWON_B35_VALUE_TYPE_STR(m->value_type));
+        DEBUG("%s : %.3f %s\n", 
+              m->bluetooth_addr,
+              m->value, 
+              OWON_B35_VALUE_TYPE_STR(m->value_type));
     }
 
     return NULL;

@@ -371,6 +371,7 @@ static void init_data_struct(data_t * data, time_t time_now)
 {
     int16_t mean_mv;
     int32_t ret, wait_ms;
+    static bool unavail_warn_printed = false;
 
     // zero data struct;  
     bzero(data, sizeof(data_t));
@@ -381,11 +382,34 @@ static void init_data_struct(data_t * data, time_t time_now)
     data->part1.time  = time_now;
     data->part2.magic = MAGIC_DATA_PART2;
 
-    // data part1 voltage_kv
-    data->part1.voltage_kv = get_fusor_voltage_kv();
-
+    // data part1 voltage_kv, and
     // data part1 current_ma
+    data->part1.voltage_kv = get_fusor_voltage_kv();
     data->part1.current_ma = get_fusor_current_ma();
+
+    // if we don't have either of the fusor voltage or current then 
+    // print a warning
+    if (data->part1.voltage_kv == ERROR_NO_VALUE || data->part1.current_ma == ERROR_NO_VALUE) {
+        char voltage_str[100], current_str[100];
+        if (data->part1.voltage_kv == ERROR_NO_VALUE) {
+            sprintf(voltage_str, "NO_VALUE");
+        } else {
+            sprintf(voltage_str, "%.1f kV", data->part1.voltage_kv);
+        }
+        if (data->part1.current_ma == ERROR_NO_VALUE) {
+            sprintf(current_str, "NO_VALUE");
+        } else {
+            sprintf(current_str, "%.1f mA", data->part1.current_ma);
+        }
+        WARN("fusor voltage or current values not available: VOLTAGE='%s' CURRENT='%s'\n",
+             voltage_str, current_str);
+        unavail_warn_printed = true;
+    } else {
+        if (unavail_warn_printed) {
+            INFO("fusor voltage and current values are now both available\n");
+            unavail_warn_printed = false;
+        }
+    }
 
     // data part1 d2_pressure_mtorr and n2_pressure_mtorr
     ret = dataq_get_adc(DATAQ_ADC_CHAN_PRESSURE, NULL, &mean_mv, NULL, NULL, NULL);
@@ -451,13 +475,12 @@ static float get_fusor_voltage_kv(void)
     //   I = E / R = 1000 v / 10^9 ohm = 10^-6 amps
     // therefore 1uA meter reading means 1kv fusor voltage
 
-    ua = owon_b35_get_reading(OWON_B35_FUSOR_VOLTAGE_METER, OWON_B35_VALUE_TYPE_DC_MICROAMP);
+    ua = owon_b35_get_reading(OWON_B35_FUSOR_VOLTAGE_METER, OWON_B35_VALUE_TYPE_DC_MICROAMP, "voltage");
     if (ua == ERROR_NO_VALUE) {
         return ERROR_NO_VALUE;
     }
 
     kv = ua;
-    INFO("GOT %.1f kV\n", kv);
     return kv;
 }
 
@@ -465,12 +488,11 @@ static float get_fusor_current_ma(void)
 {
     double ma;
 
-    ma = owon_b35_get_reading(OWON_B35_FUSOR_CURRENT_METER, OWON_B35_VALUE_TYPE_DC_MILLIAMP);
+    ma = owon_b35_get_reading(OWON_B35_FUSOR_CURRENT_METER, OWON_B35_VALUE_TYPE_DC_MILLIAMP, "current");
     if (ma == ERROR_NO_VALUE) {
         return ERROR_NO_VALUE;
     }
 
-    INFO("GOT %.1f mA\n", ma);
     return ma;
 }
 

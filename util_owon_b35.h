@@ -37,6 +37,6 @@ SOFTWARE.
      (x) == OWON_B35_VALUE_TYPE_DC_MICROAMP  ? "MICROAMP"    \
                                              : "????")
 
-double owon_b35_get_reading(char *meter_bluetooth_addr, int desired_value_type);
+double owon_b35_get_reading(char *meter_bluetooth_addr, int desired_value_type, char *meter_name);
 
 #endif

@@ -70,6 +70,7 @@ SOFTWARE.
 
 typedef struct {
     char     bluetooth_addr[100];
+    char     meter_name[100];
     uint64_t reading_time_us;
     int32_t  value_type;
     double   value;
@@ -80,7 +81,6 @@ typedef struct {
 //
 
 meter_t meter[MAX_METER];
-int max_meter;
 
 //
 // prototypes
@@ -90,7 +90,7 @@ static void * meter_thread(void *cx);
 
 // -----------------  GET CURRENT READING  -----------------------------------------
 
-double owon_b35_get_reading(char *bluetooth_addr, int desired_value_type)
+double owon_b35_get_reading(char *bluetooth_addr, int desired_value_type, char *meter_name)
 {
     meter_t *m;
     int i;
@@ -98,7 +98,7 @@ double owon_b35_get_reading(char *bluetooth_addr, int desired_value_type)
     pthread_t thread;
 
     // locate meter data struct for the bluetooth_addr specified by caller
-    for (i = 0; i < max_meter; i++) {
+    for (i = 0; i < MAX_METER; i++) {
         m = &meter[i];
         if (strcmp(bluetooth_addr, m->bluetooth_addr) == 0) {
             found = true;
@@ -109,14 +109,27 @@ double owon_b35_get_reading(char *bluetooth_addr, int desired_value_type)
     // if a thread has not yet been created to get data from 
     // this meter then create the thread, and return ERROR_NO_VALUE
     if (!found) {
-        if (max_meter >= MAX_METER) {
-            FATAL("too many meters\n");
+        // find a free entry in meter table
+        for (i = 0; i < MAX_METER; i++) {
+            m = &meter[i];
+            if (m->bluetooth_addr[0] == '\0') {
+                break;
+            }
         }
-        m = &meter[max_meter];        
+
+        // if no free entries then FATAL
+        if (i == MAX_METER) {
+            FATAL("no free meter entries\n");
+        }
+
+        // init the meter table entry, and create the meter_thread
         memset(m, 0, sizeof(meter_t));
         strcpy(m->bluetooth_addr, bluetooth_addr);
-        max_meter++;
+        strcpy(m->meter_name, meter_name);
+        DEBUG("gatttool thread created for %s / %s\n", m->bluetooth_addr, m->meter_name);
         pthread_create(&thread, NULL, meter_thread, m);
+
+        // return NO_VALUE
         return ERROR_NO_VALUE;
     }
 
@@ -170,11 +183,11 @@ static void * meter_thread(void *cx)
                      &d[0], &d[1], &d[2], &d[3], &d[4], &d[5], &d[6], 
                      &d[7], &d[8], &d[9], &d[10], &d[11], &d[12], &d[13]);
         if (cnt != 14) {
-            //WARN("%s invalid data from gatttool, cnt=%d\n", m->bluetooth_addr, cnt);
+            DEBUG("%s invalid data from gatttool, cnt=%d\n", m->bluetooth_addr, cnt);
             continue;
         }
         if (d[0] != '+' && d[0] != '-') {
-            WARN("%s invalid data from gatttool, d[0]=0x%2.2x\n", m->bluetooth_addr, d[0]);
+            DEBUG("%s invalid data from gatttool, d[0]=0x%2.2x\n", m->bluetooth_addr, d[0]);
             continue;
         }
         if (d[1] < '0' || d[1] > '9' ||
@@ -182,13 +195,13 @@ static void * meter_thread(void *cx)
             d[3] < '0' || d[3] > '9' ||
             d[4] < '0' || d[3] > '9')
         {
-            WARN("%s invalid data from gatttool, d[1-4]=0x%2.2x 0x%2.2x 0x%2.2x 0x%2.2x\n",
-                 m->bluetooth_addr, d[1], d[2], d[3], d[4]);
+            DEBUG("%s invalid data from gatttool, d[1-4]=0x%2.2x 0x%2.2x 0x%2.2x 0x%2.2x\n",
+                  m->bluetooth_addr, d[1], d[2], d[3], d[4]);
             continue;
         }
         if (d[12] != '\r' || d[13] != '\n') {
-            WARN("%s invalid data from gatttool, d[12]=0x%2.2x d[13]=0x%2.2x\n", 
-                 m->bluetooth_addr, d[12], d[13]);
+            DEBUG("%s invalid data from gatttool, d[12]=0x%2.2x d[13]=0x%2.2x\n", 
+                  m->bluetooth_addr, d[12], d[13]);
             continue;
         }
 
@@ -223,7 +236,7 @@ static void * meter_thread(void *cx)
             (d[7] & 0x0e) != 0 ||   // error if AC or Delta or Hold
             (d[8] & 0x30) != 0)     // error if MAX or MIN
         {
-            WARN("d[7]=0x%2.2x d[8]=0x%2.2x\n", d[7], d[8]);
+            DEBUG("d[7]=0x%2.2x d[8]=0x%2.2x\n", d[7], d[8]);
             continue;
         }
 
@@ -248,7 +261,7 @@ static void * meter_thread(void *cx)
             }
         }
         if (value_type == -1) {
-            WARN("d[9]=0x%2.2x d[10]=0x%2.2x\n", d[9], d[10]);
+            DEBUG("d[9]=0x%2.2x d[10]=0x%2.2x\n", d[9], d[10]);
             continue;
         }
 
@@ -262,5 +275,8 @@ static void * meter_thread(void *cx)
               OWON_B35_VALUE_TYPE_STR(m->value_type));
     }
 
+    // meter_thread exitting
+    DEBUG("gatttool thread exitting for - %s / %s\n", m->bluetooth_addr, m->meter_name);
+    strcpy(m->bluetooth_addr, "");
     return NULL;
 }

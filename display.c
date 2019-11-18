@@ -1652,28 +1652,6 @@ static void draw_adc_data_graph(rect_t * graph_pane, int32_t file_idx)
         color = PURPLE;
         break;
     case 1:
-        if (dp2 && dp1->data_part2_voltage_adc_data_valid) {
-            for (i = 0; i < MAX_ADC_DATA; i++) {
-                adc_data[i] = dp2->voltage_adc_data[i];
-                sum += adc_data[i];
-                cnt++;
-            }
-        }
-        sprintf(title_str, "VOLTAGE ADC");
-        color = RED;
-        break;
-    case 2:
-        if (dp2 && dp1->data_part2_current_adc_data_valid) {
-            for (i = 0; i < MAX_ADC_DATA; i++) {
-                adc_data[i] = dp2->current_adc_data[i];
-                sum += adc_data[i];
-                cnt++;
-            }
-        }
-        sprintf(title_str, "CURRENT ADC");
-        color = GREEN;
-        break;
-    case 3:
         if (dp2 && dp1->data_part2_pressure_adc_data_valid) {
             for (i = 0; i < MAX_ADC_DATA; i++) {
                 adc_data[i] = dp2->pressure_adc_data[i];
@@ -1716,7 +1694,7 @@ static void draw_adc_data_graph_control(char key)
 
     switch (key) {
     case 's':
-        adc_data_graph_select = ((adc_data_graph_select + 1) % 4);
+        adc_data_graph_select = ((adc_data_graph_select + 1) % 2);
         break;
     case '1':
         REDUCE(adc_data_graph_max_y_mv, max_y_mv_tbl);

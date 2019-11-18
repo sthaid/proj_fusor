@@ -96,6 +96,9 @@ double owon_b35_get_reading(char *bluetooth_addr, int desired_value_type, char *
     int i;
     bool found = false;
     pthread_t thread;
+    uint64_t time_now_us;
+
+    static uint64_t last_gatttool_start_us;
 
     // locate meter data struct for the bluetooth_addr specified by caller
     for (i = 0; i < MAX_METER; i++) {
@@ -122,12 +125,20 @@ double owon_b35_get_reading(char *bluetooth_addr, int desired_value_type, char *
             FATAL("no free meter entries\n");
         }
 
+        // if a gatttool has been started within past 5 sec then 
+        // don't start new gatttool now
+        time_now_us = microsec_timer();
+        if (time_now_us - last_gatttool_start_us < 5000000) {
+            return ERROR_NO_VALUE;
+        }
+
         // init the meter table entry, and create the meter_thread
         memset(m, 0, sizeof(meter_t));
         strcpy(m->bluetooth_addr, bluetooth_addr);
         strcpy(m->meter_name, meter_name);
         DEBUG("gatttool thread created for %s / %s\n", m->bluetooth_addr, m->meter_name);
         pthread_create(&thread, NULL, meter_thread, m);
+        last_gatttool_start_us = time_now_us;
 
         // return NO_VALUE
         return ERROR_NO_VALUE;

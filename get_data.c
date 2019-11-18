@@ -51,7 +51,7 @@ SOFTWARE.
 //
 
 //#define CAM_ENABLE
-//#define DEBUG_PRINT_PULSE_GRAPH
+#define DEBUG_PRINT_PULSE_GRAPH
 
 #define GAS_ID_D2 0
 #define GAS_ID_N2 1
@@ -844,17 +844,15 @@ static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
             sprintf(n2_pressure_str, "NO_VALUE");
         }
 
-#if 0  // XXX
         // print info, and seperator line,
         // note that the seperator line is intended to mark the begining of the next second
-        printf("NEUTRON:  samples=%d   mccdaq_restarts=%d\n",
-               max_data, mccdaq_get_restart_count());
+        printf("NEUTRON:  samples=%d   mccdaq_restarts=%d   baseline_mv=%d\n",
+               max_data, mccdaq_get_restart_count(), (baseline-2048)*10000/2048);
         printf("SUMMARY:  neutron_pulse = %d /sec   voltage = %s   current = %s   d2_pressure = %s   n2_pressure = %s\n",
                local_max_neutron_pulse, voltage_str, current_str, d2_pressure_str, n2_pressure_str);
         printf("\n");
         INFO("=========================================================================\n");
         printf("\n");
-#endif
 
         // reset for the next second
         RESET_FOR_NEXT_SEC;

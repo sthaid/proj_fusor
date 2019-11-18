@@ -1,0 +1,4 @@
+#!/bin/bash
+
+ps -ef | grep get_data | grep -v grep
+ps -ef | grep gatttool | grep -v "sh -c" | grep -v grep

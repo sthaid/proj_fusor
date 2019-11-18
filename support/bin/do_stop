@@ -1,3 +1,4 @@
 #!/bin/bash
 
-killall -SIGTERM get_data
+sudo killall -SIGTERM get_data
+sudo killall -SIGTERM gatttool

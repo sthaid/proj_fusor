@@ -1,0 +1,242 @@
+
+
+
+      ===============================
+      STARTUP CHECKLIST
+      ===============================
+                                                                            DATE &
+      Note Data & Time                                        ____________  TIME
+      
+
+      Startup Pre-checks    
+      
+      - Charged Geiger Counter                                ___
+      
+      - Power supply  meter batteries okay                    ___
+      
+      
+      Verify Initial Conditions ...
+      
+      - Bellows Valves all closed                             ___
+      
+      - Regulator 
+        - Needle Valve closed                                 ___
+        - Seated                                              ___
+        - Master Valve closed                                 ___
+      
+      - Dump Valve Open                                       ___
+      
+      - Power supply off                                      ___
+
+      - All power off                                         ___
+      
+      
+      Power On equipment
+
+      - Plug-In: Pump, Power Supply, Electronics              ___
+      
+      - Thermocouple, and sanity check                        ___
+      
+      - Pirani, and sanity check                              ___
+      
+      - Ludlum, set to 1.7 kv, and reset counts               ___
+      
+
+
+      
+      
+      Computers
+      
+      - Power on Raspberry PI Data and Display Computers      ___
+      
+      - Verify date/time is synchronized on both RPI          ___
+        'ssh rpi_data date; date'
+
+      - Start Raspberry PI Display program                    ___
+        notes: 
+        - ctl-alt-F1 text mode, F7 graphics
+      
+      - adjust neutron pulse height thresh for                ____________ NPHT MV
+        a couple counts per sec                   
+        notes: 
+        - used 215mv and 250mv on prior runs
+        - set Neutron ADC graph Y to 500 mv
+        - first allow a few minutes for Ludlum stabilize
+      
+      - adjust camera position and zoom                       ___
+      
+      - check voltage, current, cps, and pressure readings    ___
+        on the display program
+
+      
+      Test Power Supply
+      
+      - power on                                              ___
+      
+      - test at minimum verify panel meter and display pgm    ___
+        
+      - power off, and verify reset to 0                      ___
+      
+      
+      D2 Regulator
+      
+      - dump pressure at needle valve (quickly)               ___
+        if necessary;  (a quick open and close)
+      
+      - quick open and close of tank valve to pressurize      ___
+        high pressure side of regulator
+      
+      - adjust regulator to 2 PSI                             ___
+
+      - verify main tank valve is closed                      ___
+
+      - verify needle valve is closed                         ___
+
+      
+      
+
+      Pump Down
+      
+      - Power on Diff Pump FAN, and wait for full speed       ___
+      
+      - Close Air Dump valve                                  ___
+      
+      - Power on forepump, and verify pressure                ___
+        quickly drops to 30 mTorr
+      
+      - Open forepump valve and verify pressure               ___
+        goes to 30 mTorr,  this pumps down diff pump
+        (open is 10 quarter turns)
+      
+      - Open throttle valve and verify pressure               ___
+        goes to 30 mTorr,  this pumps down chamber
+      
+      - Open gas valve, and wait about 10 minutes             ____________  WAIT TIME
+        for pressure to drop to 30 mTorr,  
+        this pumps down leak lines
+      
+      - Power on Diff pump heater                             ___
+      
+      - wait ~15 minutes for Pirani gauge reading             ____________  WAIT TIME
+        to drop to <= 0.5 mTorr
+      
+      
+      Obtain 15 mTorr D2 gas pressure in chamber
+      
+      - close throttle valve until 1 mTorr on Pirani          ___
+      
+      - open needle valve on D2 tank regulator, and           ___
+        wait for stable pressure 
+      
+      - adjust throttle valve for 15 mTorr D2 pressure        ____________  MTORR
+
+      
+
+
+      Geiger Counter
+      
+      - Turn on Geiger Counter, and note CPM                  ____________ CPM
+      
+      
+      Ramp Up KV
+      
+      - turn on Power Supply                                  ___
+      
+      - slowly increase voltage until plasma ignites          ____________  TIME
+      
+      - continue increasing until max 35 kv, or               ___
+        fusion neutrons are detected
+      
+      
+      Ramp Down KV
+      
+      - reduce voltage to zero                                ___
+      
+      - turn off Power Supply                                 ___
+
+
+      Geiger Counter
+
+      - Check Geiger Counter CPM during the run               ____________  CPM   
+
+      - Turn off Geiger Counter                               ___
+
+
+
+
+      ===============================
+      SHUTDOWN CHECKLIST
+      ===============================
+      
+      Note Time                                               ____________  TIME
+      
+      
+      Power Supply
+      - verify it is off                                      ___
+      - turn off meters                                       ___
+      
+      
+      D2 regulator                                      
+      - seat regulator, wait for pressure to drop             ___
+      - close needle valve                                    ___
+      - verify main tank valve is closed                      ___
+      
+      
+      Isolate chamber
+      - Close Gas Valve                                         ___
+      - Wait a few seconds for pump down                        ___
+      - Close Throttle Valve                                    ___
+      
+      
+      Turn off Diff pump heater, and note the time            ____________  TIME
+      IMPORTANT: leave fan and forepump on  !!!!
+
+
+      Data Collection
+      - Stop RPI Display Program, and    
+        Copy fusor.dat file to home computer                  ____________  FILENAME
+
+      
+      Wait 40 Minutes, since diff pump heater was             ____________  TIME
+      turned off, and note the time   
+      
+      
+      Close Forepump Valve                                    ___
+      
+      
+      Turn Off Forepump, and DUMP Forepump Vacuum             ___
+      
+      
+      Turn off ...
+      - Verify Panel meters, and Variac meter are off         ___
+      - Reduce Ludlum voltage to 1.0 KV, and turn off         ___
+      - Turn off all power strip switches                     ___
+      - Unplug all three plugs                                ___
+      - Shutdown rpi_data                                     ___
+      
+
+      Recheck shutdown state of everything                    ___
+
+      
+      Note Completion Time                                    ____________  TIME
+
+
+
+
+      ===============================
+      APPENDIX: CONDITIONS FOR FUSION
+      ===============================
+      
+      My Target
+        KV       MA      mTorr
+        30-35    5       ~15
+      
+      
+      Others have reported fusion at ...
+        KV       MA      mTorr
+        30       3       11
+        35       5       12-16
+        35       5       15
+                         5-20
+                         3-15
+      

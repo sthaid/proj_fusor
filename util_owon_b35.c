@@ -81,6 +81,7 @@ typedef struct {
 //
 
 meter_t meter[MAX_METER];
+pthread_mutex_t owon_b35_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 //
 // prototypes
@@ -94,70 +95,70 @@ double owon_b35_get_reading(char *bluetooth_addr, int desired_value_type, char *
 {
     meter_t *m;
     int i;
-    bool found = false;
     pthread_t thread;
     uint64_t time_now_us;
 
     static uint64_t last_gatttool_start_us;
 
-    // locate meter data struct for the bluetooth_addr specified by caller
+    // locate meter data struct for the bluetooth_addr specified by caller;
+    // if found then return the meter data
     for (i = 0; i < MAX_METER; i++) {
         m = &meter[i];
         if (strcmp(bluetooth_addr, m->bluetooth_addr) == 0) {
-            found = true;
+            // if the monitor thread hasn't published a meter reading 
+            // within the past 2 seconds then return ERROR_NO_VALUE
+            if (microsec_timer() - m->reading_time_us > 2000000) {
+                return ERROR_NO_VALUE;
+            }
+
+            // if the published meter reading is not of the desired_value_type
+            // then return ERROR_NO_VALUE
+            if (m->value_type != desired_value_type) {
+                return ERROR_NO_VALUE;
+            }
+
+            // return the published meter reading
+            return m->value;
+        }
+    }
+
+    // the meter thread has not been created, do so ...
+
+    // acquire mutex
+    pthread_mutex_lock(&owon_b35_mutex);
+
+    // find a free entry in meter table
+    for (i = 0; i < MAX_METER; i++) {
+        m = &meter[i];
+        if (m->bluetooth_addr[0] == '\0') {
             break;
         }
     }
+    if (i == MAX_METER) {
+        FATAL("no free meter entries\n");
+    }
 
-    // if a thread has not yet been created to get data from 
-    // this meter then create the thread, and return ERROR_NO_VALUE
-    if (!found) {
-        // find a free entry in meter table
-        for (i = 0; i < MAX_METER; i++) {
-            m = &meter[i];
-            if (m->bluetooth_addr[0] == '\0') {
-                break;
-            }
-        }
-
-        // if no free entries then FATAL
-        if (i == MAX_METER) {
-            FATAL("no free meter entries\n");
-        }
-
-        // if a gatttool has been started within past 5 sec then 
-        // don't start new gatttool now
-        time_now_us = microsec_timer();
-        if (time_now_us - last_gatttool_start_us < 5000000) {
-            return ERROR_NO_VALUE;
-        }
-
-        // init the meter table entry, and create the meter_thread
-        memset(m, 0, sizeof(meter_t));
-        strcpy(m->bluetooth_addr, bluetooth_addr);
-        strcpy(m->meter_name, meter_name);
-        DEBUG("gatttool thread created for %s / %s\n", m->bluetooth_addr, m->meter_name);
-        pthread_create(&thread, NULL, meter_thread, m);
-        last_gatttool_start_us = time_now_us;
-
-        // return NO_VALUE
+    // if a gatttool has been started within past 5 sec then 
+    // don't start new gatttool now
+    time_now_us = microsec_timer();
+    if (time_now_us - last_gatttool_start_us < 5000000) {
+        pthread_mutex_unlock(&owon_b35_mutex);
         return ERROR_NO_VALUE;
     }
 
-    // if the monitor thread hasn't published a meter reading 
-    // within the past 2 seconds then return ERROR_NO_VALUE
-    if (microsec_timer() - m->reading_time_us > 2000000) {
-        return ERROR_NO_VALUE;
-    }
+    // init the meter table entry, and create the meter_thread
+    memset(m, 0, sizeof(meter_t));
+    strcpy(m->bluetooth_addr, bluetooth_addr);
+    strcpy(m->meter_name, meter_name);
+    DEBUG("gatttool thread created for %s / %s\n", m->bluetooth_addr, m->meter_name);
+    pthread_create(&thread, NULL, meter_thread, m);
+    last_gatttool_start_us = time_now_us;
 
-    // if the published meter reading is not of the desired_value_type
-    // then return ERROR_NO_VALUE
-    if (m->value_type != desired_value_type) {
-        return ERROR_NO_VALUE;
-    }
+    // release mutex
+    pthread_mutex_unlock(&owon_b35_mutex);
 
-    // return the published meter reading
-    return m->value;
+    // return NO_VALUE
+    return ERROR_NO_VALUE;
 }
 
 static void * meter_thread(void *cx)
@@ -280,6 +281,7 @@ static void * meter_thread(void *cx)
         m->value_type = value_type;
         m->value = value;
         m->reading_time_us = microsec_timer();
+        __sync_synchronize();
         DEBUG("%s : %.3f %s\n", 
               m->bluetooth_addr,
               m->value, 

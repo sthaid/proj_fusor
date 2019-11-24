@@ -45,7 +45,7 @@ SOFTWARE.
 #define ERROR_TEXT(x) \
     ((int32_t)(x) == ERROR_PRESSURE_SENSOR_FAULTY ? "FAULTY" : \
      (int32_t)(x) == ERROR_OVER_PRESSURE          ? "OVERPR" : \
-     (int32_t)(x) == ERROR_NO_VALUE               ? "NOVAL "   \
+     (int32_t)(x) == ERROR_NO_VALUE               ? "NOVAL"   \
                                                   : "??????")
 
 #define PORT 9001

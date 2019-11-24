@@ -211,7 +211,7 @@ int32_t sdl_init(uint32_t w, uint32_t h, char * screenshot_prefix)
 
     // initialize font1 and font1_underline,
     // this is the large font 
-    font1_ptsize = sdl_win_height / 18 - 1;
+    font1_ptsize = sdl_win_height / 20 - 1;
     sdl_font[1].font = TTF_OpenFont(font_path, font1_ptsize);
     if (sdl_font[1].font == NULL) {
         ERROR("failed TTF_OpenFont %s\n", font_path);

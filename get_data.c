@@ -184,6 +184,15 @@ static void init(void)
     // ludlum 2929 amplifier output
     mccdaq_init();
     mccdaq_start(mccdaq_callback);
+
+    // init owen_b35, used to acquire fusor voltage and current via bluetooth meter
+    owon_b35_init(
+        2, 
+        OWON_B35_FUSOR_VOLTAGE_METER_ID, OWON_B35_FUSOR_VOLTAGE_METER_ADDR, 
+              OWON_B35_VALUE_TYPE_DC_MICROAMP, "voltage",
+        OWON_B35_FUSOR_CURRENT_METER_ID, OWON_B35_FUSOR_CURRENT_METER_ADDR, 
+              OWON_B35_VALUE_TYPE_DC_MILLIAMP, "current"
+                        );
 }
 
 static void server(void)
@@ -476,7 +485,7 @@ static float get_fusor_voltage_kv(void)
     //   I = E / R = 1000 v / 10^9 ohm = 10^-6 amps
     // therefore 1uA meter reading means 1kv fusor voltage
 
-    ua = owon_b35_get_reading(OWON_B35_FUSOR_VOLTAGE_METER, OWON_B35_VALUE_TYPE_DC_MICROAMP, "voltage");
+    ua = owon_b35_get_value(OWON_B35_FUSOR_VOLTAGE_METER_ID);
     if (ua == ERROR_NO_VALUE) {
         return ERROR_NO_VALUE;
     }
@@ -489,7 +498,7 @@ static float get_fusor_current_ma(void)
 {
     double ma;
 
-    ma = owon_b35_get_reading(OWON_B35_FUSOR_CURRENT_METER, OWON_B35_VALUE_TYPE_DC_MILLIAMP, "current");
+    ma = owon_b35_get_value(OWON_B35_FUSOR_CURRENT_METER_ID);
     if (ma == ERROR_NO_VALUE) {
         return ERROR_NO_VALUE;
     }

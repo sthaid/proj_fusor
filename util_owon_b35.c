@@ -47,7 +47,7 @@ SOFTWARE.
 //
 // This program uses popen to run gatttol. Gatttool acquires the data
 // from the OWON B35T meter. The meter_thread decodes the data and writes
-// the meter reading in the meter[] array. The owon_b35_get_reading() 
+// the meter reading in the meter[] array. The owon_b35_get_value() 
 // routine returns the meter reading from the meter[] array as long as the
 // reading is recent and in the desired units.
 //
@@ -71,8 +71,10 @@ SOFTWARE.
 typedef struct {
     char     bluetooth_addr[100];
     char     meter_name[100];
-    uint64_t reading_time_us;
-    int32_t  value_type;
+    int32_t  desired_value_type;
+    uint64_t reading_count;
+    uint64_t reading_count_last;
+    uint64_t value_time_us;
     double   value;
 } meter_t;
 
@@ -81,95 +83,84 @@ typedef struct {
 //
 
 meter_t meter[MAX_METER];
-pthread_mutex_t owon_b35_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 //
 // prototypes
 //
 
 static void * meter_thread(void *cx);
+static void * monitor_thread(void *cx);
 
-// -----------------  GET CURRENT READING  -----------------------------------------
+// -----------------  API  ---------------------------------------------------------
 
-double owon_b35_get_reading(char *bluetooth_addr, int desired_value_type, char *meter_name)
+int32_t owon_b35_init(int32_t cnt, ...) // id,addr,desired_value_type,name  
 {
-    meter_t *m;
-    int i;
+    int32_t i;
+    va_list ap;
     pthread_t thread;
-    uint64_t time_now_us;
 
-    static uint64_t last_gatttool_start_us;
+    // init meter table entry and create thread for all the meters 
+    // specified by caller
+    va_start(ap, cnt);
+    for (i = 0; i < cnt; i++) {
+        int32_t id                 = va_arg(ap, int32_t);
+        char  * bluetooth_addr     = va_arg(ap, char*);
+        int32_t desired_value_type = va_arg(ap, int32_t);
+        char  * meter_name         = va_arg(ap, char*);
 
-    // locate meter data struct for the bluetooth_addr specified by caller;
-    // if found then return the meter data
-    for (i = 0; i < MAX_METER; i++) {
-        m = &meter[i];
-        if (strcmp(bluetooth_addr, m->bluetooth_addr) == 0) {
-            // if the monitor thread hasn't published a meter reading 
-            // within the past 2 seconds then return ERROR_NO_VALUE
-            if (microsec_timer() - m->reading_time_us > 2000000) {
-                return ERROR_NO_VALUE;
-            }
-
-            // if the published meter reading is not of the desired_value_type
-            // then return ERROR_NO_VALUE
-            if (m->value_type != desired_value_type) {
-                return ERROR_NO_VALUE;
-            }
-
-            // return the published meter reading
-            return m->value;
+        if (id >= MAX_METER) {
+            FATAL("id %d too large\n", id);
         }
+
+        INFO("id=%d addr=%s desired_value_type=%s name=%s\n",
+             id, bluetooth_addr, OWON_B35_VALUE_TYPE_STR(desired_value_type), meter_name);
+
+        meter_t *m = &meter[id];
+        strcpy(m->bluetooth_addr, bluetooth_addr);
+        m->desired_value_type = desired_value_type;
+        strcpy(m->meter_name, meter_name);
+
+        pthread_create(&thread, NULL, meter_thread, m);
     }
+    va_end(ap);
 
-    // the meter thread has not been created, do so ...
+    // create the monitor thread, which will look for stalled
+    // meter_threads, and kill the associated gatttool
+    pthread_create(&thread, NULL, monitor_thread, NULL);
 
-    // acquire mutex
-    pthread_mutex_lock(&owon_b35_mutex);
-
-    // find a free entry in meter table
-    for (i = 0; i < MAX_METER; i++) {
-        m = &meter[i];
-        if (m->bluetooth_addr[0] == '\0') {
-            break;
-        }
-    }
-    if (i == MAX_METER) {
-        FATAL("no free meter entries\n");
-    }
-
-    // if a gatttool has been started within past 5 sec then 
-    // don't start new gatttool now
-    time_now_us = microsec_timer();
-    if (time_now_us - last_gatttool_start_us < 5000000) {
-        pthread_mutex_unlock(&owon_b35_mutex);
-        return ERROR_NO_VALUE;
-    }
-
-    // init the meter table entry, and create the meter_thread
-    memset(m, 0, sizeof(meter_t));
-    strcpy(m->bluetooth_addr, bluetooth_addr);
-    strcpy(m->meter_name, meter_name);
-    DEBUG("gatttool thread created for %s / %s\n", m->bluetooth_addr, m->meter_name);
-    pthread_create(&thread, NULL, meter_thread, m);
-    last_gatttool_start_us = time_now_us;
-
-    // release mutex
-    pthread_mutex_unlock(&owon_b35_mutex);
-
-    // return NO_VALUE
-    return ERROR_NO_VALUE;
+    // return success
+    return 0;
 }
+
+double owon_b35_get_value(int id)
+{
+    meter_t *m = &meter[id];  
+
+    if (id >= MAX_METER) {
+        FATAL("id %d too large\n", id);
+    }
+
+    if (microsec_timer() - m->value_time_us > 2000000) {
+        return ERROR_NO_VALUE;
+    } else {
+        return m->value;
+    }
+}
+
+// -----------------  PRIVATE  -----------------------------------------------------
 
 static void * meter_thread(void *cx)
 {
     meter_t *m = cx;
-    FILE *fp;
-    char cmd[1000], str[1000];
-    int cnt;
-    unsigned int d[14];
-    double value;
-    int value_type;
+    FILE    *fp;
+    char     cmd[1000], str[1000];
+    int32_t  cnt, value_type;
+    uint32_t d[14];
+    double   value;
+    uint64_t time_now_us, time_since_last_gatttool_start_us;
+
+    static pthread_mutex_t gatttool_start_mutex = PTHREAD_MUTEX_INITIALIZER;
+    static uint64_t last_gatttool_start_us;
 
     // this code decodes only the following:
     // - DC voltage
@@ -177,12 +168,21 @@ static void * meter_thread(void *cx)
     // other meter features, such as resistance, temperature, delta-mode, hold-mode
     // are not supported
 
-    // start gatttool
+restart:
+    // start gatttool, but don't start concurrently
+    pthread_mutex_lock(&gatttool_start_mutex);
+    time_now_us = microsec_timer();
+    time_since_last_gatttool_start_us = time_now_us - last_gatttool_start_us;
+    if (time_since_last_gatttool_start_us < 5000000) {
+        usleep(5000000 - time_since_last_gatttool_start_us);
+    }
     sprintf(cmd, "gatttool -b %s --char-read --handle 0x2d --listen", m->bluetooth_addr);
     fp = popen(cmd,"r");
     if (fp == NULL) {
         FATAL("failed popen '%s'\n", cmd);
     }
+    last_gatttool_start_us = time_now_us;
+    pthread_mutex_unlock(&gatttool_start_mutex);
 
     // loop forever, reading bluetooth data from the meter and
     // decoding the data
@@ -277,19 +277,53 @@ static void * meter_thread(void *cx)
             continue;
         }
 
-        // publish
-        m->value_type = value_type;
-        m->value = value;
-        m->reading_time_us = microsec_timer();
-        __sync_synchronize();
-        DEBUG("%s : %.3f %s\n", 
-              m->bluetooth_addr,
-              m->value, 
-              OWON_B35_VALUE_TYPE_STR(m->value_type));
+        // keep track of the number of readings received; 
+        // for use by the monitor_thread
+        m->reading_count++;
+
+        // publish, but only if value_type is what is desired
+        if (value_type == m->desired_value_type) {
+            m->value = value;
+            m->value_time_us = microsec_timer();
+            __sync_synchronize();
+        }
+        DEBUG("%s : %.3f %s\n", m->bluetooth_addr, m->value, OWON_B35_VALUE_TYPE_STR(value_type));
     }
 
-    // meter_thread exitting
-    DEBUG("gatttool thread exitting for - %s / %s\n", m->bluetooth_addr, m->meter_name);
-    strcpy(m->bluetooth_addr, "");
+    // close the fp and restart from the top
+    fclose(fp);
+    goto restart;
+}
+
+static void * monitor_thread(void * cx)
+{
+    int32_t i;
+    char cmd[200];
+
+    // every 10 secs check the meter_threads to verify they have
+    // received data from the meter; if they haven't then kill the
+    // gatttool; the meter_thread will then restart the gatttool
+
+    while (true) {
+        sleep(10);
+        for (i = 0; i < MAX_METER; i++) {
+            meter_t *m = &meter[i];
+
+            if (m->bluetooth_addr[0] == '\0') {
+                continue;
+            }
+
+            if (m->reading_count > m->reading_count_last) {
+                m->reading_count_last = m->reading_count;
+                continue;
+            }
+
+            sprintf(cmd, "pkill -f \"^gatttool -b %s\"",  m->bluetooth_addr);
+            ERROR("killing gatttool for %s '%s'\n", m->meter_name, cmd);
+            system(cmd);
+        }
+    }
+
     return NULL;
 }
+

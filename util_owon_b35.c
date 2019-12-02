@@ -177,6 +177,7 @@ restart:
         usleep(5000000 - time_since_last_gatttool_start_us);
     }
     sprintf(cmd, "gatttool -b %s --char-read --handle 0x2d --listen", m->bluetooth_addr);
+    DEBUG("RUNNING '%s'\n", cmd);
     fp = popen(cmd,"r");
     if (fp == NULL) {
         FATAL("failed popen '%s'\n", cmd);
@@ -327,3 +328,81 @@ static void * monitor_thread(void * cx)
     return NULL;
 }
 
+#ifdef UNIT_TEST
+// -----------------  UNIT TEST  ---------------------------------------------------
+
+// build for unit test:
+//
+// gcc -Wall -O2 -DUNIT_TEST -pthread -o ut util_owon_b35.c util_misc.c
+
+static float get_fusor_voltage_kv(void);
+static float get_fusor_current_ma(void);
+
+int main(int argc, char **argv)
+{
+    double ma, kv;
+    char ma_str[100], kv_str[100];
+    int kv_noval_cnt=0, ma_noval_cnt=0;
+
+    owon_b35_init(
+        2,
+        OWON_B35_FUSOR_VOLTAGE_METER_ID, OWON_B35_FUSOR_VOLTAGE_METER_ADDR,
+              OWON_B35_VALUE_TYPE_DC_MICROAMP, "voltage",
+        OWON_B35_FUSOR_CURRENT_METER_ID, OWON_B35_FUSOR_CURRENT_METER_ADDR,
+              OWON_B35_VALUE_TYPE_DC_MILLIAMP, "current"
+                        );
+
+    while (true) {
+        kv = get_fusor_voltage_kv();
+        if (kv != ERROR_NO_VALUE) {
+            sprintf(kv_str, "%10.1f", kv);
+        } else {
+            sprintf(kv_str, "%10s", "NO_VAL");
+            kv_noval_cnt++;
+        }
+
+        ma = get_fusor_current_ma();
+        if (ma != ERROR_NO_VALUE) {
+            sprintf(ma_str, "%10.1f", ma);
+        } else {
+            sprintf(ma_str, "%10s", "NO_VAL");
+            ma_noval_cnt++;
+        }
+
+        INFO("%s KV    %s MA  -- kv_noval_cnt=%d  ma_noval_cnt=%d\n", 
+             kv_str, ma_str, kv_noval_cnt, ma_noval_cnt);
+
+        usleep(500000);
+    }
+}
+
+static float get_fusor_voltage_kv(void)
+{
+    double ua, kv;
+
+    // for example:
+    //   I = E / R = 1000 v / 10^9 ohm = 10^-6 amps
+    // therefore 1uA meter reading means 1kv fusor voltage
+
+    ua = owon_b35_get_value(OWON_B35_FUSOR_VOLTAGE_METER_ID);
+    if (ua == ERROR_NO_VALUE) {
+        return ERROR_NO_VALUE;
+    }
+
+    kv = ua;
+    return kv;
+}
+
+static float get_fusor_current_ma(void)
+{
+    double ma;
+
+    ma = owon_b35_get_value(OWON_B35_FUSOR_CURRENT_METER_ID);
+    if (ma == ERROR_NO_VALUE) {
+        return ERROR_NO_VALUE;
+    }
+
+    return ma;
+}
+
+#endif

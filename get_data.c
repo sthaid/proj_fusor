@@ -741,11 +741,13 @@ static int32_t mccdaq_callback(uint16_t * d, int32_t max_d)
             }
             pulse_height = pulse_height * 10000 / 2048;  // convert to mv
 
+            // XXX consider adding code here to skip this pule if its height is below a limit
+
             // if there is room to store another neutron pulse then
             // - store the pulse height
             // - store the pulse data
             // endif
-            if (max_neutron_pulse < MAX_NEUTRON_PULSE) {
+            if (local_max_neutron_pulse < MAX_NEUTRON_PULSE) {
                 // store pulse height
                 local_neutron_pulse_mv[local_max_neutron_pulse] = pulse_height;
 
